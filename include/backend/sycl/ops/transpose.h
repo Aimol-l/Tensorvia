@@ -1,0 +1,20 @@
+﻿#pragma once
+#include "ops.h"
+#include "backend/sycl/sycl_tensor.h"
+
+namespace ops {
+
+
+//************************************************
+template <Device D>
+struct TransposeImpl;
+//************************************************
+
+template <>
+struct TransposeImpl<Device::SYCL>{
+    static void execute(Tensor& a);
+    static Tensor execute(Tensor& a, std::initializer_list<int> axes);
+};
+
+extern template struct TransposeImpl<Device::SYCL>;
+}
