@@ -12,11 +12,11 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_DIR}/bin)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_DIR}/lib)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_DIR}/lib)
 # ------------------------- 后端选项定义 -------------------------
+option(BUILD_TEST      "build test file with ./tests/*.cpp" OFF)
 option(BACKEND_CPU     "Enable CPU backend" OFF)
 option(BACKEND_CUDA    "Enable CUDA backend" OFF)
 option(BACKEND_SYCL    "Enable SYCL backend" OFF)
 option(BACKEND_VULKAN  "Enable Vulkan backend" OFF)
-option(BUILD_TEST      "build test file with ./tests/*.cpp" OFF)
 
 
 # 编译器配置
@@ -51,7 +51,7 @@ if(BACKEND_VULKAN)
 endif()
 
 project(
-    bifrost
+    bifrost++
     LANGUAGES CXX C CUDA    #编程语言
     DESCRIPTION "多后端 Tensor 加速计算库"
 )

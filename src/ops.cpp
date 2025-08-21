@@ -477,7 +477,6 @@ namespace ops {
     Tensor sin(const Tensor& a){
         if(a.data() == nullptr || a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
-        
         // 后端实现分发
         if(a.device() == Device::CPU){
             return SinImpl<Device::CPU>::execute(a);

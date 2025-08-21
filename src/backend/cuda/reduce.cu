@@ -1,6 +1,5 @@
 #include "backend/cuda/ops/reduce.h"
 
-
 namespace ops {
 // template <typename T>
 // __global__ void any_cuda(const T* a_ptr, T val, size_t size, int* result) {

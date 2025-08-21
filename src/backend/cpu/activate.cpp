@@ -120,8 +120,7 @@ Tensor SiluImpl<Device::CPU>::execute(const Tensor& a) {
         using AType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_A)>>;      // const T* --> const T --> T
         using ResType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_res)>>;  // const R* --> const R --> R
         silu_kernel<AType>(ptr_A, static_cast<ResType*>(res.data()), a.numel());
-    },
-               A, Res);
+    },A, Res);
 
     return res;
 }
