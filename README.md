@@ -1,12 +1,12 @@
-# Biforst: Cross-Platform Multi-Backend Tensor Acceleration Library
+# Tensorvia: Cross-Platform Multi-Backend Tensor Acceleration Library
 
 [![CMake](https://img.shields.io/badge/CMake-3.25+-brightgreen)](https://cmake.org/)
 [![C++20](https://img.shields.io/badge/C++-20/23-blue)](https://isocpp.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-orange)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows-lightgrey)](https://github.com/your-username/biforst)
-[![Backends](https://img.shields.io/badge/Backends-CPU%20%7C%20CUDA%20%7C%20SYCL%20%7C%20Vulkan-brightgreen)](https://github.com/your-username/biforst)
+[![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows-lightgrey)](https://github.com/your-username/Tensorvia)
+[![Backends](https://img.shields.io/badge/Backends-CPU%20%7C%20CUDA%20%7C%20SYCL%20%7C%20Vulkan-brightgreen)](https://github.com/your-username/Tensorvia)
 
-**Biforst** is a high-performance tensor computation library supporting multiple hardware backends with unified API interfaces. Designed for scientific computing, computer vision, and deep learning applications requiring cross-platform acceleration.
+**Tensorvia** is a high-performance tensor computation library supporting multiple hardware backends with unified API interfaces. Designed for scientific computing, computer vision, and deep learning applications requiring cross-platform acceleration.
 
 ## 🌟 Features
 
