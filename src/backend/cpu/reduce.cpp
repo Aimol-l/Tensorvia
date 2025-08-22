@@ -253,23 +253,7 @@ bool any_kernel(const T *ptr, float val, size_t n) {
         return std::any_of(std::execution::par, ptr, ptr + n,[val, tolerance](T x) { return std::abs(x - static_cast<T>(val)) <= tolerance; });
     }
 }
-// ************************************** 声明 **************************************
-template <Device D>
-struct SumImpl;
-template <Device D>
-struct MeanImpl;
-template <Device D>
-struct MaxImpl;
-template <Device D>
-struct MinImpl;
-template <Device D>
-struct ArgMaxImpl;
-template <Device D>
-struct ArgMinImpl;
-template <Device D>
-struct AllImpl;
-template <Device D>
-struct AnyImpl;
+
 // ************************************** 特化 **************************************
 float SumImpl<Device::CPU>::execute(const Tensor& a) {
     switch (a.dtype()) {

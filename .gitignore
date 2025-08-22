@@ -9,7 +9,7 @@ dist/
 *.exe
 
 # IDE
-vscode/
+.vscode/
 .idea/
 *.swp
 *.swo
