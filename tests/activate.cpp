@@ -12,12 +12,16 @@ std::vector<DataType> GetAllDataTypes() {
     };
 }
 
+void test(DataType type){
+    Tensor temp = Tensor::Random({3,1000,1000}, 0,10, type);
+    // temp.to_host();
+    // RUNNING_TIME(ops::Softmax(static_cast<const Tensor&>(temp), 0));
+    auto res = ops::Softmax(static_cast<const Tensor&>(temp), 0);
+    ops::println(res);
+}
 int main() {
     for (auto type : GetAllDataTypes()) {
-        Tensor temp = Tensor::Random({5,5},-10,10,type);
-        ops::println(temp);
-        ops::println(ops::Softmax(static_cast<const Tensor&>(temp),1));
-        LOG_INFO("Data type: " << dtype_to_string(type));
+        test(type);
     }
     return 0;
 }

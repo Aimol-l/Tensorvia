@@ -65,11 +65,11 @@ inline void _println(const Tensor& a) {
                 std::cout << ",\n";
             }
             if (omit) {
-                std::cout << std::format("{}  ...", indent);
+                std::cout << std::format("{}  .....\n", indent);
                 for (size_t i = dim_size - 3; i < dim_size; ++i) {
                     self(self, dim + 1, offset + i * strides[dim], indent + "  ");
                     if (i != dim_size - 1)
-                        std::cout << ",";
+                        std::cout << ",\n";
                     else
                         std::cout << "\n";
                 }

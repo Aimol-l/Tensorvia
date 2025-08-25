@@ -88,11 +88,11 @@ namespace ops {
         const void* a_prt = nullptr;
         const void* b_ptr = nullptr;
         if(a.dtype()>b.dtype()){
-            c = typecast(b, a.dtype());
+            c = ops::Typecast(b, a.dtype());
             a_prt = a.data();
             b_ptr = c.data();
         }else{
-            c = typecast(a, b.dtype());
+            c = ops::Typecast(a, b.dtype());
             a_prt = c.data();
             b_ptr = b.data();
         }

@@ -85,7 +85,7 @@ Tensor ConcatImpl<Device::CUDA>::execute(const std::vector<Tensor>& tensors, int
     std::vector<Tensor> res_type_tensors(num_tensor);
     for (int i = 0; i < num_tensor; ++i) {
         if (tensors[i].dtype() != res_type) {
-            res_type_tensors[i] = ops::typecast(tensors[i], res_type);
+            res_type_tensors[i] = ops::ops::Typecast(tensors[i], res_type);
         }else {
             res_type_tensors[i] = tensors[i]; // 确保复制张量
         }

@@ -5,10 +5,11 @@ namespace ops {
 
 template <typename T, typename R = T>
 void add_kernel(const T* a, const R* b, T* out, size_t size) {
-    using PromotedType = decltype(std::declval<compute_type_t<T>>() + std::declval<compute_type_t<R>>());
+    // using PromotedType = decltype(std::declval<compute_type_t<T>>() + std::declval<compute_type_t<R>>());
     #pragma omp parallel for
     for (size_t i = 0; i < size; ++i) {
-        out[i] = PromotedType(a[i] + b[i]);
+        // out[i] = PromotedType(a[i] + b[i]);
+        out[i] = a[i] + b[i];
     }
 }
 template <typename T>
@@ -192,16 +193,6 @@ Tensor AddImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
     const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b, res_type);
 
     Tensor result(a.shape(), res_type, Device::CPU);
-
-    // auto AA = data_as_const_variant(a.dtype(),a.data());
-    // auto BB = data_as_const_variant(b.dtype(),b.data());
-
-    // std::visit([&](auto ptr_A,auto prt_B){
-    //     using AType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_A)>>; // const T* --> const T --> T
-    //     using BType = std::remove_cv_t<std::remove_pointer_t<decltype(prt_B)>>; // const T* --> const T --> T
-    //     using PromotedType = decltype(std::declval<compute_type_t<AType>>() + std::declval<compute_type_t<BType>>()); // 相同的可计算类型
-    //     add_kernel<AType,BType>(static_cast<const AType*>(a.data()), static_cast<const BType*>(b.data()), static_cast<PromotedType*>(result.data()), a.numel());
-    // },AA,BB);
 
     size_t size = a.numel();
     switch (res_type) {

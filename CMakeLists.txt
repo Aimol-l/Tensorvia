@@ -51,7 +51,7 @@ if(BACKEND_VULKAN)
 endif()
 
 project(
-    bifrost++
+    tensorvia
     LANGUAGES CXX C CUDA    #编程语言
     DESCRIPTION "多后端 Tensor 加速计算库"
 )
