@@ -267,7 +267,7 @@ void AddImpl<Device::SYCL>::execute(Tensor& a,float b){
     // uninplace
      Tensor AddImpl<Device::SYCL>::execute(const Tensor& a, const Tensor& b) {
         // 避免自加修改：a + a 返回新 tensor
-        if (&a == &b) ops::add(a.clone(), b.clone());
+        if (&a == &b) ops::Add(a.clone(), b.clone());
        // 计算公共类别
         DataType res_type = std::max(a.dtype(),b.dtype()); // 全是int 或 全是 float 
         if(a.dtype() <= DataType::INT64 && b.dtype() > DataType::INT64){
@@ -275,8 +275,8 @@ void AddImpl<Device::SYCL>::execute(Tensor& a,float b){
         }else if(a.dtype() > DataType::INT64 && b.dtype() <= DataType::INT64){
             res_type = std::max(a.dtype(),DataType::FLOAT32);
         }
-        const Tensor& A = a.dtype() == res_type ? a : ops::typecast(a,res_type);
-        const Tensor& B = b.dtype() == res_type ? b : ops::typecast(b,res_type);
+        const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a,res_type);
+        const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b,res_type);
 
         auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
         auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
@@ -299,8 +299,8 @@ void AddImpl<Device::SYCL>::execute(Tensor& a,float b){
         return result;
     }
     Tensor AddImpl<Device::SYCL>::execute(const Tensor& a, float b){
-        Tensor t = ops::fill(a.shape(),a.dtype(),b);
-        return ops::add(a, t);
+        Tensor t = ops::Fill(a.shape(),a.dtype(),b);
+        return ops::Add(a, t);
     }
 
 void SubImpl<Device::SYCL>::execute(Tensor& a,float b){
@@ -324,7 +324,7 @@ void SubImpl<Device::SYCL>::execute(Tensor& a,float b){
     // uninplace
      Tensor SubImpl<Device::SYCL>::execute(const Tensor& a, const Tensor& b) {
         // 避免自加修改：a + a 返回新 tensor
-        if (&a == &b) ops::add(a.clone(), b.clone());
+        if (&a == &b) ops::Add(a.clone(), b.clone());
        // 计算公共类别
         DataType res_type = std::max(a.dtype(),b.dtype()); // 全是int 或 全是 float 
         if(a.dtype() <= DataType::INT64 && b.dtype() > DataType::INT64){
@@ -332,8 +332,8 @@ void SubImpl<Device::SYCL>::execute(Tensor& a,float b){
         }else if(a.dtype() > DataType::INT64 && b.dtype() <= DataType::INT64){
             res_type = std::max(a.dtype(),DataType::FLOAT32);
         }
-        const Tensor& A = a.dtype() == res_type ? a : ops::typecast(a,res_type);
-        const Tensor& B = b.dtype() == res_type ? b : ops::typecast(b,res_type);
+        const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a,res_type);
+        const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b,res_type);
 
         auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
         auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
@@ -356,8 +356,8 @@ void SubImpl<Device::SYCL>::execute(Tensor& a,float b){
         return result;
     }
      Tensor SubImpl<Device::SYCL>::execute(const Tensor& a, float b){
-        Tensor t = ops::fill(a.shape(),a.dtype(),b);
-        return ops::sub(a, t);
+        Tensor t = ops::Fill(a.shape(),a.dtype(),b);
+        return ops::Sub(a, t);
     }
  void DotImpl<Device::SYCL>::execute(Tensor& a,float b){
         auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
@@ -380,7 +380,7 @@ void SubImpl<Device::SYCL>::execute(Tensor& a,float b){
     // uninplace
      Tensor DotImpl<Device::SYCL>::execute(const Tensor& a, const Tensor& b) {
         // 避免自加修改：a + a 返回新 tensor
-        if (&a == &b) ops::add(a.clone(), b.clone());
+        if (&a == &b) ops::Add(a.clone(), b.clone());
        // 计算公共类别
         DataType res_type = std::max(a.dtype(),b.dtype()); // 全是int 或 全是 float 
         if(a.dtype() <= DataType::INT64 && b.dtype() > DataType::INT64){
@@ -388,8 +388,8 @@ void SubImpl<Device::SYCL>::execute(Tensor& a,float b){
         }else if(a.dtype() > DataType::INT64 && b.dtype() <= DataType::INT64){
             res_type = std::max(a.dtype(),DataType::FLOAT32);
         }
-        const Tensor& A = a.dtype() == res_type ? a : ops::typecast(a,res_type);
-        const Tensor& B = b.dtype() == res_type ? b : ops::typecast(b,res_type);
+        const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a,res_type);
+        const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b,res_type);
 
         auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
         auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
@@ -412,8 +412,8 @@ void SubImpl<Device::SYCL>::execute(Tensor& a,float b){
         return result;
     }
      Tensor DotImpl<Device::SYCL>::execute(const Tensor& a, float b){
-        Tensor t = ops::fill(a.shape(),a.dtype(),b);
-        return ops::dot(a, t);
+        Tensor t = ops::Fill(a.shape(),a.dtype(),b);
+        return ops::Dot(a, t);
     }
 void DivImpl<Device::SYCL>::execute(Tensor& a,float b){
         auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
@@ -436,7 +436,7 @@ void DivImpl<Device::SYCL>::execute(Tensor& a,float b){
      // uninplace
     Tensor DivImpl<Device::SYCL>::execute(const Tensor& a, const Tensor& b) {
         // 避免自加修改：a + a 返回新 tensor
-        if (&a == &b) ops::add(a.clone(), b.clone());
+        if (&a == &b) ops::Add(a.clone(), b.clone());
        // 计算公共类别
         DataType res_type = std::max(a.dtype(),b.dtype()); // 全是int 或 全是 float 
         if(a.dtype() <= DataType::INT64 && b.dtype() > DataType::INT64){
@@ -444,8 +444,8 @@ void DivImpl<Device::SYCL>::execute(Tensor& a,float b){
         }else if(a.dtype() > DataType::INT64 && b.dtype() <= DataType::INT64){
             res_type = std::max(a.dtype(),DataType::FLOAT32);
         }
-        const Tensor& A = a.dtype() == res_type ? a : ops::typecast(a,res_type);
-        const Tensor& B = b.dtype() == res_type ? b : ops::typecast(b,res_type);
+        const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a,res_type);
+        const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b,res_type);
 
         auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
         auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
@@ -468,8 +468,8 @@ void DivImpl<Device::SYCL>::execute(Tensor& a,float b){
         return result;
     }
      Tensor DivImpl<Device::SYCL>::execute(const Tensor& a, float b){
-        Tensor t = ops::fill(a.shape(),a.dtype(),b);
-        return ops::div(a, t);
+        Tensor t = ops::Fill(a.shape(),a.dtype(),b);
+        return ops::Div(a, t);
     }
 
 

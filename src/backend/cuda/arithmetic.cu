@@ -69,8 +69,8 @@ Tensor AddImpl<Device::CUDA>::execute(const Tensor& a,const Tensor& b){
     DataType res_type = compute_type(a.dtype(),b.dtype());
     Tensor res(a.shape(),res_type,a.device());
 
-    const Tensor& A = a.dtype() == res_type ? a : ops::typecast(a,res_type);
-    const Tensor& B = b.dtype() == res_type ? b : ops::typecast(b,res_type);
+    const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a,res_type);
+    const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b,res_type);
 
     switch (res_type) {
         case DataType::INT8:            
@@ -157,8 +157,8 @@ Tensor SubImpl<Device::CUDA>::execute(const Tensor& a,const Tensor& b){
     // 计算公共类别
     DataType res_type = compute_type(a.dtype(),b.dtype());
     Tensor res(a.shape(),res_type,a.device());
-    const Tensor& A = a.dtype() == res_type ? a : ops::typecast(a,res_type);
-    const Tensor& B = b.dtype() == res_type ? b : ops::typecast(b,res_type);
+    const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a,res_type);
+    const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b,res_type);
     switch (res_type) {
         case DataType::INT8:            
             sub_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const int8_t*>(A.data()),static_cast<const int8_t*>(B.data()), static_cast<int8_t*>(res.data()),numel);break;
@@ -244,8 +244,8 @@ Tensor DotImpl<Device::CUDA>::execute(const Tensor& a,const Tensor& b){
     // 计算公共类别
     DataType res_type = compute_type(a.dtype(),b.dtype());
     Tensor res(a.shape(),res_type,a.device());
-    const Tensor& A = a.dtype() == res_type ? a : ops::typecast(a,res_type);
-    const Tensor& B = b.dtype() == res_type ? b : ops::typecast(b,res_type);
+    const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a,res_type);
+    const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b,res_type);
     switch (res_type) {
         case DataType::INT8:            
             dot_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const int8_t*>(A.data()),static_cast<const int8_t*>(B.data()), static_cast<int8_t*>(res.data()),numel);break;
@@ -330,8 +330,8 @@ Tensor DivImpl<Device::CUDA>::execute(const Tensor& a,const Tensor& b){
     // 计算公共类别
     DataType res_type = compute_type(a.dtype(),b.dtype());
     Tensor res(a.shape(),res_type,a.device());
-    const Tensor& A = a.dtype() == res_type ? a : ops::typecast(a,res_type);
-    const Tensor& B = b.dtype() == res_type ? b : ops::typecast(b,res_type);
+    const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a,res_type);
+    const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b,res_type);
     switch (res_type) {
         case DataType::INT8:            
             div_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const int8_t*>(A.data()),static_cast<const int8_t*>(B.data()), static_cast<int8_t*>(res.data()),numel);break;

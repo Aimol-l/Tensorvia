@@ -16,7 +16,7 @@ int main() {
     for (auto type : GetAllDataTypes()) {
         Tensor temp = Tensor::Random({5,5},-10,10,type);
         ops::println(temp);
-        ops::println(ops::softmax(static_cast<const Tensor&>(temp),1));
+        ops::println(ops::Softmax(static_cast<const Tensor&>(temp),1));
         LOG_INFO("Data type: " << dtype_to_string(type));
     }
     return 0;

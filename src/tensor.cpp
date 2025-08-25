@@ -230,7 +230,7 @@ int Tensor::shape(int i) const{
 DataType Tensor::dtype() const { return m_dtype; }
 
 Tensor Tensor::to_type(DataType dst){
-   return ops::typecast(*this,dst);
+   return ops::Typecast(*this,dst);
 }
 
 // cuda|sycl|vulkan -> cpu
@@ -281,109 +281,109 @@ std::shared_ptr<TensorImpl> Tensor::get_impl() const{
     return m_impl;
 }
 Tensor Tensor::slice(const std::vector<std::pair<int, int>> &ranges) const{
-    return ops::slice(*this,ranges);
+    return ops::Slice(*this,ranges);
 }
 
 Tensor Tensor::add(const Tensor& other) const {
-    return ops::add(*this,other);
+    return ops::Add(*this,other);
 }
 
 Tensor Tensor::operator+(const Tensor& other) const{
-    return ops::add(*this,other);
+    return ops::Add(*this,other);
 }
 
 Tensor Tensor::sub(const Tensor& other) const {
-    return ops::sub(*this,other);
+    return ops::Sub(*this,other);
 }
 
 Tensor Tensor::operator-(const Tensor& other) const{
-    return ops::sub(*this,other);
+    return ops::Sub(*this,other);
 }
 
 Tensor Tensor::dot(const Tensor& other) const {
-    return ops::dot(*this,other);
+    return ops::Dot(*this,other);
 }
 
 Tensor Tensor::operator*(const Tensor& other) const{
-    return ops::dot(*this,other);
+    return ops::Dot(*this,other);
 }
 
 Tensor operator+(double a, const Tensor& other) {
     
-    return ops::add(other, a);
+    return ops::Add(other, a);
 }
 
 Tensor Tensor::operator+(double a) const{
     
-    return ops::add(*this, a);
+    return ops::Add(*this, a);
 }
 
 Tensor operator-(double a, const Tensor& other) {
-    return ops::sub(other, a);
+    return ops::Sub(other, a);
 }
 
 Tensor Tensor::operator-(double a) const{
-    return ops::sub(*this, a);
+    return ops::Sub(*this, a);
 }
 
 Tensor operator*(double a, const Tensor& other) {
-    return ops::dot(other, a);
+    return ops::Dot(other, a);
 }
 
 Tensor Tensor::operator*(double a) const{
-    return ops::dot(*this, a);
+    return ops::Dot(*this, a);
 }
 
 Tensor Tensor::div(const Tensor& other) const {
-    return ops::div(*this,other);
+    return ops::Div(*this,other);
 }
 
 Tensor Tensor::operator/(const Tensor& other) const{
-    return ops::div(*this,other);
+    return ops::Div(*this,other);
 }
 
 Tensor Tensor::operator/(double a) const {
-    return ops::div(*this,a);
+    return ops::Div(*this,a);
 }
 
 Tensor Tensor::matmul(const Tensor& other) const {
-    return ops::mul(*this,other);
+    return ops::Mul(*this,other);
 }
 Tensor Tensor::Zeros(std::initializer_list<int> shape, DataType dtype){
     if(shape.size() == 0) throw std::runtime_error("Tensor shape cannot be empty");
     std::vector<int> shape_(shape);
-    return ops::zeros(shape_,dtype);
+    return ops::Zeros(shape_,dtype);
 }
 Tensor Tensor::Zeros(std::vector<int> shape, DataType dtype){
     if(shape.empty()) throw std::runtime_error("Tensor shape cannot be empty");
-    return ops::zeros(shape,dtype);
+    return ops::Zeros(shape,dtype);
 }
 Tensor Tensor::Ones(std::initializer_list<int> shape, DataType dtype){
     if(shape.size() == 0) throw std::runtime_error("Tensor shape cannot be empty");
     std::vector<int> shape_(shape);
-    return ops::ones(shape_,dtype);
+    return ops::Ones(shape_,dtype);
 }
 Tensor Tensor::Ones(std::vector<int> shape, DataType dtype){
     if(shape.empty()) throw std::runtime_error("Tensor shape cannot be empty");
-    return ops::ones(shape,dtype);
+    return ops::Ones(shape,dtype);
 }
 Tensor Tensor::Fill(std::initializer_list<int> shape, float value, DataType dtype){
     if(shape.size() == 0) throw std::runtime_error("Tensor shape cannot be empty");
     std::vector<int> shape_(shape);
-    return ops::fill(shape_,dtype,value);
+    return ops::Fill(shape_,dtype,value);
 }
 Tensor Tensor::Fill(std::vector<int> shape, float value, DataType dtype){
     if(shape.empty()) throw std::runtime_error("Tensor shape cannot be empty");
-    return ops::fill(shape,dtype,value);
+    return ops::Fill(shape,dtype,value);
 }
 Tensor Tensor::Random(std::initializer_list<int> shape, float min, float max, DataType dtype){
     if(shape.size() == 0) throw std::runtime_error("Tensor shape cannot be empty");
     std::vector<int> shape_(shape);
-    return ops::random(shape_,dtype,min,max);
+    return ops::Random(shape_,dtype,min,max);
 }
 Tensor Tensor::Random(std::vector<int> shape, float min, float max, DataType dtype){
     if(shape.empty()) throw std::runtime_error("Tensor shape cannot be empty");
-    return ops::random(shape,dtype,min,max);
+    return ops::Random(shape,dtype,min,max);
 }
 
 
@@ -469,114 +469,114 @@ Tensor& Tensor::unsqueeze(size_t dim){
 }
 
 float Tensor::sum(){
-    return ops::sum(*this);
+    return ops::Sum(*this);
 }
 
 float Tensor::mean(){
-    return ops::mean(*this);
+    return ops::Mean(*this);
 }
 
 float Tensor::max(){
-    return ops::max(*this);
+    return ops::Max(*this);
 }
 
 float Tensor::min(){
-    return ops::min(*this);
+    return ops::Min(*this);
 }
 
 Tensor Tensor::sum(int axis){
-    return ops::sum(*this,axis);
+    return ops::Sum(*this,axis);
 }
 
 Tensor Tensor::mean(int axis){
-    return ops::mean(*this,axis);
+    return ops::Mean(*this,axis);
 }
 
 Tensor Tensor::max(int axis){
-    return ops::max(*this,axis);
+    return ops::Max(*this,axis);
 }
 
 Tensor Tensor::min(int axis){
-    return ops::min(*this,axis);
+    return ops::Min(*this,axis);
 }
 
 Tensor Tensor::argmax(int axis){
-    return ops::argmax(*this,axis);
+    return ops::Argmax(*this,axis);
 }
 bool Tensor::all(float val){
-    return ops::all(*this,val);
+    return ops::All(*this,val);
 }
 bool Tensor::any(float val){
-    return ops::any(*this,val);
+    return ops::Any(*this,val);
 }
 size_t Tensor::nonzero(){
-    return ops::nonzero(*this);
+    return ops::Nonzero(*this);
 }
 Tensor Tensor::argmin(int axis)
 {
-    return ops::argmin(*this,axis);
+    return ops::Argmin(*this,axis);
 }
 Tensor Tensor::equal(const Tensor &other) const {
-    return ops::equal(*this,other);
+    return ops::Equal(*this,other);
 }
 Tensor Tensor::operator==(const Tensor& other) const{
-    return ops::equal(*this,other);
+    return ops::Equal(*this,other);
 }
 Tensor Tensor::operator==(const float val) const{
-    Tensor t = ops::fill(this->m_shape, DataType::FLOAT32, val);
-    return ops::equal(*this,t);
+    Tensor t = ops::Fill(this->m_shape, DataType::FLOAT32, val);
+    return ops::Equal(*this,t);
 }
 Tensor Tensor::not_equal(const Tensor& other) const{
-    return ops::not_equal(*this,other);
+    return ops::NotEqual(*this,other);
 }
 Tensor Tensor::operator!=(const Tensor& other) const{
-    return ops::not_equal(*this,other);
+    return ops::NotEqual(*this,other);
 }
 Tensor Tensor::operator!=(const float val) const{
-    Tensor t = ops::fill(this->m_shape, DataType::FLOAT32, val);
-    return ops::not_equal(*this,t);
+    Tensor t = ops::Fill(this->m_shape, DataType::FLOAT32, val);
+    return ops::NotEqual(*this,t);
 }
 Tensor Tensor::greater(const Tensor& other) const{
-    return ops::greater(*this,other);
+    return ops::Greater(*this,other);
 }
 Tensor Tensor::operator>(const Tensor& other) const{
-    return ops::greater(*this,other);
+    return ops::Greater(*this,other);
 }
 Tensor Tensor::operator>(const float val) const{
-    Tensor t = ops::fill(this->m_shape, DataType::FLOAT32, val);
-    return ops::greater(*this,t);
+    Tensor t = ops::Fill(this->m_shape, DataType::FLOAT32, val);
+    return ops::Greater(*this,t);
 }
 Tensor Tensor::greater_equal(const Tensor& other) const{
-    return ops::greater_equal(*this,other);
+    return ops::GreaterEqual(*this,other);
 }
 Tensor Tensor::operator>=(const Tensor& other) const{
-    return ops::greater_equal(*this,other);
+    return ops::GreaterEqual(*this,other);
 }
 
 Tensor Tensor::operator>=(const float val) const{
-    Tensor t = ops::fill(this->m_shape, DataType::FLOAT32, val);
-    return ops::greater_equal(*this,t);
+    Tensor t = ops::Fill(this->m_shape, DataType::FLOAT32, val);
+    return ops::GreaterEqual(*this,t);
 }
 
 Tensor Tensor::less(const Tensor& other) const{
-    return ops::less(*this,other);
+    return ops::Less(*this,other);
 }
 Tensor Tensor::operator<(const Tensor& other) const{
-    return ops::less(*this,other);
+    return ops::Less(*this,other);
 }
 Tensor Tensor::operator<(const float val) const{
-    Tensor t = ops::fill(this->m_shape, DataType::FLOAT32, val);
-    return ops::less(*this,t);
+    Tensor t = ops::Fill(this->m_shape, DataType::FLOAT32, val);
+    return ops::Less(*this,t);
 }
 Tensor Tensor::less_equal(const Tensor& other) const{
-    return ops::less_equal(*this,other);
+    return ops::LessEqual(*this,other);
 }
 Tensor Tensor::operator<=(const Tensor& other) const{
-    return ops::less_equal(*this,other);
+    return ops::LessEqual(*this,other);
 }
 Tensor Tensor::operator<=(const float val) const{
-    Tensor t = ops::fill(this->m_shape, DataType::FLOAT32, val);
-    return ops::less_equal(*this,t);
+    Tensor t = ops::Fill(this->m_shape, DataType::FLOAT32, val);
+    return ops::LessEqual(*this,t);
 }
 
 template int8_t Tensor::at<int8_t>(std::initializer_list<int> idxs);

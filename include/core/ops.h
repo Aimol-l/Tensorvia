@@ -16,86 +16,85 @@ namespace ops{
     OPS_API void println(Tensor & a);
     OPS_API void println(Tensor && a);
 
-
-    OPS_API Tensor ones(const std::vector<int>& shape, DataType dtype);
-    OPS_API Tensor zeros(const std::vector<int>& shape, DataType dtype);
-    OPS_API Tensor fill(const std::vector<int>& shape, DataType dtype, float value);
-    OPS_API Tensor random(const std::vector<int>& shape, DataType dtype,float min,float max);
+    OPS_API Tensor Ones(const std::vector<int>& shape, DataType dtype);
+    OPS_API Tensor Zeros(const std::vector<int>& shape, DataType dtype);
+    OPS_API Tensor Fill(const std::vector<int>& shape, DataType dtype, float value);
+    OPS_API Tensor Random(const std::vector<int>& shape, DataType dtype,float min,float max);
     
-    OPS_API Tensor slice(const Tensor& t, const std::vector<std::pair<int, int>>& ranges);
+    OPS_API Tensor Slice(const Tensor& t, const std::vector<std::pair<int, int>>& ranges);
     
     // inplace
-    OPS_API void add(Tensor& a,float b);
-    OPS_API void sub(Tensor& a,float b);
-    OPS_API void dot(Tensor& a,float b);
-    OPS_API void div(Tensor& a,float b);
+    OPS_API void Add(Tensor& a,float b);
+    OPS_API void Sub(Tensor& a,float b);
+    OPS_API void Dot(Tensor& a,float b);
+    OPS_API void Div(Tensor& a,float b);
 
     // uninplace
-    OPS_API Tensor add(const Tensor& a, float b);
-    OPS_API Tensor sub(const Tensor& a, float b);
-    OPS_API Tensor dot(const Tensor& a, float b);
-    OPS_API Tensor div(const Tensor& a, float b);
+    OPS_API Tensor Add(const Tensor& a, float b);
+    OPS_API Tensor Sub(const Tensor& a, float b);
+    OPS_API Tensor Dot(const Tensor& a, float b);
+    OPS_API Tensor Div(const Tensor& a, float b);
     
-    OPS_API Tensor add(const Tensor& a,const Tensor& b);
-    OPS_API Tensor sub(const Tensor& a,const Tensor& b);
-    OPS_API Tensor dot(const Tensor& a,const Tensor& b);
-    OPS_API Tensor div(const Tensor& a,const Tensor& b);
+    OPS_API Tensor Add(const Tensor& a,const Tensor& b);
+    OPS_API Tensor Sub(const Tensor& a,const Tensor& b);
+    OPS_API Tensor Dot(const Tensor& a,const Tensor& b);
+    OPS_API Tensor Div(const Tensor& a,const Tensor& b);
 
     // [w,k] @ [k,h] --> [w,h]
     // [b,w,k] @ [b,k,h] --> [b,w,h]
-    OPS_API Tensor mul(const Tensor& a,const Tensor& b);
+    OPS_API Tensor Mul(const Tensor& a,const Tensor& b);
 
     // 激活函数
-    OPS_API Tensor abs(const Tensor& a);
-    OPS_API Tensor sin(const Tensor& a);
-    OPS_API Tensor cos(const Tensor& a);
-    OPS_API Tensor tan(const Tensor& a);
-    OPS_API Tensor exp(const Tensor& a);
-    OPS_API Tensor relu(const Tensor& a);
-    OPS_API Tensor silu(const Tensor& a);
-    OPS_API Tensor tanh(const Tensor& a);
-    OPS_API Tensor sqrt(const Tensor& a);
-    OPS_API Tensor sigmoid(const Tensor& a);
-    OPS_API Tensor pow(const Tensor& a,float val);
-    OPS_API Tensor log(const Tensor& a,float val);
-    OPS_API Tensor softmax(const Tensor& a,int axis);
-    OPS_API Tensor clamp(const Tensor& a,float min,float max);
+    OPS_API Tensor Abs(const Tensor& a);
+    OPS_API Tensor Sin(const Tensor& a);
+    OPS_API Tensor Cos(const Tensor& a);
+    OPS_API Tensor Tan(const Tensor& a);
+    OPS_API Tensor Exp(const Tensor& a);
+    OPS_API Tensor Relu(const Tensor& a);
+    OPS_API Tensor Silu(const Tensor& a);
+    OPS_API Tensor Tanh(const Tensor& a);
+    OPS_API Tensor Sqrt(const Tensor& a);
+    OPS_API Tensor Sigmoid(const Tensor& a);
+    OPS_API Tensor Pow(const Tensor& a,float val);
+    OPS_API Tensor Log(const Tensor& a,float val);
+    OPS_API Tensor Softmax(const Tensor& a,int axis);
+    OPS_API Tensor Clamp(const Tensor& a,float min,float max);
 
-    OPS_API void abs(Tensor& a);
-    OPS_API void sin(Tensor& a);    // 只支持浮点数
-    OPS_API void cos(Tensor& a);    // 只支持浮点数
-    OPS_API void tan(Tensor& a);    // 只支持浮点数
-    OPS_API void relu(Tensor& a);
-    OPS_API void silu(Tensor& a);    // 只支持浮点数
-    OPS_API void tanh(Tensor& a);    // 只支持浮点数
-    OPS_API void sigmoid(Tensor& a); // 只支持浮点数
-    OPS_API void clamp(Tensor& a,float min,float max);
+    OPS_API void Abs(Tensor& a);
+    OPS_API void Sin(Tensor& a);    // 只支持浮点数
+    OPS_API void Cos(Tensor& a);    // 只支持浮点数
+    OPS_API void Tan(Tensor& a);    // 只支持浮点数
+    OPS_API void Relu(Tensor& a);
+    OPS_API void Silu(Tensor& a);    // 只支持浮点数
+    OPS_API void Tanh(Tensor& a);    // 只支持浮点数
+    OPS_API void Sigmoid(Tensor& a); // 只支持浮点数
+    OPS_API void Clamp(Tensor& a,float min,float max);
 
-    OPS_API float sum(const Tensor& a);
-    OPS_API float min(const Tensor& a);
-    OPS_API float max(const Tensor& a);
-    OPS_API float mean(const Tensor& a);
-    OPS_API Tensor sum(const Tensor& a,int axis);
-    OPS_API Tensor min(const Tensor& a,int axis);
-    OPS_API Tensor max(const Tensor& a,int axis);
-    OPS_API Tensor mean(const Tensor& a,int axis);
+    OPS_API float Sum(const Tensor& a);
+    OPS_API float Min(const Tensor& a);
+    OPS_API float Max(const Tensor& a);
+    OPS_API float Mean(const Tensor& a);
+    OPS_API Tensor Sum(const Tensor& a,int axis);
+    OPS_API Tensor Min(const Tensor& a,int axis);
+    OPS_API Tensor Max(const Tensor& a,int axis);
+    OPS_API Tensor Mean(const Tensor& a,int axis);
 
-    OPS_API Tensor typecast(const Tensor& a,DataType dst_type);
-    OPS_API Tensor concat(const std::vector<Tensor> &tensors, int dim);
+    OPS_API Tensor Typecast(const Tensor& a,DataType dst_type);
+    OPS_API Tensor Concat(const std::vector<Tensor> &tensors, int dim);
 
-    OPS_API void transpose(Tensor& a); // for 2-d (inplace)
-    OPS_API Tensor transpose(Tensor& a,std::initializer_list<int> axes); // for n-d
+    OPS_API void Transpose(Tensor& a); // for 2-d (inplace)
+    OPS_API Tensor Transpose(Tensor& a,std::initializer_list<int> axes); // for n-d
 
-    OPS_API Tensor equal(const Tensor& a,const Tensor& b);
-    OPS_API Tensor not_equal(const Tensor& a,const Tensor& b);
-    OPS_API Tensor greater(const Tensor& a,const Tensor& b);
-    OPS_API Tensor less(const Tensor& a,const Tensor& b);
-    OPS_API Tensor greater_equal(const Tensor& a,const Tensor& b);
-    OPS_API Tensor less_equal(const Tensor& a,const Tensor& b);
+    OPS_API Tensor Equal(const Tensor& a,const Tensor& b);
+    OPS_API Tensor NotEqual(const Tensor& a,const Tensor& b);
+    OPS_API Tensor Greater(const Tensor& a,const Tensor& b);
+    OPS_API Tensor Less(const Tensor& a,const Tensor& b);
+    OPS_API Tensor GreaterEqual(const Tensor& a,const Tensor& b);
+    OPS_API Tensor LessEqual(const Tensor& a,const Tensor& b);
 
-    OPS_API bool all(const Tensor& t,float val); // 判断张量 t 中是否所有元素都非val（true）。
-    OPS_API bool any(const Tensor& t,float val); // 判断张量 t 中是否存在val（true）。
-    OPS_API size_t nonzero(const Tensor& t); // 返回张量 t 中非零元素的数量。
-    OPS_API Tensor argmax(const Tensor& t, int axis); // 沿指定维度 axis 查找最大值的位置索引（不是值）。
-    OPS_API Tensor argmin(const Tensor& t, int axis); //  沿 axis 查找最小值的位置。
+    OPS_API bool All(const Tensor& t,float val); // 判断张量 t 中是否所有元素都非val（true）。
+    OPS_API bool Any(const Tensor& t,float val); // 判断张量 t 中是否存在val（true）。
+    OPS_API size_t Nonzero(const Tensor& t); // 返回张量 t 中非零元素的数量。
+    OPS_API Tensor Argmax(const Tensor& t, int axis); // 沿指定维度 axis 查找最大值的位置索引（不是值）。
+    OPS_API Tensor Argmin(const Tensor& t, int axis); //  沿 axis 查找最小值的位置。
 }

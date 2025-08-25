@@ -73,10 +73,10 @@ namespace ops {
         }
         std::cout<<std::format("Tensor dtype: {} | Tensor device: {}",dtype_to_string(a.dtype()), device_to_string(dev))<<std::endl;
     }
-    Tensor ones(const std::vector<int>& shape, DataType dtype){
+    Tensor Ones(const std::vector<int>& shape, DataType dtype){
         // 合法性判断
         if(shape.empty()) 
-            throw std::runtime_error("ops::ones: shape is empty");
+            throw std::runtime_error("ops::Ones: shape is empty");
         // 分发
         #ifdef BACKEND_CPU
             return OnesImpl<Device::CPU>::execute(shape,dtype);
@@ -91,10 +91,10 @@ namespace ops {
             return OnesImpl<Device::VULKAN>::execute(shape,dtype);
         #endif
     }
-    Tensor zeros(const std::vector<int>& shape, DataType dtype){
+    Tensor Zeros(const std::vector<int>& shape, DataType dtype){
         // 合法性判断
         if(shape.empty()) 
-            throw std::runtime_error("ops::zeros: shape is empty");
+            throw std::runtime_error("ops::Zeros: shape is empty");
         // 分发
         #ifdef BACKEND_CPU
             return ZerosImpl<Device::CPU>::execute(shape,dtype);
@@ -109,10 +109,10 @@ namespace ops {
             return ZerosImpl<Device::VULKAN>::execute(shape,dtype);
         #endif
     }
-    Tensor fill(const std::vector<int>& shape, DataType dtype,float val){
+    Tensor Fill(const std::vector<int>& shape, DataType dtype,float val){
         // 合法性判断
         if(shape.empty()) 
-            throw std::runtime_error("ops::fill: shape is empty");
+            throw std::runtime_error("ops::Fill: shape is empty");
         // 分发
         #ifdef BACKEND_CPU
             return FillImpl<Device::CPU>::execute(shape,dtype,val);
@@ -127,10 +127,10 @@ namespace ops {
             return FillImpl<Device::VULKAN>::execute(shape,dtype,val);
         #endif
     }
-    Tensor random(const std::vector<int>& shape, DataType dtype,float min,float max){
+    Tensor Random(const std::vector<int>& shape, DataType dtype,float min,float max){
         // 合法性判断
         if(shape.empty()) 
-            throw std::runtime_error("ops::random: shape is empty");
+            throw std::runtime_error("ops::Random: shape is empty");
         // 分发
         #ifdef BACKEND_CPU
             return RandomImpl<Device::CPU>::execute(shape,dtype,min,max);
@@ -146,7 +146,7 @@ namespace ops {
         #endif
     }
     
-    Tensor slice(const Tensor& t, const std::vector<std::pair<int, int>>& ranges){
+    Tensor Slice(const Tensor& t, const std::vector<std::pair<int, int>>& ranges){
         // 合法性判断
         if(ranges.empty())  
             throw std::runtime_error("Slice ranges cannot be empty");
@@ -179,7 +179,7 @@ namespace ops {
             return SliceImpl<Device::VULKAN>::execute(t,ranges);
         #endif
     }
-    void add(Tensor& a,float b){
+    void Add(Tensor& a,float b){
         if(a.numel() == 0 || b == 0.0f) return;
         // 后端实现分发
         if(a.device() == Device::CPU){
@@ -195,7 +195,7 @@ namespace ops {
             return AddImpl<Device::VULKAN>::execute(a,b);
         #endif
     }
-    void sub(Tensor& a,float b){
+    void Sub(Tensor& a,float b){
         if(a.numel() == 0 || b == 0.0f) return;
         // 后端实现分发
         if(a.device() == Device::CPU){
@@ -211,7 +211,7 @@ namespace ops {
             SubImpl<Device::VULKAN>::execute(a,b);
         #endif
     }
-    void dot(Tensor& a,float b){
+    void Dot(Tensor& a,float b){
         if(a.numel() == 0 || b == 1.0f) return;
         // 后端实现分发
         if(a.device() == Device::CPU){
@@ -227,7 +227,7 @@ namespace ops {
             DotImpl<Device::VULKAN>::execute(a,b);
         #endif
     }
-    void div(Tensor& a,float b){
+    void Div(Tensor& a,float b){
         // 检查
         if(a.numel() == 0 || b == 1.0f) return;
         if(b == 0.0f) throw std::runtime_error("div: Cann't division by zero");
@@ -246,7 +246,7 @@ namespace ops {
         #endif
     }
     
-    Tensor add(const Tensor& a, float b){
+    Tensor Add(const Tensor& a, float b){
         if(a.numel()==0 || b == 0.0f) return a.clone();
 
         // 后端实现分发
@@ -266,7 +266,7 @@ namespace ops {
             return AddImpl<Device::VULKAN>::execute(a,b);
         #endif
     }
-    Tensor sub(const Tensor& a, float b){
+    Tensor Sub(const Tensor& a, float b){
         if(a.numel()==0 || b == 0.0f) return a.clone();
         // 后端实现分发
         #ifdef BACKEND_CPU
@@ -282,7 +282,7 @@ namespace ops {
             return SubImpl<Device::VULKAN>::execute(a,b);
         #endif
     }
-    Tensor dot(const Tensor& a, float b){
+    Tensor Dot(const Tensor& a, float b){
         if(a.numel()==0 || b == 1.0f) return a.clone();
         // 后端实现分发
         #ifdef BACKEND_CPU
@@ -298,7 +298,7 @@ namespace ops {
             return DotImpl<Device::VULKAN>::execute(a,b);
         #endif
     }
-    Tensor div(const Tensor& a, float b){
+    Tensor Div(const Tensor& a, float b){
         if(a.numel()==0 || b == 1.0f) 
             return a.clone();
         if(b == 0.0f) 
@@ -318,7 +318,7 @@ namespace ops {
             return DivImpl<Device::VULKAN>::execute(a,b);
         #endif
     }
-    Tensor add(const Tensor& a,const Tensor& b){
+    Tensor Add(const Tensor& a,const Tensor& b){
         if(a.device() != b.device()) 
             throw std::runtime_error("Tensor Device mismatch!");
         if(a.shape().size() != b.shape().size()) 
@@ -346,7 +346,7 @@ namespace ops {
             return AddImpl<Device::VULKAN>::execute(a,b);
         #endif
     }
-    Tensor sub(const Tensor& a,const Tensor& b){
+    Tensor Sub(const Tensor& a,const Tensor& b){
         // 设备合法性检测
         if(a.device() != b.device()) throw std::runtime_error("Tensor Device mismatch!");
         // 维度合法性检测 
@@ -373,7 +373,7 @@ namespace ops {
             return SubImpl<Device::VULKAN>::execute(a,b);
         #endif
     }
-    Tensor dot(const Tensor& a,const Tensor& b){
+    Tensor Dot(const Tensor& a,const Tensor& b){
         // 设备合法性检测
         if(a.device() != b.device()) throw std::runtime_error("Tensor Device mismatch!");
         // 维度合法性检测 
@@ -398,7 +398,7 @@ namespace ops {
             return DotImpl<Device::VULKAN>::execute(a,b);
         #endif
     }
-    Tensor div(const Tensor& a,const Tensor& b){
+    Tensor Div(const Tensor& a,const Tensor& b){
         if(a.device()!=b.device()) throw std::runtime_error("Device mismatch!");
         for(int i=0;i<a.shape().size();i++){
             if(a.shape(i) != b.shape(i)) throw std::runtime_error("Tensor shape mismatch!");
@@ -420,7 +420,7 @@ namespace ops {
             return DivImpl<Device::VULKAN>::execute(a,b);
         #endif
     }
-    Tensor mul(const Tensor& a,const Tensor& b){
+    Tensor Mul(const Tensor& a,const Tensor& b){
         // 合法性判断
         if(a.device()!=b.device()) 
             throw std::runtime_error("Tensors a and b device mismatch!");
@@ -454,7 +454,7 @@ namespace ops {
             return MulImpl<Device::VULKAN>::execute(a,b);
         #endif
     }
-    Tensor abs(const Tensor& a){
+    Tensor Abs(const Tensor& a){
         if(a.data() == nullptr || a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
         // 后端实现分发
@@ -474,7 +474,7 @@ namespace ops {
             return AbsImpl<Device::VULKAN>::execute(a);
         #endif
     }
-    Tensor sin(const Tensor& a){
+    Tensor Sin(const Tensor& a){
         if(a.data() == nullptr || a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
         // 后端实现分发
@@ -494,7 +494,7 @@ namespace ops {
             return SinImpl<Device::VULKAN>::execute(a);
         #endif
     }
-    Tensor cos(const Tensor& a){
+    Tensor Cos(const Tensor& a){
         if(a.data() == nullptr || a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
         
@@ -515,7 +515,7 @@ namespace ops {
             return CosImpl<Device::VULKAN>::execute(a);
         #endif
     }
-    Tensor tan(const Tensor& a){
+    Tensor Tan(const Tensor& a){
         if(a.data() == nullptr || a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
         
@@ -536,7 +536,7 @@ namespace ops {
             return TanImpl<Device::VULKAN>::execute(a);
         #endif
     }
-    Tensor exp(const Tensor& a){
+    Tensor Exp(const Tensor& a){
         if(a.data() == nullptr || a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
         
@@ -557,7 +557,7 @@ namespace ops {
             return ExpImpl<Device::VULKAN>::execute(a);
         #endif
     }
-    Tensor relu(const Tensor& a){
+    Tensor Relu(const Tensor& a){
         if(a.data() == nullptr || a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
 
@@ -578,7 +578,7 @@ namespace ops {
             return ReluImpl<Device::VULKAN>::execute(a);
         #endif
     }
-    Tensor silu(const Tensor& a){
+    Tensor Silu(const Tensor& a){
         if(a.data() == nullptr || a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
        // 后端实现分发
@@ -598,7 +598,7 @@ namespace ops {
             return SiluImpl<Device::VULKAN>::execute(a);
         #endif
     }
-    Tensor tanh(const Tensor& a){
+    Tensor Tanh(const Tensor& a){
         if(a.data() == nullptr || a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
          // 后端实现分发
@@ -618,7 +618,7 @@ namespace ops {
             return TanhImpl<Device::VULKAN>::execute(a);
         #endif
     }
-    Tensor sqrt(const Tensor& a){
+    Tensor Sqrt(const Tensor& a){
         if(a.data() == nullptr || a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
 
@@ -643,7 +643,7 @@ namespace ops {
             return SqrtImpl<Device::VULKAN>::execute(a);
         #endif
     }
-    Tensor sigmoid(const Tensor& a){
+    Tensor Sigmoid(const Tensor& a){
         if(a.data() == nullptr || a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
         // 后端实现分发
@@ -663,7 +663,7 @@ namespace ops {
             return SigmoidImpl<Device::VULKAN>::execute(a);
         #endif
     }
-    Tensor pow(const Tensor& a,float val){
+    Tensor Pow(const Tensor& a,float val){
         if(a.data() == nullptr || a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
         
@@ -684,7 +684,7 @@ namespace ops {
             return PowImpl<Device::VULKAN>::execute(a,val);
         #endif
     }
-    Tensor log(const Tensor& a,float val){
+    Tensor Log(const Tensor& a,float val){
         if (val < 0 || val == 1)
             throw std::runtime_error("The base cannot be less than or equal to 0, and it cannot be 1");
 
@@ -713,7 +713,7 @@ namespace ops {
         #endif
     }
     
-    Tensor softmax(const Tensor& a,int axis){
+    Tensor Softmax(const Tensor& a,int axis){
         if(a.data() == nullptr || a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
         if(std::abs(axis) >= a.shape().size()) 
@@ -735,7 +735,7 @@ namespace ops {
             return SoftmaxImpl<Device::VULKAN>::execute(a,axis);
         #endif
     }
-    Tensor clamp(const Tensor& a,float min,float max){
+    Tensor Clamp(const Tensor& a,float min,float max){
         if(a.data() == nullptr || a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
         if(min > max) 
@@ -756,7 +756,7 @@ namespace ops {
             return ClampImpl<Device::VULKAN>::execute(a,min,max);
         #endif
     }
-    void abs(Tensor& a){
+    void Abs(Tensor& a){
         if(a.data() == nullptr || a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
         // 后端实现分发
@@ -773,7 +773,7 @@ namespace ops {
             AbsImpl<Device::VULKAN>::execute(a);
         #endif
     }
-    void sin(Tensor& a){
+    void Sin(Tensor& a){
         if(a.data() == nullptr || a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
         if(a.dtype() < DataType::BFLOAT16){
@@ -793,7 +793,7 @@ namespace ops {
             SinImpl<Device::VULKAN>::execute(a);
         #endif
     }
-    void cos(Tensor& a){
+    void Cos(Tensor& a){
         if(a.data() == nullptr || a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
         if(a.dtype() < DataType::BFLOAT16){
@@ -813,7 +813,7 @@ namespace ops {
             CosImpl<Device::VULKAN>::execute(a);
         #endif
     }
-    void tan(Tensor& a){
+    void Tan(Tensor& a){
         if(a.data() == nullptr || a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
         if(a.dtype() < DataType::BFLOAT16){
@@ -833,7 +833,7 @@ namespace ops {
             TanImpl<Device::VULKAN>::execute(a);
         #endif
     }
-    void relu(Tensor& a){
+    void Relu(Tensor& a){
         if(a.data() == nullptr || a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
         // 后端实现分发
@@ -850,7 +850,7 @@ namespace ops {
             ReluImpl<Device::VULKAN>::execute(a);
         #endif
     }
-    void silu(Tensor& a){
+    void Silu(Tensor& a){
         if(a.data() == nullptr || a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
         if(a.dtype() < DataType::BFLOAT16){
@@ -870,7 +870,7 @@ namespace ops {
             SiluImpl<Device::VULKAN>::execute(a);
         #endif
     }
-    void tanh(Tensor& a){
+    void Tanh(Tensor& a){
         if(a.data() == nullptr || a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
         if(a.dtype() < DataType::BFLOAT16){
@@ -890,7 +890,7 @@ namespace ops {
             TanhImpl<Device::VULKAN>::execute(a);
         #endif
     }
-    void sigmoid(Tensor& a){
+    void Sigmoid(Tensor& a){
         if(a.data() == nullptr || a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
         if(a.dtype() < DataType::BFLOAT16){
@@ -911,7 +911,7 @@ namespace ops {
         #endif
     }
     
-    void clamp(Tensor& a,float min,float max){
+    void Clamp(Tensor& a,float min,float max){
         if(a.data() == nullptr || a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
         if(min > max) 
@@ -930,7 +930,7 @@ namespace ops {
             ClampImpl<Device::VULKAN>::execute(a,min,max);
         #endif
     }
-    float sum(const Tensor& a){
+    float Sum(const Tensor& a){
         if(a.data() == nullptr|| a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
 
@@ -951,7 +951,7 @@ namespace ops {
             return SumImpl<Device::VULKAN>::execute(a);
         #endif
     }
-    float min(const Tensor& a){
+    float Min(const Tensor& a){
         if(a.data() == nullptr|| a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
         // 后端实现分发
@@ -971,7 +971,7 @@ namespace ops {
             return MinImpl<Device::VULKAN>::execute(a);
         #endif
     }
-    float max(const Tensor& a){
+    float Max(const Tensor& a){
         if(a.data() == nullptr|| a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
         // 后端实现分发
@@ -991,7 +991,7 @@ namespace ops {
             return MaxImpl<Device::VULKAN>::execute(a);
         #endif
     }
-    float mean(const Tensor& a){
+    float Mean(const Tensor& a){
         if(a.data() == nullptr|| a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
         // 后端实现分发
@@ -1011,7 +1011,7 @@ namespace ops {
             return MeanImpl<Device::VULKAN>::execute(a);
         #endif
     }
-     Tensor sum(const Tensor& a,int axis){
+    Tensor Sum(const Tensor& a,int axis){
         if(a.data() == nullptr|| a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
         axis = axis < 0 ? axis + a.shape().size() : axis;
@@ -1035,7 +1035,7 @@ namespace ops {
             return SumImpl<Device::VULKAN>::execute(a,axis);
         #endif
     }
-    Tensor min(const Tensor& a,int axis){
+    Tensor Min(const Tensor& a,int axis){
         if(a.data() == nullptr|| a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
         axis = axis < 0 ? axis + a.shape().size() : axis;
@@ -1058,7 +1058,7 @@ namespace ops {
             return MinImpl<Device::VULKAN>::execute(a,axis);
         #endif
     }
-    Tensor max(const Tensor& a,int axis){
+    Tensor Max(const Tensor& a,int axis){
         if(a.data() == nullptr|| a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
         axis = axis < 0 ? axis + a.shape().size() : axis;
@@ -1081,7 +1081,7 @@ namespace ops {
             return MaxImpl<Device::VULKAN>::execute(a,axis);
         #endif
     }
-    Tensor mean(const Tensor& a,int axis){
+    Tensor Mean(const Tensor& a,int axis){
         if(a.data() == nullptr|| a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
         axis = axis < 0 ? axis + a.shape().size() : axis;
@@ -1105,7 +1105,7 @@ namespace ops {
             return MeanImpl<Device::VULKAN>::execute(a,axis);
         #endif
     }
-    Tensor typecast(const Tensor& a,DataType dst_type){
+    Tensor Typecast(const Tensor& a,DataType dst_type){
         if(a.data() == nullptr|| a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
         if (!is_cast_valid(a.dtype(), dst_type))
@@ -1129,7 +1129,7 @@ namespace ops {
             return TypecastImpl<Device::VULKAN>::execute(a,dst_type);
         #endif
     }
-    Tensor concat(const std::vector<Tensor>& tensors, int dim){
+    Tensor Concat(const std::vector<Tensor>& tensors, int dim){
         // 合法性判断
         if(tensors.empty()) throw std::invalid_argument("tensors is empty");
         if(tensors.size() == 1) return tensors[0];
@@ -1162,7 +1162,7 @@ namespace ops {
             return ConcatImpl<Device::VULKAN>::execute(tensors,dim);
         #endif
     }
-    void transpose(Tensor& a){
+    void Transpose(Tensor& a){
         if(a.data() == nullptr|| a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
         if(a.shape().size()!=2) 
@@ -1182,7 +1182,7 @@ namespace ops {
             TransposeImpl<Device::VULKAN>::execute(a);
         #endif
     }
-    Tensor transpose(Tensor& a,std::initializer_list<int> axes){
+    Tensor Transpose(Tensor& a,std::initializer_list<int> axes){
         if(a.shape().empty()) 
             throw std::runtime_error("Input tensor must be not null.");
         if(a.shape().size() != axes.size()) 
@@ -1205,7 +1205,7 @@ namespace ops {
             return TransposeImpl<Device::VULKAN>::execute(a,axes);
         #endif
     }
-    Tensor equal(const Tensor& a,const Tensor& b) {
+    Tensor Equal(const Tensor& a,const Tensor& b) {
         if(a.device()!=b.device()) 
             throw std::runtime_error("Tensors a and b device mismatch!");
         if(a.shape().size() != b.shape().size()) 
@@ -1228,7 +1228,7 @@ namespace ops {
         #endif
     }
 
-    Tensor not_equal(const Tensor& a,const Tensor& b){
+    Tensor NotEqual(const Tensor& a,const Tensor& b){
         if(a.device()!=b.device()) 
             throw std::runtime_error("Tensors a and b device mismatch!");
         if(a.shape().size() != b.shape().size()) 
@@ -1250,7 +1250,7 @@ namespace ops {
             return NotEqualImpl<Device::VULKAN>::execute(a,b);
         #endif
      }
-    Tensor greater(const Tensor& a,const Tensor& b){
+    Tensor Greater(const Tensor& a,const Tensor& b){
         if(a.device()!=b.device()) 
             throw std::runtime_error("Tensors a and b device mismatch!");
         if(a.shape().size() != b.shape().size()) 
@@ -1272,7 +1272,7 @@ namespace ops {
             return GreaterImpl<Device::VULKAN>::execute(a,b);
         #endif
      }
-    Tensor less(const Tensor& a,const Tensor& b){
+    Tensor Less(const Tensor& a,const Tensor& b){
         if(a.device()!=b.device()) 
             throw std::runtime_error("Tensors a and b device mismatch!");
         if(a.shape().size() != b.shape().size()) 
@@ -1294,7 +1294,7 @@ namespace ops {
             return LessImpl<Device::VULKAN>::execute(a,b);
         #endif
      }
-    Tensor greater_equal(const Tensor& a,const Tensor& b){
+    Tensor GreaterEqual(const Tensor& a,const Tensor& b){
         if(a.device()!=b.device()) 
             throw std::runtime_error("Tensors a and b device mismatch!");
         if(a.shape().size() != b.shape().size()) 
@@ -1316,7 +1316,7 @@ namespace ops {
             return GreaterEqualImpl<Device::VULKAN>::execute(a,b);
         #endif
      }
-    Tensor less_equal(const Tensor& a,const Tensor& b){
+    Tensor LessEqual(const Tensor& a,const Tensor& b){
         if(a.device()!=b.device()) 
             throw std::runtime_error("Tensors a and b device mismatch!");
         if(a.shape().size() != b.shape().size()) 
@@ -1338,7 +1338,7 @@ namespace ops {
             return LessEqualImpl<Device::VULKAN>::execute(a,b);
         #endif
     }
-    bool all(const Tensor &a,float val = 0.0f){
+    bool All(const Tensor &a,float val = 0.0f){
         // 判断张量 t 中是否所有元素都非零（true）。
         if(a.data() == nullptr|| a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
@@ -1356,7 +1356,7 @@ namespace ops {
             return AllImpl<Device::VULKAN>::execute(a,val);
         #endif
     }
-    bool any(const Tensor &a,float val = 0.0f){
+    bool Any(const Tensor &a,float val = 0.0f){
         // 判断张量 t 中是否至少有一个元素非零（true）。
         if(a.data() == nullptr|| a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
@@ -1374,7 +1374,7 @@ namespace ops {
             return AnyImpl<Device::VULKAN>::execute(a,val);
         #endif
     }
-    size_t nonzero(const Tensor &a){
+    size_t Nonzero(const Tensor &a){
         // 统计张量 t 中非零元素的数量。
         if(a.data() == nullptr|| a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
@@ -1393,7 +1393,7 @@ namespace ops {
         #endif
     }
    
-    Tensor argmax(const Tensor &a, int axis){
+    Tensor Argmax(const Tensor &a, int axis){
         if(a.data() == nullptr|| a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
         // axis 可以为负数
@@ -1417,7 +1417,7 @@ namespace ops {
         #endif
     }
 
-    Tensor argmin(const Tensor &a, int axis){
+    Tensor Argmin(const Tensor &a, int axis){
         if(a.data() == nullptr|| a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
         // axis 可以为负数

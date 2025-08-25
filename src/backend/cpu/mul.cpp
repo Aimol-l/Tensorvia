@@ -29,8 +29,8 @@ void mul_kernel(const T* pa, const T* pb, T* pr, size_t batch, size_t rows, size
 
 Tensor MulImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
     // 精度提升
-    const Tensor& A = a.dtype() > b.dtype() ? a : ops::typecast(a, b.dtype());
-    const Tensor& B = a.dtype() <= b.dtype() ? b : ops::typecast(b, a.dtype());
+    const Tensor& A = a.dtype() > b.dtype() ? a : ops::Typecast(a, b.dtype());
+    const Tensor& B = a.dtype() <= b.dtype() ? b : ops::Typecast(b, a.dtype());
     // 创建结果张量
     Tensor res;
     int batch, cols, rows, common_dim;

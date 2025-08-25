@@ -40,26 +40,19 @@ void comparison_kernel(int8_t *res, const T *a_ptr, const R *b_ptr, int size) {
             const PromotedType val_b = b_ptr[i];
             if constexpr (Op == CmpOp::Equal || Op == CmpOp::NotEqual) {
                 // 定义容差，逻辑保持不变：由原始类型中精度最低的决定
+                using PromotedType = decltype(std::declval<compute_type_t<T>>() + std::declval<compute_type_t<R>>());
                 constexpr PromotedType abs_tol = [] {
-                    if constexpr (std::is_same_v<T, double> || std::is_same_v<R, double>)
-                        return static_cast<PromotedType>(1e-2);
-                    else if constexpr (std::is_same_v<T, float> || std::is_same_v<R, float>)
-                        return static_cast<PromotedType>(1e-3);
-                    else if constexpr (std::is_same_v<T, float16> || std::is_same_v<R, float16>)
-                        return static_cast<PromotedType>(1e-8);
-                    else if constexpr (std::is_same_v<T, bfloat16> || std::is_same_v<R, bfloat16>)
-                        return static_cast<PromotedType>(1e-12);
+                    if constexpr (std::is_same_v<T, double> || std::is_same_v<R, double>) return static_cast<PromotedType>(1e-9);
+                    else if constexpr (std::is_same_v<T, float> || std::is_same_v<R, float>) return static_cast<PromotedType>(1e-5);
+                    else if constexpr (std::is_same_v<T, float16> || std::is_same_v<R, float16>) return static_cast<PromotedType>(1e-3);
+                    else if constexpr (std::is_same_v<T, bfloat16> || std::is_same_v<R, bfloat16>) return static_cast<PromotedType>(1e-2);
                     return PromotedType{0};
                 }();
                 constexpr PromotedType rel_tol = [] {
-                    if constexpr (std::is_same_v<T, double> || std::is_same_v<R, double>)
-                        return static_cast<PromotedType>(1e-1);
-                    else if constexpr (std::is_same_v<T, float> || std::is_same_v<R, float>)
-                        return static_cast<PromotedType>(1e-2);
-                    else if constexpr (std::is_same_v<T, float16> || std::is_same_v<R, float16>)
-                        return static_cast<PromotedType>(1e-5);
-                    else if constexpr (std::is_same_v<T, bfloat16> || std::is_same_v<R, bfloat16>)
-                        return static_cast<PromotedType>(1e-9);
+                    if constexpr (std::is_same_v<T, double> || std::is_same_v<R, double>) return static_cast<PromotedType>(1e-12);
+                    else if constexpr (std::is_same_v<T, float> || std::is_same_v<R, float>) return static_cast<PromotedType>(1e-6);
+                    else if constexpr (std::is_same_v<T, float16> || std::is_same_v<R, float16>) return static_cast<PromotedType>(1e-3);
+                    else if constexpr (std::is_same_v<T, bfloat16> || std::is_same_v<R, bfloat16>) return static_cast<PromotedType>(1e-2);
                     return PromotedType{0};
                 }();
                 bool is_close = (std::abs(val_a - val_b) <= std::max(rel_tol * std::max(std::abs(val_a), std::abs(val_b)), abs_tol));

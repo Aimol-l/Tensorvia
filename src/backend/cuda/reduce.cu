@@ -816,7 +816,7 @@ bool AnyImpl<Device::CUDA>::execute(const Tensor& a, float val) {
 template <typename T>
 __global__ void all_cuda(const T* a_ptr, float val, size_t size, int* result) {
     // 声明共享内存（用于 block 内规约）
-     extern __shared__ bool all_sdata[];
+    extern __shared__ bool all_sdata[];
     auto tid = threadIdx.x;
     auto i   = blockIdx.x * blockDim.x + threadIdx.x;
     // Step 1: 每个线程判断 a[i] == val

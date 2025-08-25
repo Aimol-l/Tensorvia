@@ -37,9 +37,9 @@ Todo......
 ### Build from Source
 
 ```bash
-git clone --recursive https://github.com/Aimol-l/Bifrost.git
+git clone --recursive https://github.com/Aimol-l/Tensorvia.git
 
-cd Bifrost
+cd Tensorvia
 
 cmake -B build -DBACKEND_CPU=ON -DBUILD_TEST=ON && cmake --build build --parallel $(nproc) # cpu
 cmake -B build -DBACKEND_CUDA=ON -DBUILD_TEST=ON && cmake --build build --parallel $(nproc) # cuda
@@ -130,4 +130,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
  + 💬 Discussions: GitHub Discussions
 
 ----
-### <center> Bifrost - Bridging the gap between hardware and performance 🚀
+### <center> Tensorvia - Bridging the gap between hardware and performance 🚀

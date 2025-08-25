@@ -17,8 +17,8 @@ int main() {
     for(auto& dtype : GetAllDataTypes()) {
         Tensor temp = Tensor::Random({3,3},-10,10,dtype);
         ops::println(temp);
-        LOG_INFO("res: " << ops::any(static_cast<const Tensor&>(temp), 0));
-        // ops::println(ops::argmax(temp, 1));
+        LOG_INFO("res: " << ops::Any(static_cast<const Tensor&>(temp), 0));
+        // ops::println(ops::Argmax(temp, 1));
         LOG_INFO("Data type: " << dtype_to_string(dtype));
     }
     return 0;

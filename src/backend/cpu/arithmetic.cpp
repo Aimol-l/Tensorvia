@@ -8,7 +8,7 @@ void add_kernel(const T* a, const R* b, T* out, size_t size) {
     using PromotedType = decltype(std::declval<compute_type_t<T>>() + std::declval<compute_type_t<R>>());
     #pragma omp parallel for
     for (size_t i = 0; i < size; ++i) {
-        out[i] = PromotedType(a[i]) + PromotedType(b[i]);
+        out[i] = PromotedType(a[i] + b[i]);
     }
 }
 template <typename T>
@@ -179,7 +179,7 @@ void AddImpl<Device::CPU>::execute(Tensor& a, float b) {
 Tensor AddImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
     // 避免自加修改：a + a 返回新 tensor
     if (&a == &b)
-        return ops::add(a.clone(), b.clone());
+        return ops::Add(a.clone(), b.clone());
     // 计算公共类别
     DataType res_type = std::max(a.dtype(), b.dtype());  // 全是int 或 全是 float
     if (a.dtype() <= DataType::INT64 && b.dtype() > DataType::INT64) {
@@ -188,8 +188,8 @@ Tensor AddImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
         res_type = std::max(a.dtype(), DataType::FLOAT32);
     }
 
-    const Tensor& A = a.dtype() == res_type ? a : ops::typecast(a, res_type);
-    const Tensor& B = b.dtype() == res_type ? b : ops::typecast(b, res_type);
+    const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a, res_type);
+    const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b, res_type);
 
     Tensor result(a.shape(), res_type, Device::CPU);
 
@@ -235,8 +235,8 @@ Tensor AddImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
     return result;
 }
 Tensor AddImpl<Device::CPU>::execute(const Tensor& a, float b) {
-    Tensor t = ops::fill(a.shape(), a.dtype(), b);
-    return ops::add(a, t);
+    Tensor t = ops::Fill(a.shape(), a.dtype(), b);
+    return ops::Add(a, t);
 }
 
 void SubImpl<Device::CPU>::execute(Tensor& a, float b) {
@@ -275,7 +275,7 @@ void SubImpl<Device::CPU>::execute(Tensor& a, float b) {
 Tensor SubImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
     // 避免自修改
     if (&a == &b)
-        return ops::sub(a.clone(), b.clone());
+        return ops::Sub(a.clone(), b.clone());
     DataType res_type = std::max(a.dtype(), b.dtype());  // 全是int 或 全是 float
     if (a.dtype() <= DataType::INT64 && b.dtype() > DataType::INT64) {
         res_type = std::max(b.dtype(), DataType::FLOAT32);
@@ -283,8 +283,8 @@ Tensor SubImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
         res_type = std::max(a.dtype(), DataType::FLOAT32);
     }
 
-    const Tensor& A = a.dtype() == res_type ? a : ops::typecast(a, res_type);
-    const Tensor& B = b.dtype() == res_type ? b : ops::typecast(b, res_type);
+    const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a, res_type);
+    const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b, res_type);
 
     size_t size = a.numel();
     Tensor result(a.shape(), res_type, Device::CPU);
@@ -319,8 +319,8 @@ Tensor SubImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
     return result;
 }
 Tensor SubImpl<Device::CPU>::execute(const Tensor& a, float b) {
-    Tensor t = ops::fill(a.shape(), a.dtype(), b);
-    return ops::sub(a, t);
+    Tensor t = ops::Fill(a.shape(), a.dtype(), b);
+    return ops::Sub(a, t);
 }
 void DotImpl<Device::CPU>::execute(Tensor& a, float b) {
     size_t size = a.numel();
@@ -357,7 +357,7 @@ void DotImpl<Device::CPU>::execute(Tensor& a, float b) {
 Tensor DotImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
     // 避免自修改
     if (&a == &b)
-        return ops::dot(a.clone(), b.clone());
+        return ops::Dot(a.clone(), b.clone());
 
     DataType res_type = std::max(a.dtype(), b.dtype());  // 全是int 或 全是 float
     if (a.dtype() <= DataType::INT64 && b.dtype() > DataType::INT64) {
@@ -365,8 +365,8 @@ Tensor DotImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
     } else if (a.dtype() > DataType::INT64 && b.dtype() <= DataType::INT64) {
         res_type = std::max(a.dtype(), DataType::FLOAT32);
     }
-    const Tensor& A = a.dtype() == res_type ? a : ops::typecast(a, res_type);
-    const Tensor& B = b.dtype() == res_type ? b : ops::typecast(b, res_type);
+    const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a, res_type);
+    const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b, res_type);
     size_t size = a.numel();
     Tensor result(a.shape(), res_type, Device::CPU);
     switch (res_type) {
@@ -400,8 +400,8 @@ Tensor DotImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
     return result;
 }
 Tensor DotImpl<Device::CPU>::execute(const Tensor& a, float b) {
-    Tensor t = ops::fill(a.shape(), a.dtype(), b);
-    return ops::dot(a, t);
+    Tensor t = ops::Fill(a.shape(), a.dtype(), b);
+    return ops::Dot(a, t);
 }
 void DivImpl<Device::CPU>::execute(Tensor& a, float b) {
     size_t size = a.numel();
@@ -440,8 +440,8 @@ Tensor DivImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
     if (&a == &b)
         return DivImpl<Device::CPU>::execute(a.clone(), b.clone());
 
-    const Tensor& A = a.dtype() > b.dtype() ? a : ops::typecast(a, b.dtype());
-    const Tensor& B = a.dtype() <= b.dtype() ? b : ops::typecast(b, a.dtype());
+    const Tensor& A = a.dtype() > b.dtype() ? a : ops::Typecast(a, b.dtype());
+    const Tensor& B = a.dtype() <= b.dtype() ? b : ops::Typecast(b, a.dtype());
 
     size_t size = A.numel();
     Tensor result(A.shape(), A.dtype(), Device::CPU);
@@ -477,8 +477,8 @@ Tensor DivImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
     return result;
 }
 Tensor DivImpl<Device::CPU>::execute(const Tensor& a, float b) {
-    Tensor t = ops::fill(a.shape(), a.dtype(), b);
-    return ops::div(a, t);
+    Tensor t = ops::Fill(a.shape(), a.dtype(), b);
+    return ops::Div(a, t);
 }
 void AbsImpl<Device::CPU>::execute(Tensor& a) {
     void* src = a.data();
@@ -514,7 +514,7 @@ void AbsImpl<Device::CPU>::execute(Tensor& a) {
 }
 Tensor AbsImpl<Device::CPU>::execute(const Tensor& a) {
     Tensor b = a.clone();
-    ops::abs(b);
+    ops::Abs(b);
     return b;
 }
 void SinImpl<Device::CPU>::execute(Tensor& a) {

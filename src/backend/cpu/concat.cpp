@@ -58,7 +58,7 @@ Tensor ConcatImpl<Device::CPU>::execute(const std::vector<Tensor>& tensors, int 
     size_t num_tensor = tensors.size();
     std::vector<Tensor> res_type_tensors(num_tensor);
     for (int i = 0; i < num_tensor; ++i) {
-        res_type_tensors[i] = ops::typecast(tensors[i], res_type);
+        res_type_tensors[i] = ops::Typecast(tensors[i], res_type);
     }
     out_shape[dim] = concat_size;
     Tensor res(out_shape, res_type, Device::CPU);

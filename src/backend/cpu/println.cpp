@@ -16,7 +16,6 @@ template <typename T>
 inline void _println(const Tensor& a) {
     const std::vector<int>& shape = a.shape();
     if (shape.empty()) {
-        // std::println("[ ]");
         std::cout << "[ ]\n";
         return;
     }
@@ -32,7 +31,6 @@ inline void _println(const Tensor& a) {
         bool omit = dim_size > max_elements_per_dim;
         size_t show = omit ? 3 : dim_size;
         if (dim == total_dims - 1) {
-            // std::print("{}[",indent);
             std::cout << std::format("{}[", indent);
             for (size_t i = 0; i < show; ++i) {
                 if constexpr (Float16Type<T> || BFloat16Type<T>) {
@@ -42,12 +40,10 @@ inline void _println(const Tensor& a) {
                 } else {
                     std::cout << std::format("{:.3f}", data[offset + i]);
                 }
-                // if (i != show - 1) std::print(", ");
                 if (i != show - 1)
                     std::cout << ", ";
             }
             if (omit) {
-                // std::print(", ..., ");
                 std::cout << ", ..., ";
                 for (size_t i = dim_size - 3; i < dim_size; ++i) {
                     if constexpr (Float16Type<T> || BFloat16Type<T>) {
@@ -59,47 +55,35 @@ inline void _println(const Tensor& a) {
                     }
                     if (i != dim_size - 1)
                         std::cout << ", ";
-                    // std::print(", ");
                 }
             }
-            // std::print("]");
             std::cout << "]";
         } else {
-            // std::println("{}[",indent);
-            std::cout << std::format("{}[", indent);
+            std::cout << std::format("{}[\n", indent);
             for (size_t i = 0; i < show; ++i) {
                 self(self, dim + 1, offset + i * strides[dim], indent + "  ");
-                // std::println(",");
                 std::cout << ",\n";
             }
             if (omit) {
-                // std::println("{}  ...",indent);
                 std::cout << std::format("{}  ...", indent);
                 for (size_t i = dim_size - 3; i < dim_size; ++i) {
                     self(self, dim + 1, offset + i * strides[dim], indent + "  ");
                     if (i != dim_size - 1)
-                        // std::println(",");
                         std::cout << ",";
                     else
                         std::cout << "\n";
-                    // std::println("\n");
                 }
             }
-            // std::print("{}]",indent);
             std::cout << std::format("{}]", indent);
         }
     };
     print_recursive(print_recursive, 0, 0, "");
-    // std::print("\nTensor shape: (");
     std::cout << std::format("\nTensor shape: (");
     for (size_t i = 0; i < shape.size(); ++i) {
-        // std::print("{}",shape[i]);
         std::cout << std::format("{}", shape[i]);
         if (i != shape.size() - 1)
-            // std::print(", ");
             std::cout << ", ";
     }
-    // std::print(") | ");
     std::cout << ") | ";
 }
 

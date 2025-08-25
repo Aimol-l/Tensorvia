@@ -8,7 +8,7 @@
 void test(int iter){
     for(int i=0;i<iter;i++){
         Tensor a = Tensor::Random({200,300,400},0,10,DataType::FLOAT32);
-        auto c = ops::argmax(a,0);
+        auto c = ops::Argmax(a,0);
     }
 }
 
