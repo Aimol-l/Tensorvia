@@ -1,0 +1,97 @@
+#include "backend/cpu/ops/concat.h"
+
+
+
+namespace ops {
+
+template <typename T>
+void concat_kernel(Tensor& res, const std::vector<Tensor>& tensors, int dim) {
+    const auto& out_shape = res.shape();
+    size_t t_dim = tensors[0].shape().size();
+    size_t tensor_num = tensors.size();
+    T* pr = static_cast<T*>(res.data());
+    auto res_elem_size = calc_dtype_size(res.dtype());
+    std::vector<size_t> res_coord_weight(t_dim, 1);
+    for (int i = t_dim - 2; i >= 0; --i) {
+        res_coord_weight[i] = res_coord_weight[i + 1] * out_shape[i + 1];  // 固定
+    }
+    std::vector<size_t> offsets(tensor_num, 0);
+    for (int i = 1; i < tensor_num; ++i) {
+        offsets[i] = offsets[i - 1] + tensors[i - 1].shape()[dim];
+    }
+    for (int i = 0; i < tensor_num; ++i) {
+        auto t_shape = tensors[i].shape();
+        const T* pt = static_cast<const T*>(tensors[i].data());
+        size_t t_numl = tensors[i].numel();
+        auto src_elem_size = calc_dtype_size(tensors[i].dtype());
+        std::vector<int> stride(t_dim, 1);
+        for (int k = t_dim - 2; k >= 0; --k)
+            stride[k] = stride[k + 1] * t_shape[k + 1];
+        for (size_t j = 0; j < t_numl; ++j) {
+            size_t temp = j;
+            std::vector<size_t> coord(t_dim);
+            for (int k = 0; k < t_dim; ++k) {
+                coord[k] = temp / stride[k];
+                temp %= stride[k];
+            }
+            coord[dim] += offsets[i];
+            int linear_coord = 0;
+            for (int k = 0; k < t_dim; ++k) {
+                linear_coord += coord[k] * res_coord_weight[k];
+            }
+            pr[linear_coord] = static_cast<T>(pt[j]);
+        }
+    }
+}
+
+Tensor ConcatImpl<Device::CPU>::execute(const std::vector<Tensor>& tensors, int dim) {
+    // 确定输出张量的类型，最高精度
+    auto res_type = tensors[0].dtype();
+    // 计算输出张量的形状
+    std::vector<int> out_shape = tensors[0].shape();
+    size_t concat_size = 0;
+    for (auto& t : tensors) {
+        concat_size += t.shape()[dim];
+        res_type = std::max(res_type, t.dtype());
+    }
+    // 将所有张量先统一成res_type类型
+    size_t num_tensor = tensors.size();
+    std::vector<Tensor> res_type_tensors(num_tensor);
+    for (int i = 0; i < num_tensor; ++i) {
+        res_type_tensors[i] = ops::Typecast(tensors[i], res_type);
+    }
+    out_shape[dim] = concat_size;
+    Tensor res(out_shape, res_type, Device::CPU);
+    switch (res_type) {
+        case DataType::FLOAT64:
+            concat_kernel<double>(res, res_type_tensors, dim);
+            break;
+        case DataType::FLOAT32:
+            concat_kernel<float>(res, res_type_tensors, dim);
+            break;
+        case DataType::FLOAT16:
+            concat_kernel<float16>(res, res_type_tensors, dim);
+            break;
+        case DataType::BFLOAT16:
+            concat_kernel<bfloat16>(res, res_type_tensors, dim);
+            break;
+        case DataType::INT64:
+            concat_kernel<int64_t>(res, res_type_tensors, dim);
+            break;
+        case DataType::INT32:
+            concat_kernel<int32_t>(res, res_type_tensors, dim);
+            break;
+        case DataType::INT16:
+            concat_kernel<int16_t>(res, res_type_tensors, dim);
+            break;
+        case DataType::INT8:
+            concat_kernel<int8_t>(res, res_type_tensors, dim);
+            break;
+        default:
+            throw std::runtime_error("concat not support this data type");
+    }
+    return res;
+}
+
+template struct ConcatImpl<Device::CPU>;
+}  // namespace ops
