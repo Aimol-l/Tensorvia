@@ -55,10 +55,10 @@ public:
     Tensor(void* ptr, std::vector<int> shape,DataType dtype,Device device);
     // 从stl容器创建张量,vector
     template<typename T>
-    Tensor(std::vector<T>& vec,std::initializer_list<int> shape);
+    Tensor(std::vector<T>& vec, std::initializer_list<int> shape);
 
     template<typename T>
-    Tensor(std::vector<T>& vec,std::vector<int> shape);
+    Tensor(std::vector<T>& vec, std::vector<int> shape);
 
 
     Tensor& operator=(const Tensor& other); // 拷贝赋值运算符

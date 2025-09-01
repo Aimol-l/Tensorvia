@@ -129,7 +129,7 @@ template <typename T>
 Tensor::Tensor(std::vector<T> &vec, std::initializer_list<int> shape){
     // create a tensor from a vector
     if(vec.empty()) throw std::runtime_error("Cannot create a tensor from an empty vector");
-    // 判断shape是否正确
+
 #ifdef BACKEND_CPU
     m_device = Device::CPU;
 #endif
@@ -166,7 +166,7 @@ Tensor::Tensor(std::vector<T> &vec, std::initializer_list<int> shape){
 }
 
 template<typename T>
-Tensor::Tensor(std::vector<T>& vec,std::vector<int> shape) {
+Tensor::Tensor(std::vector<T>& vec, std::vector<int> shape) {
     // create a tensor from a vector
     if(vec.empty()) throw std::runtime_error("Cannot create a tensor from an empty vector");
 #ifdef BACKEND_CPU
@@ -665,3 +665,12 @@ template Tensor::Tensor(std::vector<float16> &vec, std::initializer_list<int> sh
 template Tensor::Tensor(std::vector<bfloat16> &vec, std::initializer_list<int> shape);
 template Tensor::Tensor(std::vector<float32>  &vec, std::initializer_list<int> shape);
 template Tensor::Tensor(std::vector<float64>  &vec, std::initializer_list<int> shape);
+
+template Tensor::Tensor(std::vector<int8_t>  &vec, std::vector<int> shape);
+template Tensor::Tensor(std::vector<int16_t> &vec, std::vector<int> shape);
+template Tensor::Tensor(std::vector<int32_t> &vec, std::vector<int> shape);
+template Tensor::Tensor(std::vector<int64_t> &vec, std::vector<int> shape);
+template Tensor::Tensor(std::vector<float16> &vec, std::vector<int> shape);
+template Tensor::Tensor(std::vector<bfloat16> &vec, std::vector<int> shape);
+template Tensor::Tensor(std::vector<float32>  &vec, std::vector<int> shape);
+template Tensor::Tensor(std::vector<float64>  &vec, std::vector<int> shape);
