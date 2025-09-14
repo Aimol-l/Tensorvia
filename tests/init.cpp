@@ -11,9 +11,8 @@ int main() {
     Tensor c = Tensor::Random({200,300,400},0,10,DataType::FLOAT32);
     Tensor d = Tensor::Fill({5,5},3.1415f);
 
-    // ops::println(a);
-    // ops::println(b);
+    ops::println(a);
+    ops::println(b);
     ops::println(c);
-    // ops::println(d);
-
+    ops::println(d);
 }

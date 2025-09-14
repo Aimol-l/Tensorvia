@@ -28,11 +28,12 @@
 
 ## 📦 Installation
 
-### Prerequisites
+### Arch Linux
 
-```bash
-Todo......
-```
+- CPU Backend:  `pacman -S onetbb gcc cmake openmp`
+- CUDA Backend: `pacman -S nvidia opencl-nvidia cuda cmake openmp nccl`
+- SYCL Backend: `pacman -S intel-oneapi-basekit cmake`
+- Vulkan Backend: `pacman -S vulkan-tools cmake openmp clang`
 
 ### Build from Source
 
@@ -65,41 +66,33 @@ cmake -B build -DBACKEND_VULKAN=ON -DBUILD_TEST=ON && cmake --build build --para
 ```c++
 #include "ops.h"
 int main() {
-    // create
-    Tensor a = Tensor::Random({5,5},0,1,DataType::INT8);
-    Tensor b = Tensor::Random({5,5},0,1,DataType::INT16);
-    Tensor c = Tensor::Random({5,5},0,1,DataType::INT32);
-    Tensor d = Tensor::Random({5,5},0,1,DataType::INT64);
-    Tensor e = Tensor::Random({5,5},0,1,DataType::FLOAT16);
-    Tensor f = Tensor::Random({5,5},0,1,DataType::BFLOAT16);
-    Tensor g = Tensor::Random({5,5},0,1,DataType::FLOAT32);
-    Tensor h = Tensor::Random({5,5},0,1,DataType::FLOAT64);
+    Tensor a = Tensor::Random({5,5},-10,10,DataType::INT8);
+    Tensor b = Tensor::Random({5,5},-10,10,DataType::INT16);
+    Tensor c = Tensor::Random({5,5},-10,10,DataType::INT32);
+    Tensor d = Tensor::Random({5,5},-10,10,DataType::INT64);
+    Tensor e = Tensor::Random({5,5},-10,10,DataType::FLOAT16);
+    Tensor f = Tensor::Random({5,5},-10,10,DataType::BFLOAT16);
+    Tensor g = Tensor::Random({5,5},-10,10,DataType::FLOAT32);
+    Tensor h = Tensor::Random({5,5},-10,10,DataType::FLOAT64);
 
-    // ops...
-    Tensor i = a + b;
-    Tensor j = c - d;
-    Tensor k = e * f;
-    Tensor l = g / h;
-
-    // println
-    ops::println(i);
-    ops::println(j);
-    ops::println(k);
-    ops::println(l);
+    ops::println(a + b);
+    ops::println(c - d);
+    ops::println(e * f);
+    ops::println(g / h);
     return 0;
 }
 ```
 
 ## 📊 Performance Benchmarks
 
-### Matrix Multiplication (1024x1024)
+### Matrix Multiplication (10x1024x1024 @ 10x1024x1024,fp32)
 
 | Backend | Time (ms) | Speedup |
 |---------|-----------|---------|
-| CPU | 9999 ms | 1.0x |
-| CUDA (RTX xxx) | 9999 ms | 1.0x |
-| SYCL (Intel xxx) | 9999 ms | 1.0x |
-| VULKAN (Intel Arc xxx) | 9999 ms | 1.0x |
+| CPU | 370 ms | 1x |
+| CUDA| 8 ms | 46x |
+| SYCL | 10 ms | 37x |
+| VULKAN | 9999 ms | ?x |
 
 ### todo...
 
@@ -126,7 +119,6 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 
 ## 📞 Support
-
  + 💬 Discussions: GitHub Discussions
 
 ----

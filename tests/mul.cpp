@@ -17,6 +17,7 @@ int main() {
         Tensor a = Tensor::Random({10,1024,1024},-10,10,dtype);
         Tensor b = Tensor::Random({10,1024,1024},-10,10,dtype);
         RUNNING_TIME(ops::Mul(a,b));
+        LOG_INFO("Mul(a,b)");
     }
     return 0;
 }

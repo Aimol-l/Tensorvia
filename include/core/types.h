@@ -5,7 +5,6 @@
 
 // #define BACKEND_CUDA //临时使用
 
-
 template<typename T>
 struct compute_type_helper { using type = T; };
 
@@ -62,9 +61,11 @@ struct compute_type_helper { using type = T; };
   using float64 = std::float64_t;
 #endif
 
+
 template<>
 struct compute_type_helper<float16> { using type = float; };
 template<>
 struct compute_type_helper<bfloat16> { using type = float; };
+
 template<typename T>
 using compute_type_t = typename compute_type_helper<T>::type;

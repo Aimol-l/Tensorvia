@@ -6,22 +6,21 @@
 // 获取所有 DataType 值的函数
 std::vector<DataType> GetAllDataTypes() {
     return {
-        DataType::INT8, DataType::INT16, DataType::INT32,
-        DataType::INT64, DataType::BFLOAT16, DataType::FLOAT16,
-        DataType::FLOAT32, DataType::FLOAT64
+        DataType::INT8, DataType::INT16, DataType::INT32,DataType::INT64,
+        DataType::BFLOAT16, DataType::FLOAT16,DataType::FLOAT32, DataType::FLOAT64
     };
 }
 
-void test(DataType type){
-    Tensor temp = Tensor::Random({3,1000,1000}, 0,10, type);
-    // temp.to_host();
-    // RUNNING_TIME(ops::Softmax(static_cast<const Tensor&>(temp), 0));
-    auto res = ops::Softmax(static_cast<const Tensor&>(temp), 0);
-    ops::println(res);
-}
 int main() {
+    // relu silu tanh sigmoid softmax
     for (auto type : GetAllDataTypes()) {
-        test(type);
+        auto temp = Tensor::Random({700, 700},-10,10,type);
+        ops::println(temp);
+        ops::println(ops::Relu(static_cast<const Tensor&>(temp)));
+        ops::println(ops::Silu(static_cast<const Tensor&>(temp)));
+        ops::println(ops::Sigmoid(static_cast<const Tensor&>(temp)));
+        ops::println(ops::Softmax(static_cast<const Tensor&>(temp),0));
+        LOG_INFO("----------------------------------------------------------------");
     }
     return 0;
 }

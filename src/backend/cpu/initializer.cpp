@@ -17,12 +17,12 @@ inline void fill_value_impl(T* ptr, float val, size_t numel) {
 template <typename T>
 void fill_random_impl(T* typed_ptr, size_t numel, float min, float max) {
 // T* typed_ptr = static_cast<T*>(ptr);
-#pragma omp parallel
+    #pragma omp parallel
     {
         std::mt19937 rng(static_cast<unsigned int>(
-            std::chrono::high_resolution_clock::now().time_since_epoch().count() +
-            omp_get_thread_num() * 9973));
-#pragma omp for
+            std::chrono::high_resolution_clock::now().time_since_epoch().count() + omp_get_thread_num() * 9973)
+        );
+        #pragma omp for
         for (size_t i = 0; i < numel; ++i) {
             if constexpr (std::is_integral_v<T>) {
                 std::uniform_int_distribution<T> dist(static_cast<T>(min), static_cast<T>(max));

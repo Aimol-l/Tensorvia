@@ -86,6 +86,27 @@ Tensor::Tensor(void *ptr, std::initializer_list<int> shape, DataType dtype, Devi
     m_numel = calc_numel(shape_);
     m_impl = create_tensor_impl(ptr,shape_,m_dtype, m_device);
 }
+Tensor::Tensor(void* ptr, std::vector<int> shape,DataType dtype,Device device) {
+    if(shape.size() == 0) throw std::runtime_error("Tensor shape cannot be empty");
+    // 使用默认数据类型 float32 ,使用编译选择的设备
+#ifdef BACKEND_CPU
+    m_device = Device::CPU;
+#endif
+#ifdef BACKEND_CUDA
+    m_device = Device::CUDA;
+#endif
+#ifdef BACKEND_SYCL
+    m_device = Device::SYCL;
+#endif
+#ifdef BACKEND_VULKAN
+    m_device = Device::VULKAN;
+#endif
+    m_dtype = dtype;
+    m_shape = shape;
+    m_numel = calc_numel(shape);
+    m_impl = create_tensor_impl(ptr,shape,m_dtype, m_device);
+}
+
 Tensor::Tensor(std::vector<int> shape, DataType dtype, Device device){
     if(shape.empty()) throw std::runtime_error("Tensor shape cannot be empty");
     m_device = device;
@@ -108,7 +129,7 @@ template <typename T>
 Tensor::Tensor(std::vector<T> &vec, std::initializer_list<int> shape){
     // create a tensor from a vector
     if(vec.empty()) throw std::runtime_error("Cannot create a tensor from an empty vector");
-    // 判断shape是否正确
+
 #ifdef BACKEND_CPU
     m_device = Device::CPU;
 #endif
@@ -125,6 +146,45 @@ Tensor::Tensor(std::vector<T> &vec, std::initializer_list<int> shape){
     if constexpr (std::is_same_v<T, float32>) {
         m_dtype = DataType::FLOAT32;
     } else if constexpr (std::is_same_v<T, float64>) {
+        m_dtype = DataType::FLOAT64;
+    } else if constexpr (std::is_same_v<T, int64_t>) {
+        m_dtype = DataType::INT64;
+    } else if constexpr (std::is_same_v<T, int32_t>) {
+        m_dtype = DataType::INT32;
+    } else if constexpr (std::is_same_v<T, int16_t>) {
+        m_dtype = DataType::INT16;
+    } else if constexpr (std::is_same_v<T, int8_t>) {
+        m_dtype = DataType::INT8;
+    } else if constexpr (std::is_same_v<T, bfloat16>) {
+        m_dtype = DataType::BFLOAT16;
+    }else if constexpr (std::is_same_v<T, float16>) {
+        m_dtype = DataType::FLOAT16;
+    }
+    m_shape = shape;
+    m_numel = calc_numel(shape);
+    m_impl = create_tensor_impl(vec.data(),m_shape,m_dtype, m_device);
+}
+
+template<typename T>
+Tensor::Tensor(std::vector<T>& vec, std::vector<int> shape) {
+    // create a tensor from a vector
+    if(vec.empty()) throw std::runtime_error("Cannot create a tensor from an empty vector");
+#ifdef BACKEND_CPU
+    m_device = Device::CPU;
+#endif
+#ifdef BACKEND_CUDA
+    m_device = Device::CUDA;
+#endif
+#ifdef BACKEND_SYCL
+    m_device = Device::SYCL;
+#endif
+#ifdef BACKEND_VULKAN
+    m_device = Device::VULKAN;
+#endif
+    // 根据T的类型设置m_dtype
+    if constexpr (std::is_same_v<T, float32>) {
+        m_dtype = DataType::FLOAT32;
+    }else if (std::is_same_v<T, float64>) {
         m_dtype = DataType::FLOAT64;
     } else if constexpr (std::is_same_v<T, int64_t>) {
         m_dtype = DataType::INT64;
@@ -605,3 +665,12 @@ template Tensor::Tensor(std::vector<float16> &vec, std::initializer_list<int> sh
 template Tensor::Tensor(std::vector<bfloat16> &vec, std::initializer_list<int> shape);
 template Tensor::Tensor(std::vector<float32>  &vec, std::initializer_list<int> shape);
 template Tensor::Tensor(std::vector<float64>  &vec, std::initializer_list<int> shape);
+
+template Tensor::Tensor(std::vector<int8_t>  &vec, std::vector<int> shape);
+template Tensor::Tensor(std::vector<int16_t> &vec, std::vector<int> shape);
+template Tensor::Tensor(std::vector<int32_t> &vec, std::vector<int> shape);
+template Tensor::Tensor(std::vector<int64_t> &vec, std::vector<int> shape);
+template Tensor::Tensor(std::vector<float16> &vec, std::vector<int> shape);
+template Tensor::Tensor(std::vector<bfloat16> &vec, std::vector<int> shape);
+template Tensor::Tensor(std::vector<float32>  &vec, std::vector<int> shape);
+template Tensor::Tensor(std::vector<float64>  &vec, std::vector<int> shape);

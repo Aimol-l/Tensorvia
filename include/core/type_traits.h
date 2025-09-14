@@ -164,6 +164,14 @@ inline ConstCppDTypeVariant data_as_const_variant(DataType type, const void* src
             throw std::runtime_error("Unsupported dtype for variant");
     }
 }
+// int8*int8 -> int8; int8*int16 -> int16; int8*int32 -> int32;int8*int64 -> int64; int8*float16 -> float16; int8*bfloat16 -> bfloat16; int8*float32 -> float32; int8*float64 -> float64;
+// int16*int16 -> int16; int16*int32 -> int32; int16*int64 -> int64; int16*float16 -> float16; int16*bfloat16 -> bfloat16; int16*float32 -> float32; int16*float64 -> float64;
+// int32*int32 -> int32; int32*int64 -> int64; int32*float16 -> float16; int32*bfloat16 -> bfloat16; int32*float32 -> float32; int32*float64 -> float64;
+// int64*int64 -> int64; int64*float16 -> float64; int64*bfloat16 -> float64; int64*float32 -> float64; int64*float64 -> float64;
+// float16*float16 -> float16; float16*bfloat16 -> float32; float16*float32 -> float32; float16*float64 -> float64;
+// bfloat16*bfloat16 -> bfloat16; bfloat16*float32 -> float32; bfloat16*float64 -> float64;
+// float32*float32 -> float32; float32*float64 -> float64;
+// float64*float64 -> float64;
 inline DataType compute_type(DataType type0, DataType type1){
     if(type0 == type1)      
         return type0;
@@ -172,6 +180,7 @@ inline DataType compute_type(DataType type0, DataType type1){
         return std::max(type0,type1);
     }else if(type0 > DataType::INT64 && type1 > DataType::INT64){
         // 都是浮点数
+        // float16 + float16 = float32; bfloat16 + bfloat16 = float32;
         return std::max(std::max(type0,DataType::FLOAT32),std::max(type1,DataType::FLOAT32));
     }else{
         // 整数 + 浮点数 or 浮点数 + 整数

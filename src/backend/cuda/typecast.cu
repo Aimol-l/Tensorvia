@@ -56,24 +56,23 @@ Tensor TypecastImpl<Device::CUDA>::execute(const Tensor& a, DataType dst_type) {
     };
     // 获取目标数据指针并分发
     Tensor result(a.shape(), dst_type, Device::CUDA); // float32
-    auto dst_data = result.data();
     switch (dst_type) {
         case DataType::INT8:
-            cast_visitor(static_cast<int8_t*>(dst_data));break;
+            cast_visitor(static_cast<int8_t*>(result.data()));break;
         case DataType::INT16:
-            cast_visitor(static_cast<int16_t*>(dst_data));break;
+            cast_visitor(static_cast<int16_t*>(result.data()));break;
         case DataType::INT32:
-            cast_visitor(static_cast<int32_t*>(dst_data));break;
+            cast_visitor(static_cast<int32_t*>(result.data()));break;
         case DataType::INT64:
-            cast_visitor(static_cast<int64_t*>(dst_data));break;
+            cast_visitor(static_cast<int64_t*>(result.data()));break;
         case DataType::FLOAT16:
-            cast_visitor(static_cast<__half*>(dst_data)); break;
+            cast_visitor(static_cast<__half*>(result.data())); break;
         case DataType::BFLOAT16:
-            cast_visitor(static_cast<__nv_bfloat16*>(dst_data));break;
+            cast_visitor(static_cast<__nv_bfloat16*>(result.data()));break;
         case DataType::FLOAT32:
-            cast_visitor(static_cast<float*>(dst_data));break;
+            cast_visitor(static_cast<float*>(result.data()));break;
         case DataType::FLOAT64:
-            cast_visitor(static_cast<double*>(dst_data));break;
+            cast_visitor(static_cast<double*>(result.data()));break;
         default: throw std::runtime_error("Unsupported destination dtype");
     }
     ctx_impl->wait(); // 等待CUDA流完成

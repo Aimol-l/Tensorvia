@@ -51,10 +51,15 @@ public:
     Tensor(std::vector<int> shape,DataType dtype,Device device);
     Tensor(std::initializer_list<int> shape,DataType dtype,Device device);
     // 从外部指针创建张量
+    Tensor(void* ptr, std::vector<int> shape,DataType dtype,Device device);
     Tensor(void* ptr,std::initializer_list<int> shape,DataType dtype,Device device);// 深拷贝ptr的内容
+
     // 从stl容器创建张量,vector
     template<typename T>
     Tensor(std::vector<T>& vec,std::initializer_list<int> shape);
+
+    template<typename T>
+    Tensor(std::vector<T>& vec, std::vector<int> shape);
 
     Tensor& operator=(const Tensor& other); // 拷贝赋值运算符
     Tensor& operator=(Tensor&& other) noexcept;  // 移动赋值运算符

@@ -173,22 +173,21 @@ void AddImpl<Device::CPU>::execute(Tensor& a, float b) {
     std::visit([&](auto ptr_A) {
         using AType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_A)>>;  // const T* --> const T --> T
         add_kernel<AType>(static_cast<AType*>(a.data()), b, a.numel());
-    },
-               A);
+    },A);
 }
 // uninplace
 Tensor AddImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
     // 避免自加修改：a + a 返回新 tensor
-    if (&a == &b)
-        return ops::Add(a.clone(), b.clone());
+    if (&a == &b) return ops::Add(a.clone(), b.clone());
     // 计算公共类别
-    DataType res_type = std::max(a.dtype(), b.dtype());  // 全是int 或 全是 float
-    if (a.dtype() <= DataType::INT64 && b.dtype() > DataType::INT64) {
-        res_type = std::max(b.dtype(), DataType::FLOAT32);
-    } else if (a.dtype() > DataType::INT64 && b.dtype() <= DataType::INT64) {
-        res_type = std::max(a.dtype(), DataType::FLOAT32);
-    }
+    // DataType res_type = std::max(a.dtype(), b.dtype());  // 全是int 或 全是 float
+    // if (a.dtype() <= DataType::INT64 && b.dtype() > DataType::INT64) {
+    //     res_type = std::max(b.dtype(), DataType::FLOAT32);
+    // } else if (a.dtype() > DataType::INT64 && b.dtype() <= DataType::INT64) {
+    //     res_type = std::max(a.dtype(), DataType::FLOAT32);
+    // }
 
+    DataType res_type = compute_type(a.dtype(), b.dtype());
     const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a, res_type);
     const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b, res_type);
 
@@ -265,18 +264,16 @@ void SubImpl<Device::CPU>::execute(Tensor& a, float b) {
 
 Tensor SubImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
     // 避免自修改
-    if (&a == &b)
-        return ops::Sub(a.clone(), b.clone());
-    DataType res_type = std::max(a.dtype(), b.dtype());  // 全是int 或 全是 float
-    if (a.dtype() <= DataType::INT64 && b.dtype() > DataType::INT64) {
-        res_type = std::max(b.dtype(), DataType::FLOAT32);
-    } else if (a.dtype() > DataType::INT64 && b.dtype() <= DataType::INT64) {
-        res_type = std::max(a.dtype(), DataType::FLOAT32);
-    }
-
+    if (&a == &b)   return ops::Sub(a.clone(), b.clone());
+    // DataType res_type = std::max(a.dtype(), b.dtype());  // 全是int 或 全是 float
+    // if (a.dtype() <= DataType::INT64 && b.dtype() > DataType::INT64) {
+    //     res_type = std::max(b.dtype(), DataType::FLOAT32);
+    // } else if (a.dtype() > DataType::INT64 && b.dtype() <= DataType::INT64) {
+    //     res_type = std::max(a.dtype(), DataType::FLOAT32);
+    // }
+    DataType res_type = compute_type(a.dtype(), b.dtype());
     const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a, res_type);
     const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b, res_type);
-
     size_t size = a.numel();
     Tensor result(a.shape(), res_type, Device::CPU);
     switch (res_type) {
@@ -347,15 +344,16 @@ void DotImpl<Device::CPU>::execute(Tensor& a, float b) {
 }
 Tensor DotImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
     // 避免自修改
-    if (&a == &b)
-        return ops::Dot(a.clone(), b.clone());
+    if (&a == &b)   return ops::Dot(a.clone(), b.clone());
 
-    DataType res_type = std::max(a.dtype(), b.dtype());  // 全是int 或 全是 float
-    if (a.dtype() <= DataType::INT64 && b.dtype() > DataType::INT64) {
-        res_type = std::max(b.dtype(), DataType::FLOAT32);
-    } else if (a.dtype() > DataType::INT64 && b.dtype() <= DataType::INT64) {
-        res_type = std::max(a.dtype(), DataType::FLOAT32);
-    }
+    // DataType res_type = std::max(a.dtype(), b.dtype());  // 全是int 或 全是 float
+    // if (a.dtype() <= DataType::INT64 && b.dtype() > DataType::INT64) {
+    //     res_type = std::max(b.dtype(), DataType::FLOAT32);
+    // } else if (a.dtype() > DataType::INT64 && b.dtype() <= DataType::INT64) {
+    //     res_type = std::max(a.dtype(), DataType::FLOAT32);
+    // }
+    
+    DataType res_type = compute_type(a.dtype(), b.dtype());
     const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a, res_type);
     const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b, res_type);
     size_t size = a.numel();

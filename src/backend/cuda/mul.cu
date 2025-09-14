@@ -2,105 +2,125 @@
 
 namespace ops {
 
-// [w,k] @ [k,h] --> [w,h]
-// [b,w,k] @ [b,k,h] --> [b,w,h]
-template<typename T, const int TILE = 16>
-__global__ void mul_cuda_3d(
-    const T* a, const T* b, T* res,
-    size_t batch, size_t w, size_t h, size_t k
-) {
-    // 每个 block 负责 TILE x TILE 的输出区域
+// [cols,k] @ [k,rows] --> [cols,rows]
+// [b,cols,k] @ [b,k,rows] --> [b,cols,rows]
+template <typename T, typename R, typename S, int TILE = 16>
+__global__ void mul_cuda_3d(const T*  a_ptr, const R*  b_ptr, S* __restrict__ res_ptr,size_t batch, size_t cols, size_t rows, size_t k) {
     __shared__ T tile_a[TILE][TILE];
-    __shared__ T tile_b[TILE][TILE];
-    // 全局线程索引
+    __shared__ R tile_b[TILE][TILE];
     int tx = threadIdx.x;
     int ty = threadIdx.y;
-    int bx = blockIdx.x;  // 输出列块
-    int by = blockIdx.y;  // 输出行块
-    int bz = blockIdx.z;  // batch 索引
-    // 当前 block 负责的输出起始位置
-    int row = by * TILE + ty;
+    int bx = blockIdx.x;
+    int by = blockIdx.y;
+    int bz = blockIdx.z;
+    int row = by * TILE + ty; 
     int col = bx * TILE + tx;
-    // 累加器（寄存器）
-    T sum = T(0);
-    // 遍历 k 维度，分块加载
-    for (int tile_idx = 0; tile_idx < (k + TILE - 1) / TILE; ++tile_idx) {
-        // 加载 tile_a: a[b][row][tile_k]
-        int a_k = tile_idx * TILE + tx;
-        if (row < w && a_k < k) {
-            tile_a[ty][tx] = a[bz * w * k + row * k + a_k];
+
+    using PromotedType = decltype(std::declval<compute_type_t<T>>() + std::declval<compute_type_t<R>>());
+
+    PromotedType sum = 0;
+
+    int numTiles = (int)((k + TILE - 1) / TILE);
+    for (int tile_idx = 0; tile_idx < numTiles; ++tile_idx) {
+        int a_k = tile_idx * TILE + tx; // 加载 A 的列索引 (k)
+        if (row < rows && a_k < (int)k) {
+            // A 被视作 [b, rows, k]
+            tile_a[ty][tx] = a_ptr[bz * (size_t)rows * k + (size_t)row * k + a_k];
         } else {
             tile_a[ty][tx] = T(0);
         }
-        // 加载 tile_b: b[b][tile_k][col]
-        int b_k = tile_idx * TILE + ty;
-        if (b_k < k && col < h) {
-            tile_b[ty][tx] = b[bz * k * h + b_k * h + col];
+        int b_k = tile_idx * TILE + ty; // 加载 B 的行索引 (k)
+        if (b_k < (int)k && col < cols) {
+            // B 被视作 [b, k, cols]
+            tile_b[ty][tx] = b_ptr[bz * (size_t)k * cols + (size_t)b_k * cols + col];
         } else {
-            tile_b[ty][tx] = T(0);
+            tile_b[ty][tx] = R(0);
         }
         __syncthreads();
-        // 内层计算：当前 tile 的乘积累加
+        #pragma unroll
         for (int i = 0; i < TILE; ++i) {
-            sum += tile_a[ty][i] * tile_b[i][tx];
+            // 显式 cast 到 accumulator 类型 S（防止 half 等精度问题）
+            sum += static_cast<PromotedType>(tile_a[ty][i]) * static_cast<PromotedType>(tile_b[i][tx]);
         }
         __syncthreads();
     }
-    // 写回结果
-    if (row < w && col < h) {
-        res[bz * w * h + row * w + col] = sum;
+    if (row < rows && col < cols) {
+        res_ptr[bz * (size_t)rows * cols + (size_t)row * cols + col] = static_cast<S>(sum);
     }
 }
 
+// 基本原则：输入的 shape 必须合法。
 Tensor MulImpl<Device::CUDA>::execute(const Tensor& a, const Tensor& b) {
-    // 外界的前置条件已经判定了shape的合法性
-    auto a_shape = a.shape();
-    size_t a_dim = a_shape.size();
-    auto b_shape = b.shape();
-    size_t b_dim = b_shape.size();
-    int batch, w, h, k;
-    std::vector<int> res_shape;
-    if (a_dim == 2) {
-        batch = size_t{1};
-        w = a_shape[0];
-        k = a_shape[1];
-        h = b_shape[1];
-        res_shape = {w, h};
-    } else if (a_dim == 3) {
-        batch = a_shape[0];
-        w = a_shape[1];
-        k = a_shape[2];
-        h = b_shape[2];
-        res_shape = {batch, w, h};
-    } else {
-        throw std::runtime_error("mul: invalid shape");
+    int batch =     a.shape().size() == 3?a.shape(0):1;
+    int rows =      a.shape().size() == 3?a.shape(1):a.shape(0);
+    int common =    a.shape().size() == 3?a.shape(2):a.shape(1);
+    int cols =      a.shape().size() == 3?b.shape(2):b.shape(1);
+    std::vector<int> newshape;
+    if(a.shape().size() == 3){
+        newshape = {batch,rows,cols};
+    }else{
+        newshape = {rows,cols};
     }
+    DataType res_type = compute_type(a.dtype(),b.dtype());
+    Tensor result(newshape, res_type, Device::CUDA);
 
-    DataType res_type;
-    if(a.dtype() > b.dtype()) {
-        res_type = a.dtype();
-    } else {
-        res_type = b.dtype();
-    }
-    
-    Tensor res(res_shape, res_type, Device::CUDA);
-    dim3 threads(16, 16);
-    dim3 blocks((w + threads.x - 1) / threads.x, (h + threads.y - 1) / threads.y, batch);
-    auto src_impl =  std::dynamic_pointer_cast<CUDATensor>(res.get_impl());
+    constexpr int TILE_SZ = 16; // or match template TILE
+    dim3 threads(TILE_SZ, TILE_SZ);
+    dim3 blocks((cols + TILE_SZ - 1) / TILE_SZ,(rows + TILE_SZ - 1) / TILE_SZ,batch );
+
+    auto src_impl =  std::dynamic_pointer_cast<CUDATensor>(result.get_impl());
     auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_impl->context());
-    auto A = data_as_const_variant(a.dtype(), a.data());
-    std::visit([&](auto a_ptr) {
-        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(a_ptr)>>;
-        if constexpr(std::is_same_v<AType, float16>){
-            mul_cuda_3d<__half><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __half*>(a.data()), static_cast<const __half*>(b.data()), static_cast<__half*>(res.data()), batch, w, h, k);
-        }else if constexpr(std::is_same_v<AType, bfloat16>) {
-            mul_cuda_3d<__nv_bfloat16><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()), static_cast<const __nv_bfloat16*>(b.data()), static_cast<__nv_bfloat16*>(res.data()), batch, w, h, k);
-        }else{
-            mul_cuda_3d<AType><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const AType*>(a.data()), static_cast<const AType*>(b.data()), static_cast<AType*>(res.data()), batch, w, h, k);
+
+    auto c_visitor = [&]<typename T, typename R>(const T* a_ptr,const R* b_ptr) {
+        switch (res_type) {
+            case DataType::INT8:
+                mul_cuda_3d<<<blocks,threads,0,ctx_impl->stream()>>>(a_ptr,b_ptr,static_cast<int8_t*>(result.data()), batch, cols, rows, common); break;
+            case DataType::INT16:
+                mul_cuda_3d<<<blocks,threads,0,ctx_impl->stream()>>>(a_ptr,b_ptr,static_cast<int16_t*>(result.data()), batch, cols, rows, common); break;
+            case DataType::INT32:
+                mul_cuda_3d<<<blocks,threads,0,ctx_impl->stream()>>>(a_ptr,b_ptr,static_cast<int32_t*>(result.data()), batch, cols, rows, common); break;
+            case DataType::INT64:
+                mul_cuda_3d<<<blocks,threads,0,ctx_impl->stream()>>>(a_ptr,b_ptr,static_cast<int64_t*>(result.data()), batch, cols, rows, common); break;
+            case DataType::FLOAT16:
+                mul_cuda_3d<<<blocks,threads,0,ctx_impl->stream()>>>(a_ptr,b_ptr,static_cast<__half*>(result.data()), batch, cols, rows, common); break;
+            case DataType::BFLOAT16:
+                mul_cuda_3d<<<blocks,threads,0,ctx_impl->stream()>>>(a_ptr,b_ptr,static_cast<__nv_bfloat16*>(result.data()), batch, cols, rows, common); break;
+            case DataType::FLOAT32:
+                mul_cuda_3d<<<blocks,threads,0,ctx_impl->stream()>>>(a_ptr,b_ptr,static_cast<float*>(result.data()), batch, cols, rows, common); break;
+            case DataType::FLOAT64:
+                mul_cuda_3d<<<blocks,threads,0,ctx_impl->stream()>>>(a_ptr,b_ptr,static_cast<double*>(result.data()), batch, rows, rows, common); break;
+            default: throw std::runtime_error("Unsupported destination dtype");
         }
-    },A);
+    };
+
+    auto A = data_as_const_variant(a.dtype(), a.data());
+    auto B = data_as_const_variant(b.dtype(), b.data());
+
+    std::visit([&](auto a_ptr,auto b_ptr) {
+        using T = std::remove_cv_t<std::remove_pointer_t<decltype(a_ptr)>>;
+        using R = std::remove_cv_t<std::remove_pointer_t<decltype(b_ptr)>>;
+        if constexpr(std::is_same_v<T,float16> && std::is_same_v<R,float16>){
+            c_visitor(static_cast<const __half*>(a.data()),static_cast<const __half*>(b.data()));
+        }else if constexpr(std::is_same_v<T,bfloat16> && std::is_same_v<R,bfloat16>){
+            c_visitor(static_cast<const __nv_bfloat16*>(a.data()),static_cast<const __nv_bfloat16*>(b.data()));
+        }else if constexpr(std::is_same_v<T,float16> && std::is_same_v<R,bfloat16>){
+            c_visitor(static_cast<const __half*>(a.data()),static_cast<const __nv_bfloat16*>(b.data()));
+        }else if constexpr(std::is_same_v<T,bfloat16> && std::is_same_v<R,float16>){
+            c_visitor(static_cast<const __nv_bfloat16*>(a.data()),static_cast<const __half*>(b.data()));
+        }else if constexpr(std::is_same_v<T,float16>){
+            c_visitor(static_cast<const __half*>(a.data()),static_cast<const R*>(b.data()));
+        }else if constexpr(std::is_same_v<R,float16>){
+            c_visitor(static_cast<const T*>(a.data()),static_cast<const __half*>(b.data()));
+        }else if constexpr(std::is_same_v<T,bfloat16>){
+            c_visitor(static_cast<const __nv_bfloat16*>(a.data()),static_cast<const R*>(b.data()));
+        }else if constexpr(std::is_same_v<R,bfloat16>){
+            c_visitor(static_cast<const T*>(a.data()),static_cast<const __nv_bfloat16*>(b.data()));
+        }else{
+            c_visitor(static_cast<const T*>(a.data()),static_cast<const R*>(b.data()));
+        }
+    },A,B);
     ctx_impl->wait();
-    return res;
+    return result;
 }
 
 template struct MulImpl<Device::CUDA>;
