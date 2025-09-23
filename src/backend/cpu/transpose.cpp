@@ -15,13 +15,13 @@ void transpose_kernel(T* src_data, T* copy_data, int rows, int cols, int size) {
 }
 
 template <typename T>
-void transpose_kernel(T* dst_data, T* src_data, const std::vector<int>& axes, std::vector<int> in_strides, std::vector<int> out_strides, size_t size, int dim) {
+void transpose_kernel(T* dst_data, T* src_data, const std::vector<int64_t>& axes, std::vector<int64_t> in_strides, std::vector<int64_t> out_strides, size_t size, int dim) {
 // 并行处理每个元素(使用OpenMP模拟并行)
 #pragma omp parallel for
     for (int i = 0; i < size; ++i) {
         int tmp = i;
-        std::vector<int> coord(dim);        // 存储解码后的多维坐标 (i,j,k, ...)
-        std::vector<int> trans_coord(dim);  // 存储重新排列后的多维坐标 (a,b,c, ...)
+        std::vector<int64_t> coord(dim);        // 存储解码后的多维坐标 (i,j,k, ...)
+        std::vector<int64_t> trans_coord(dim);  // 存储重新排列后的多维坐标 (a,b,c, ...)
         // 解码坐标，将线性索引转换为多维坐标
         for (int d = 0; d < dim; ++d) {
             coord[d] = tmp / in_strides[d];  // 计算当前维度上的坐标
@@ -69,19 +69,19 @@ void TransposeImpl<Device::CPU>::execute(Tensor& a) {
         default:
             throw std::runtime_error("transpose not support this data type");
     }
-    std::vector<int> shape = {a.shape(1), a.shape(0)};
+    std::vector<int64_t> shape = {a.shape(1), a.shape(0)};
     a.reshape(shape);
 }
-Tensor TransposeImpl<Device::CPU>::execute(Tensor& a, std::initializer_list<int> axes) {
+Tensor TransposeImpl<Device::CPU>::execute(Tensor& a, std::initializer_list<int64_t> axes) {
     // 创建结果张量
-    std::vector<int> new_shape;
-    std::vector<int> axes_v(axes);
+    std::vector<int64_t> new_shape;
+    std::vector<int64_t> axes_v(axes);
     for (auto axe : axes) new_shape.push_back(a.shape(axe));
     Tensor result(new_shape, a.dtype(), Device::CPU);
     const int dim = a.shape().size();
     // 计算输入和输出的步长
-    std::vector<int> in_strides(dim);
-    std::vector<int> out_strides(dim);
+    std::vector<int64_t> in_strides(dim);
+    std::vector<int64_t> out_strides(dim);
     in_strides[dim - 1] = 1;
     out_strides[dim - 1] = 1;
     for (int i = dim - 2; i >= 0; --i) {

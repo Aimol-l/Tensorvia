@@ -49,7 +49,7 @@ Tensor SliceImpl<Device::CUDA>::execute(const Tensor& a, const std::vector<std::
     size_t a_dim = a_shape.size();
     const size_t slice_dim = ranges.size();
     // 构建新 shape（切片维度为 [start, end)，非切片维度原样保留）
-    std::vector<int> new_shape;
+    std::vector<int64_t> new_shape;
     new_shape.reserve(a_dim);
     for (size_t i = 0; i < slice_dim; ++i) {
         new_shape.push_back(ranges[i].second - ranges[i].first);
@@ -64,7 +64,7 @@ Tensor SliceImpl<Device::CUDA>::execute(const Tensor& a, const std::vector<std::
 
     // 准备切片起始位置数组
     auto range_dim = ranges.size();
-    std::vector<int> slice_starts(range_dim);
+    std::vector<int64_t> slice_starts(range_dim);
     for (size_t i = 0; i < range_dim; ++i) {
         slice_starts[i] = ranges[i].first;
     }

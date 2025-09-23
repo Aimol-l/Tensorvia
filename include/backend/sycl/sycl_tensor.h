@@ -31,15 +31,15 @@ struct FreeDeleter {
 private:
     size_t m_numel;
     DataType m_dtype;
-    std::vector<int> m_shape;
+    std::vector<int64_t> m_shape;
     std::shared_ptr<SYCLContext> m_context;
     std::unique_ptr<void, FreeDeleter> m_data;
 public:
     ~SYCLTensor(){};
-    SYCLTensor(std::vector<int> shape, DataType dtype,std::shared_ptr<SYCLContext> context);
-    SYCLTensor(void* ptr,std::vector<int> shape, DataType dtype,std::shared_ptr<SYCLContext> context);
+    SYCLTensor(std::vector<int64_t> shape, DataType dtype,std::shared_ptr<SYCLContext> context);
+    SYCLTensor(void* ptr,std::vector<int64_t> shape, DataType dtype,std::shared_ptr<SYCLContext> context);
 
-    void init(void* ptr,std::vector<int> shape, DataType dtype,std::shared_ptr<SYCLContext> context);
+    void init(void* ptr,std::vector<int64_t> shape, DataType dtype,std::shared_ptr<SYCLContext> context);
 
     void* data() override;
     size_t numel() const override;
@@ -47,6 +47,6 @@ public:
     void copy_to(void* dst) const override;           // 同设备
     std::unique_ptr<TensorImpl> clone() const override;
     std::shared_ptr<ContextImpl> context() const override;
-    void reshape(std::vector<int>& newshape)override;
-    void reshape(std::initializer_list<int> newshape)override;
+    void reshape(std::vector<int64_t>& newshape)override;
+    void reshape(std::initializer_list<int64_t> newshape)override;
 };

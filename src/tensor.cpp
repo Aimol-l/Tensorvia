@@ -22,7 +22,7 @@ Tensor::Tensor(){
     m_dtype = DataType::FLOAT32;
     m_impl = nullptr;
 }
-Tensor::Tensor(std::vector<int> shape,DataType dtype = DataType::FLOAT32){
+Tensor::Tensor(std::vector<int64_t> shape,DataType dtype = DataType::FLOAT32){
     if(shape.size() == 0) throw std::runtime_error("Tensor shape cannot be empty");
     // 使用默认数据类型 float32 ,使用编译选择的设备
 #ifdef BACKEND_CPU
@@ -42,10 +42,10 @@ Tensor::Tensor(std::vector<int> shape,DataType dtype = DataType::FLOAT32){
     m_numel = calc_numel(shape);
     m_impl = create_tensor_impl(shape,m_dtype, m_device);
 }
-Tensor::Tensor(std::initializer_list<int> shape,DataType dtype = DataType::FLOAT32){
+Tensor::Tensor(std::initializer_list<int64_t> shape,DataType dtype = DataType::FLOAT32){
     if(shape.size() == 0) throw std::runtime_error("Tensor shape cannot be empty");
 
-    std::vector<int> shape_(shape);
+    std::vector<int64_t> shape_(shape);
     // 使用默认数据类型 float32 ,使用编译选择的设备
 #ifdef BACKEND_CPU
     m_device = Device::CPU;
@@ -64,10 +64,10 @@ Tensor::Tensor(std::initializer_list<int> shape,DataType dtype = DataType::FLOAT
     m_numel = calc_numel(shape_);
     m_impl = create_tensor_impl(shape_,m_dtype, m_device);
 }
-Tensor::Tensor(void *ptr, std::initializer_list<int> shape, DataType dtype, Device device){
+Tensor::Tensor(void *ptr, std::initializer_list<int64_t> shape, DataType dtype, Device device){
     if(shape.size() == 0) throw std::runtime_error("Tensor shape cannot be empty");
 
-    std::vector<int> shape_(shape);
+    std::vector<int64_t> shape_(shape);
     // 使用默认数据类型 float32 ,使用编译选择的设备
 #ifdef BACKEND_CPU
     m_device = Device::CPU;
@@ -86,7 +86,7 @@ Tensor::Tensor(void *ptr, std::initializer_list<int> shape, DataType dtype, Devi
     m_numel = calc_numel(shape_);
     m_impl = create_tensor_impl(ptr,shape_,m_dtype, m_device);
 }
-Tensor::Tensor(void* ptr, std::vector<int> shape,DataType dtype,Device device) {
+Tensor::Tensor(void* ptr, std::vector<int64_t> shape,DataType dtype,Device device) {
     if(shape.size() == 0) throw std::runtime_error("Tensor shape cannot be empty");
     // 使用默认数据类型 float32 ,使用编译选择的设备
 #ifdef BACKEND_CPU
@@ -107,7 +107,7 @@ Tensor::Tensor(void* ptr, std::vector<int> shape,DataType dtype,Device device) {
     m_impl = create_tensor_impl(ptr,shape,m_dtype, m_device);
 }
 
-Tensor::Tensor(std::vector<int> shape, DataType dtype, Device device){
+Tensor::Tensor(std::vector<int64_t> shape, DataType dtype, Device device){
     if(shape.empty()) throw std::runtime_error("Tensor shape cannot be empty");
     m_device = device;
     m_dtype = dtype;
@@ -115,18 +115,18 @@ Tensor::Tensor(std::vector<int> shape, DataType dtype, Device device){
     m_numel = calc_numel(shape);
     m_impl = create_tensor_impl(shape, dtype, device);
 }
-Tensor::Tensor(std::initializer_list<int> shape, DataType dtype, Device device){
+Tensor::Tensor(std::initializer_list<int64_t> shape, DataType dtype, Device device){
     if(shape.size() == 0) throw std::runtime_error("Tensor shape cannot be empty");
     m_device = device;
     m_dtype = dtype;
     m_shape = shape;
 
     m_numel = calc_numel(shape);
-    std::vector<int> shape_(shape);
+    std::vector<int64_t> shape_(shape);
     m_impl = create_tensor_impl(shape_, dtype, device);
 }
 template <typename T>
-Tensor::Tensor(std::vector<T> &vec, std::initializer_list<int> shape){
+Tensor::Tensor(std::vector<T> &vec, std::initializer_list<int64_t> shape){
     // create a tensor from a vector
     if(vec.empty()) throw std::runtime_error("Cannot create a tensor from an empty vector");
 
@@ -166,7 +166,7 @@ Tensor::Tensor(std::vector<T> &vec, std::initializer_list<int> shape){
 }
 
 template<typename T>
-Tensor::Tensor(std::vector<T>& vec, std::vector<int> shape) {
+Tensor::Tensor(std::vector<T>& vec, std::vector<int64_t> shape) {
     // create a tensor from a vector
     if(vec.empty()) throw std::runtime_error("Cannot create a tensor from an empty vector");
 #ifdef BACKEND_CPU
@@ -253,8 +253,8 @@ Tensor& Tensor::operator=(Tensor&& other) noexcept {
 }
 Device Tensor::device()const{return m_device;}
 
-std::vector<int> Tensor::shape() const{return m_shape;}
-void Tensor::reshape(std::vector<int> &newshape){
+std::vector<int64_t> Tensor::shape() const{return m_shape;}
+void Tensor::reshape(std::vector<int64_t> &newshape){
     int old_total = std::accumulate(m_shape.begin(), m_shape.end(), 1, std::multiplies<int>());
     int new_total = std::accumulate(newshape.begin(), newshape.end(), 1, std::multiplies<int>());
     if(old_total != new_total){
@@ -265,7 +265,7 @@ void Tensor::reshape(std::vector<int> &newshape){
     m_shape.assign(newshape.begin(), newshape.end());
     m_impl->reshape(newshape);
 }
-void Tensor::reshape(std::initializer_list<int> newshape){
+void Tensor::reshape(std::initializer_list<int64_t> newshape){
     int old_total = std::accumulate(m_shape.begin(), m_shape.end(), 1, std::multiplies<int>());
     int new_total = std::accumulate(newshape.begin(), newshape.end(), 1, std::multiplies<int>());
     if(old_total != new_total){
@@ -278,12 +278,12 @@ void Tensor::reshape(std::initializer_list<int> newshape){
 size_t Tensor::dims()const{
     return m_shape.size();
 }
-int Tensor::shape(int i)
+int64_t Tensor::shape(int i)
 {
     if(i<0) return m_shape[m_shape.size()+i];
     return m_shape[i];
 }
-int Tensor::shape(int i) const{
+int64_t Tensor::shape(int i) const{
     if(i<0) return m_shape[m_shape.size()+i];
     return m_shape[i];
 }
@@ -409,50 +409,50 @@ Tensor Tensor::operator/(double a) const {
 Tensor Tensor::matmul(const Tensor& other) const {
     return ops::Mul(*this,other);
 }
-Tensor Tensor::Zeros(std::initializer_list<int> shape, DataType dtype){
+Tensor Tensor::Zeros(std::initializer_list<int64_t> shape, DataType dtype){
     if(shape.size() == 0) throw std::runtime_error("Tensor shape cannot be empty");
-    std::vector<int> shape_(shape);
+    std::vector<int64_t> shape_(shape);
     return ops::Zeros(shape_,dtype);
 }
-Tensor Tensor::Zeros(std::vector<int> shape, DataType dtype){
+Tensor Tensor::Zeros(std::vector<int64_t> shape, DataType dtype){
     if(shape.empty()) throw std::runtime_error("Tensor shape cannot be empty");
     return ops::Zeros(shape,dtype);
 }
-Tensor Tensor::Ones(std::initializer_list<int> shape, DataType dtype){
+Tensor Tensor::Ones(std::initializer_list<int64_t> shape, DataType dtype){
     if(shape.size() == 0) throw std::runtime_error("Tensor shape cannot be empty");
-    std::vector<int> shape_(shape);
+    std::vector<int64_t> shape_(shape);
     return ops::Ones(shape_,dtype);
 }
-Tensor Tensor::Ones(std::vector<int> shape, DataType dtype){
+Tensor Tensor::Ones(std::vector<int64_t> shape, DataType dtype){
     if(shape.empty()) throw std::runtime_error("Tensor shape cannot be empty");
     return ops::Ones(shape,dtype);
 }
-Tensor Tensor::Fill(std::initializer_list<int> shape, float value, DataType dtype){
+Tensor Tensor::Fill(std::initializer_list<int64_t> shape, float value, DataType dtype){
     if(shape.size() == 0) throw std::runtime_error("Tensor shape cannot be empty");
-    std::vector<int> shape_(shape);
+    std::vector<int64_t> shape_(shape);
     return ops::Fill(shape_,dtype,value);
 }
-Tensor Tensor::Fill(std::vector<int> shape, float value, DataType dtype){
+Tensor Tensor::Fill(std::vector<int64_t> shape, float value, DataType dtype){
     if(shape.empty()) throw std::runtime_error("Tensor shape cannot be empty");
     return ops::Fill(shape,dtype,value);
 }
-Tensor Tensor::Random(std::initializer_list<int> shape, float min, float max, DataType dtype){
+Tensor Tensor::Random(std::initializer_list<int64_t> shape, float min, float max, DataType dtype){
     if(shape.size() == 0) throw std::runtime_error("Tensor shape cannot be empty");
-    std::vector<int> shape_(shape);
+    std::vector<int64_t> shape_(shape);
     return ops::Random(shape_,dtype,min,max);
 }
-Tensor Tensor::Random(std::vector<int> shape, float min, float max, DataType dtype){
+Tensor Tensor::Random(std::vector<int64_t> shape, float min, float max, DataType dtype){
     if(shape.empty()) throw std::runtime_error("Tensor shape cannot be empty");
     return ops::Random(shape,dtype,min,max);
 }
 
 
 template <typename T>
-T Tensor::at(std::initializer_list<int> idxs)
+T Tensor::at(std::initializer_list<int64_t> idxs)
 {
     if(this->device() != Device::CPU) throw std::runtime_error("Tensor device must be CPU");
     if(idxs.size() != m_shape.size()) throw std::runtime_error("Tensor index size must be equal to tensor shape size");
-    std::vector<int> idxs_(idxs);
+    std::vector<int64_t> idxs_(idxs);
     for(int i =0;i<idxs_.size();i++){
         if(idxs_[i] >= this->shape(i) || idxs_[i] < 0)
             throw std::runtime_error("index out of range");
@@ -479,10 +479,10 @@ T Tensor::at(std::initializer_list<int> idxs)
 }
 
 template <typename T>
-T Tensor::operator[](std::initializer_list<int> idxs){
+T Tensor::operator[](std::initializer_list<int64_t> idxs){
     if(this->device() != Device::CPU) throw std::runtime_error("Tensor device must be CPU");
     if(idxs.size() != m_shape.size()) throw std::runtime_error("Tensor index size must be equal to tensor shape size");
-    std::vector<int> idxs_(idxs);
+    std::vector<int64_t> idxs_(idxs);
     for(int i =0;i<idxs_.size();i++){
         if(idxs_[i] >= this->shape(i) || idxs_[i] < 0)
             throw std::runtime_error("index out of range");
@@ -639,38 +639,38 @@ Tensor Tensor::operator<=(const float val) const{
     return ops::LessEqual(*this,t);
 }
 
-template int8_t Tensor::at<int8_t>(std::initializer_list<int> idxs);
-template int16_t Tensor::at<int16_t>(std::initializer_list<int> idxs);
-template int32_t Tensor::at<int32_t>(std::initializer_list<int> idxs);
-template int64_t Tensor::at<int64_t>(std::initializer_list<int> idxs);
-template float16 Tensor::at<float16>(std::initializer_list<int> idxs);
-template bfloat16 Tensor::at<bfloat16>(std::initializer_list<int> idxs);
-template float32 Tensor::at<float32>(std::initializer_list<int> idxs);
-template float64 Tensor::at<float64>(std::initializer_list<int> idxs);
+template int8_t Tensor::at<int8_t>(std::initializer_list<int64_t> idxs);
+template int16_t Tensor::at<int16_t>(std::initializer_list<int64_t> idxs);
+template int32_t Tensor::at<int32_t>(std::initializer_list<int64_t> idxs);
+template int64_t Tensor::at<int64_t>(std::initializer_list<int64_t> idxs);
+template float16 Tensor::at<float16>(std::initializer_list<int64_t> idxs);
+template bfloat16 Tensor::at<bfloat16>(std::initializer_list<int64_t> idxs);
+template float32 Tensor::at<float32>(std::initializer_list<int64_t> idxs);
+template float64 Tensor::at<float64>(std::initializer_list<int64_t> idxs);
 
-template int8_t Tensor::operator[]<int8_t>(std::initializer_list<int> idxs);
-template int16_t Tensor::operator[]<int16_t>(std::initializer_list<int> idxs);
-template int32_t Tensor::operator[]<int32_t>(std::initializer_list<int> idxs);
-template int64_t Tensor::operator[]<int64_t>(std::initializer_list<int> idxs);
-template float16 Tensor::operator[]<float16>(std::initializer_list<int> idxs);
-template bfloat16 Tensor::operator[]<bfloat16>(std::initializer_list<int> idxs);
-template float32 Tensor::operator[]<float32>(std::initializer_list<int> idxs);
-template float64 Tensor::operator[]<float64>(std::initializer_list<int> idxs);
+template int8_t Tensor::operator[]<int8_t>(std::initializer_list<int64_t> idxs);
+template int16_t Tensor::operator[]<int16_t>(std::initializer_list<int64_t> idxs);
+template int32_t Tensor::operator[]<int32_t>(std::initializer_list<int64_t> idxs);
+template int64_t Tensor::operator[]<int64_t>(std::initializer_list<int64_t> idxs);
+template float16 Tensor::operator[]<float16>(std::initializer_list<int64_t> idxs);
+template bfloat16 Tensor::operator[]<bfloat16>(std::initializer_list<int64_t> idxs);
+template float32 Tensor::operator[]<float32>(std::initializer_list<int64_t> idxs);
+template float64 Tensor::operator[]<float64>(std::initializer_list<int64_t> idxs);
 
-template Tensor::Tensor(std::vector<int8_t>  &vec, std::initializer_list<int> shape);
-template Tensor::Tensor(std::vector<int16_t> &vec, std::initializer_list<int> shape);
-template Tensor::Tensor(std::vector<int32_t> &vec, std::initializer_list<int> shape);
-template Tensor::Tensor(std::vector<int64_t> &vec, std::initializer_list<int> shape);
-template Tensor::Tensor(std::vector<float16> &vec, std::initializer_list<int> shape);
-template Tensor::Tensor(std::vector<bfloat16> &vec, std::initializer_list<int> shape);
-template Tensor::Tensor(std::vector<float32>  &vec, std::initializer_list<int> shape);
-template Tensor::Tensor(std::vector<float64>  &vec, std::initializer_list<int> shape);
+template Tensor::Tensor(std::vector<int8_t>  &vec, std::initializer_list<int64_t> shape);
+template Tensor::Tensor(std::vector<int16_t> &vec, std::initializer_list<int64_t> shape);
+template Tensor::Tensor(std::vector<int32_t> &vec, std::initializer_list<int64_t> shape);
+template Tensor::Tensor(std::vector<int64_t> &vec, std::initializer_list<int64_t> shape);
+template Tensor::Tensor(std::vector<float16> &vec, std::initializer_list<int64_t> shape);
+template Tensor::Tensor(std::vector<bfloat16> &vec, std::initializer_list<int64_t> shape);
+template Tensor::Tensor(std::vector<float32>  &vec, std::initializer_list<int64_t> shape);
+template Tensor::Tensor(std::vector<float64>  &vec, std::initializer_list<int64_t> shape);
 
-template Tensor::Tensor(std::vector<int8_t>  &vec, std::vector<int> shape);
-template Tensor::Tensor(std::vector<int16_t> &vec, std::vector<int> shape);
-template Tensor::Tensor(std::vector<int32_t> &vec, std::vector<int> shape);
-template Tensor::Tensor(std::vector<int64_t> &vec, std::vector<int> shape);
-template Tensor::Tensor(std::vector<float16> &vec, std::vector<int> shape);
-template Tensor::Tensor(std::vector<bfloat16> &vec, std::vector<int> shape);
-template Tensor::Tensor(std::vector<float32>  &vec, std::vector<int> shape);
-template Tensor::Tensor(std::vector<float64>  &vec, std::vector<int> shape);
+template Tensor::Tensor(std::vector<int8_t>  &vec, std::vector<int64_t> shape);
+template Tensor::Tensor(std::vector<int16_t> &vec, std::vector<int64_t> shape);
+template Tensor::Tensor(std::vector<int32_t> &vec, std::vector<int64_t> shape);
+template Tensor::Tensor(std::vector<int64_t> &vec, std::vector<int64_t> shape);
+template Tensor::Tensor(std::vector<float16> &vec, std::vector<int64_t> shape);
+template Tensor::Tensor(std::vector<bfloat16> &vec, std::vector<int64_t> shape);
+template Tensor::Tensor(std::vector<float32>  &vec, std::vector<int64_t> shape);
+template Tensor::Tensor(std::vector<float64>  &vec, std::vector<int64_t> shape);

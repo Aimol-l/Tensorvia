@@ -37,7 +37,7 @@ void fill_random_impl(T* typed_ptr, size_t numel, float min, float max) {
 
 //****************************** 特化 ***********************************
 
-Tensor ZerosImpl<Device::CPU>::execute(const std::vector<int>& shape, DataType dtype) {
+Tensor ZerosImpl<Device::CPU>::execute(const std::vector<int64_t>& shape, DataType dtype) {
     Tensor temp(shape, dtype, Device::CPU);
     void* data_ptr = temp.data();
     size_t numel = temp.numel();
@@ -70,7 +70,7 @@ Tensor ZerosImpl<Device::CPU>::execute(const std::vector<int>& shape, DataType d
     return temp;
 }
 
-Tensor OnesImpl<Device::CPU>::execute(const std::vector<int>& shape, DataType dtype) {
+Tensor OnesImpl<Device::CPU>::execute(const std::vector<int64_t>& shape, DataType dtype) {
     Tensor temp(shape, dtype, Device::CPU);
     void* data_ptr = temp.data();
     size_t numel = temp.numel();
@@ -103,7 +103,7 @@ Tensor OnesImpl<Device::CPU>::execute(const std::vector<int>& shape, DataType dt
     return temp;
 }
 
-Tensor FillImpl<Device::CPU>::execute(const std::vector<int>& shape, DataType dtype, float value) {
+Tensor FillImpl<Device::CPU>::execute(const std::vector<int64_t>& shape, DataType dtype, float value) {
     Tensor temp(shape, dtype, Device::CPU);
     void* data_ptr = temp.data();
     size_t numel = temp.numel();
@@ -136,7 +136,7 @@ Tensor FillImpl<Device::CPU>::execute(const std::vector<int>& shape, DataType dt
     return temp;
 }
 
-Tensor RandomImpl<Device::CPU>::execute(const std::vector<int>& shape, DataType dtype, float min, float max) {
+Tensor RandomImpl<Device::CPU>::execute(const std::vector<int64_t>& shape, DataType dtype, float min, float max) {
     Tensor temp(shape, dtype, Device::CPU);
     void* data_ptr = temp.data();
     size_t numel = temp.numel();

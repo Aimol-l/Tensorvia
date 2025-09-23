@@ -35,7 +35,7 @@ __global__ void fill_random_cuda(T* ptr, curandState* states, size_t numel, floa
     states[i] = localState; // 保存状态
 }
 
-Tensor ZerosImpl<Device::CUDA>::execute(const std::vector<int>& shape, DataType dtype){
+Tensor ZerosImpl<Device::CUDA>::execute(const std::vector<int64_t>& shape, DataType dtype){
     Tensor tmp(shape, dtype, Device::CUDA);
     constexpr size_t threads = 256;
     size_t blocks = (tmp.numel() + threads - 1) / threads;
@@ -55,7 +55,7 @@ Tensor ZerosImpl<Device::CUDA>::execute(const std::vector<int>& shape, DataType 
     ctx_impl->wait();
     return tmp;
 }
-Tensor OnesImpl<Device::CUDA>::execute(const std::vector<int>& shape, DataType dtype){
+Tensor OnesImpl<Device::CUDA>::execute(const std::vector<int64_t>& shape, DataType dtype){
     Tensor tmp(shape, dtype, Device::CUDA);
     constexpr size_t threads = 256;
     size_t blocks = (tmp.numel() + threads - 1) / threads;
@@ -75,7 +75,7 @@ Tensor OnesImpl<Device::CUDA>::execute(const std::vector<int>& shape, DataType d
     ctx_impl->wait();
     return tmp;
 }
-Tensor FillImpl<Device::CUDA>::execute(const std::vector<int>& shape, DataType dtype, float value){
+Tensor FillImpl<Device::CUDA>::execute(const std::vector<int64_t>& shape, DataType dtype, float value){
     Tensor tmp(shape, dtype, Device::CUDA);
     constexpr size_t threads = 256;
     size_t blocks = (tmp.numel() + threads - 1) / threads;
@@ -95,7 +95,7 @@ Tensor FillImpl<Device::CUDA>::execute(const std::vector<int>& shape, DataType d
     ctx_impl->wait();
     return tmp;
 }
-Tensor RandomImpl<Device::CUDA>::execute(const std::vector<int>& shape, DataType dtype,float min,float max){
+Tensor RandomImpl<Device::CUDA>::execute(const std::vector<int64_t>& shape, DataType dtype,float min,float max){
     Tensor tmp(shape, dtype, Device::CUDA);
     auto numel = tmp.numel();
     constexpr size_t threads = 256;

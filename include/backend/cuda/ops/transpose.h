@@ -8,7 +8,7 @@ template <Device D> struct TransposeImpl;
 template <>
 struct TransposeImpl<Device::CUDA>{
     static void execute(Tensor& a);
-    static Tensor execute(Tensor& a, std::initializer_list<int> axes);
+    static Tensor execute(Tensor& a, std::initializer_list<int64_t> axes);
 };
 
 extern template struct TransposeImpl<Device::CUDA>;

@@ -24,7 +24,7 @@ void concat_kernel(Tensor& res, const std::vector<Tensor>& tensors, int dim) {
         const T* pt = static_cast<const T*>(tensors[i].data());
         size_t t_numl = tensors[i].numel();
         auto src_elem_size = calc_dtype_size(tensors[i].dtype());
-        std::vector<int> stride(t_dim, 1);
+        std::vector<int64_t> stride(t_dim, 1);
         for (int k = t_dim - 2; k >= 0; --k)
             stride[k] = stride[k + 1] * t_shape[k + 1];
         for (size_t j = 0; j < t_numl; ++j) {
@@ -48,7 +48,7 @@ Tensor ConcatImpl<Device::CPU>::execute(const std::vector<Tensor>& tensors, int 
     // 确定输出张量的类型，最高精度
     auto res_type = tensors[0].dtype();
     // 计算输出张量的形状
-    std::vector<int> out_shape = tensors[0].shape();
+    std::vector<int64_t> out_shape = tensors[0].shape();
     size_t concat_size = 0;
     for (auto& t : tensors) {
         concat_size += t.shape()[dim];

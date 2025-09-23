@@ -16,15 +16,15 @@ struct FreeDeleter {
 private:
     size_t m_numel;
     DataType m_dtype;
-    std::vector<int> m_shape;
+    std::vector<int64_t> m_shape;
     std::unique_ptr<void, FreeDeleter> m_data;
 
 public:
     ~CPUTensor(){};
 
-    CPUTensor(std::vector<int> shape, DataType dtype);
-    CPUTensor(void* ptr,std::vector<int> shape, DataType dtype);
-    void init(void* ptr,std::vector<int> shape, DataType dtype);
+    CPUTensor(std::vector<int64_t> shape, DataType dtype);
+    CPUTensor(void* ptr,std::vector<int64_t> shape, DataType dtype);
+    void init(void* ptr,std::vector<int64_t> shape, DataType dtype);
     
     void* data() override {return m_data.get(); }
     const void* data() const override{ return m_data.get();}
@@ -32,7 +32,7 @@ public:
     void copy_to(void* dst) const override;           // 同设备
     std::unique_ptr<TensorImpl> clone() const override;
     std::shared_ptr<ContextImpl> context() const override;
-    void reshape(std::vector<int>& newshape)override;
-    void reshape(std::initializer_list<int> newshape)override;
+    void reshape(std::vector<int64_t>& newshape)override;
+    void reshape(std::initializer_list<int64_t> newshape)override;
 
 };

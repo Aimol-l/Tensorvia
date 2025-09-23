@@ -33,16 +33,16 @@ private:
 private:
     size_t m_numel;
     DataType m_dtype;
-    std::vector<int> m_shape;
+    std::vector<int64_t> m_shape;
     std::shared_ptr<CUDAContext> m_context;
     std::unique_ptr<void, FreeDeleter> m_data;
 
 public:
     ~CUDATensor() = default;
-    CUDATensor(std::vector<int> shape, DataType dtype, std::shared_ptr<CUDAContext> context);
-    CUDATensor(void* ptr, std::vector<int> shape, DataType dtype, std::shared_ptr<CUDAContext> context);
+    CUDATensor(std::vector<int64_t> shape, DataType dtype, std::shared_ptr<CUDAContext> context);
+    CUDATensor(void* ptr, std::vector<int64_t> shape, DataType dtype, std::shared_ptr<CUDAContext> context);
     
-    void init(void* ptr, std::vector<int> shape, DataType dtype, std::shared_ptr<CUDAContext> context);
+    void init(void* ptr, std::vector<int64_t> shape, DataType dtype, std::shared_ptr<CUDAContext> context);
 
     void* data() override {return m_data.get(); }
     const void* data() const override{ return m_data.get();}
@@ -51,6 +51,6 @@ public:
     void copy_to(void* dst) const override;
     std::unique_ptr<TensorImpl> clone() const override;
     std::shared_ptr<ContextImpl> context() const override;
-    void reshape(std::vector<int>& newshape) override;
-    void reshape(std::initializer_list<int> newshape) override;
+    void reshape(std::vector<int64_t>& newshape) override;
+    void reshape(std::initializer_list<int64_t> newshape) override;
 };

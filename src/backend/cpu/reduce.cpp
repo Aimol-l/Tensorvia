@@ -270,7 +270,7 @@ float SumImpl<Device::CPU>::execute(const Tensor& a) {
 }
 
 Tensor SumImpl<Device::CPU>::execute(const Tensor& a, int axis) {
-    std::vector<int> new_shape;
+    std::vector<int64_t> new_shape;
     for (int i = 0; i < a.shape().size(); ++i) {
         if (i != axis)  new_shape.push_back(a.shape(i));
     }
@@ -313,7 +313,7 @@ float MinImpl<Device::CPU>::execute(const Tensor& a) {
 }
 
 Tensor MinImpl<Device::CPU>::execute(const Tensor& a, int axis) {
-    std::vector<int> new_shape;
+    std::vector<int64_t> new_shape;
     for (int i = 0; i < a.shape().size(); ++i) {
         if (i != axis)  new_shape.push_back(a.shape(i));
     }
@@ -356,7 +356,7 @@ float MaxImpl<Device::CPU>::execute(const Tensor& a) {
 }
 
 Tensor MaxImpl<Device::CPU>::execute(const Tensor& a, int axis) {
-    std::vector<int> new_shape;
+    std::vector<int64_t> new_shape;
     for (int i = 0; i < a.shape().size(); ++i) {
         if (i != axis)  new_shape.push_back(a.shape(i));
     }
@@ -398,7 +398,7 @@ float MeanImpl<Device::CPU>::execute(const Tensor& a) {
     }
 }
 Tensor MeanImpl<Device::CPU>::execute(const Tensor& a, int axis) {
-    std::vector<int> new_shape;
+    std::vector<int64_t> new_shape;
     for (int i = 0; i < a.shape().size(); ++i) {
         if (i != axis)  new_shape.push_back(a.shape(i));
     }
@@ -430,7 +430,7 @@ Tensor ArgMaxImpl<Device::CPU>::execute(const Tensor &a, int axis){
     // 移除 a.shape(axis) 所在的轴
     auto a_shape = a.shape();
     int dim = a_shape.size();
-    std::vector<int> new_shape;
+    std::vector<int64_t> new_shape;
     for (int i = 0; i < a.shape().size(); i++) {
         if (i != axis)  new_shape.push_back(a.shape(i));
     }
@@ -456,7 +456,7 @@ Tensor ArgMaxImpl<Device::CPU>::execute(const Tensor &a, int axis){
     return result;
 }
 Tensor ArgMinImpl<Device::CPU>::execute(const Tensor &a, int axis) {
-    std::vector<int> new_shape;
+    std::vector<int64_t> new_shape;
     for (int i = 0; i < a.shape().size(); ++i) {
         if (i != axis)  new_shape.push_back(a.shape(i));
     }

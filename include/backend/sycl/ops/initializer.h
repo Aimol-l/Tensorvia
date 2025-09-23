@@ -29,22 +29,22 @@ struct RandomImpl;
 
 template <>
 struct ZerosImpl<Device::SYCL> {
-    static Tensor execute(const std::vector<int>& shape, DataType dtype);
+    static Tensor execute(const std::vector<int64_t>& shape, DataType dtype);
 };
 
 template <>
 struct OnesImpl<Device::SYCL> {
-    static Tensor execute(const std::vector<int>& shape, DataType dtype);
+    static Tensor execute(const std::vector<int64_t>& shape, DataType dtype);
 };
 
 template <>
 struct FillImpl<Device::SYCL> {
-    static Tensor execute(const std::vector<int>& shape, DataType dtype, float value);
+    static Tensor execute(const std::vector<int64_t>& shape, DataType dtype, float value);
 };
 
 template <>
 struct RandomImpl<Device::SYCL> {
-    static Tensor execute(const std::vector<int>& shape, DataType dtype, double min, double max);
+    static Tensor execute(const std::vector<int64_t>& shape, DataType dtype, double min, double max);
 };
 
 extern template struct ZerosImpl<Device::SYCL>;

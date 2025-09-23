@@ -24,7 +24,7 @@ namespace ops {
     }
     
     template <typename T>
-    void transpose_sycl(Tensor& result,Tensor& a,std::vector<int> axes,sycl::queue& q) {
+    void transpose_sycl(Tensor& result,Tensor& a,std::vector<int64_t> axes,sycl::queue& q) {
         int dim = a.shape().size();
         T* src_data = static_cast<T*>(a.data());
         T* dst_data = static_cast<T*>(result.data());
@@ -85,14 +85,14 @@ namespace ops {
             case DataType::FLOAT64: transpose_sycl<float64>(a, q); break;
             case DataType::BFLOAT16:transpose_sycl<bfloat16>(a, q); break;
         }
-        std::vector<int> shape = {a.shape(1),a.shape(0)};
+        std::vector<int64_t> shape = {a.shape(1),a.shape(0)};
         a.reshape(shape);
 
     }
-     Tensor TransposeImpl<Device::SYCL>::execute(Tensor& a,std::initializer_list<int> axes){
+     Tensor TransposeImpl<Device::SYCL>::execute(Tensor& a,std::initializer_list<int64_t> axes){
         // 创建结果张量
-        std::vector<int> new_shape;
-        std::vector<int> axes_v(axes);
+        std::vector<int64_t> new_shape;
+        std::vector<int64_t> axes_v(axes);
         for(auto axe:axes)  new_shape.push_back(a.shape(axe));
         Tensor result(new_shape,a.dtype(),Device::SYCL);
         auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());

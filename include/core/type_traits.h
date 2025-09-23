@@ -195,7 +195,7 @@ inline bool is_cast_valid(DataType src, DataType dst) {
     return src == dst || valid_casts.contains({src, dst});
 }
 // 返回元素个数
-inline size_t calc_numel(const std::vector<int>& shape) {
+inline size_t calc_numel(const std::vector<int64_t>& shape) {
     size_t numel = 1;
     for (int dim : shape) {
         if (dim <= 0) throw std::runtime_error("Invalid tensor dimension");
@@ -205,7 +205,7 @@ inline size_t calc_numel(const std::vector<int>& shape) {
 }
 
 // 返回每一维的字节 stride（从最内层维度开始是 dtype size）
-inline std::vector<size_t> calc_strides(const std::vector<int>& shape, DataType dtype) {
+inline std::vector<size_t> calc_strides(const std::vector<int64_t>& shape, DataType dtype) {
     std::vector<size_t> strides(shape.size());
     size_t stride = calc_dtype_size(dtype);
     for (int i = static_cast<int>(shape.size()) - 1; i >= 0; --i) {

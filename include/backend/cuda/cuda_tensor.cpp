@@ -5,7 +5,7 @@
 #include <numeric>
 
 
-void CUDATensor::init(void* ptr, std::vector<int> shape, DataType dtype, std::shared_ptr<CUDAContext> context) {
+void CUDATensor::init(void* ptr, std::vector<int64_t> shape, DataType dtype, std::shared_ptr<CUDAContext> context) {
     m_shape = std::move(shape);
     m_dtype = dtype;
     m_context = context;
@@ -28,12 +28,12 @@ void CUDATensor::init(void* ptr, std::vector<int> shape, DataType dtype, std::sh
     m_data.reset(allocated_ptr);
 }
 
-CUDATensor::CUDATensor(std::vector<int> shape, DataType dtype, std::shared_ptr<CUDAContext> context):
+CUDATensor::CUDATensor(std::vector<int64_t> shape, DataType dtype, std::shared_ptr<CUDAContext> context):
     m_data(nullptr,FreeDeleter(dtype)){
     this->init(nullptr, shape, dtype, context);
 }
 
-CUDATensor::CUDATensor(void* ptr, std::vector<int> shape, DataType dtype, std::shared_ptr<CUDAContext> context):
+CUDATensor::CUDATensor(void* ptr, std::vector<int64_t> shape, DataType dtype, std::shared_ptr<CUDAContext> context):
     m_data(nullptr,FreeDeleter(dtype)){
     this->init(nullptr, shape, dtype, context);
 }
@@ -59,11 +59,11 @@ void CUDATensor::copy_to(void* dst) const {
 std::shared_ptr<ContextImpl> CUDATensor::context() const{
     return m_context;
 }
-void CUDATensor::reshape(std::vector<int>& newshape) {
+void CUDATensor::reshape(std::vector<int64_t>& newshape) {
     m_shape.clear();
     m_shape.assign(newshape.begin(), newshape.end());
 }
-void CUDATensor::reshape(std::initializer_list<int> newshape) {
+void CUDATensor::reshape(std::initializer_list<int64_t> newshape) {
     m_shape.clear();
     m_shape.assign(newshape.begin(), newshape.end());
 }

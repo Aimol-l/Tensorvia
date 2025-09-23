@@ -14,7 +14,7 @@ concept BFloat16Type = std::is_same_v<T, bfloat16>;
 
 template <typename T>
 inline void _println(const Tensor& a) {
-    const std::vector<int>& shape = a.shape();
+    const std::vector<int64_t>& shape = a.shape();
     if (shape.empty()) {
         std::cout << "[ ]\n";
         return;

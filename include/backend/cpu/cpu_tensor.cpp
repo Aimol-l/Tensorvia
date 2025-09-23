@@ -5,12 +5,12 @@ size_t CPUTensor::numel() const{return m_numel;}
 std::shared_ptr<ContextImpl> CPUTensor::context() const{
     return nullptr;
 }
-void CPUTensor::reshape(std::vector<int> &newshape){
+void CPUTensor::reshape(std::vector<int64_t> &newshape){
     m_shape.clear();
     m_shape.assign(newshape.begin(), newshape.end());
 }
 
-void CPUTensor::init(void *ptr, std::vector<int> shape, DataType dtype){
+void CPUTensor::init(void *ptr, std::vector<int64_t> shape, DataType dtype){
     m_dtype = dtype;
     m_numel = calc_numel(shape);
     m_shape = shape;
@@ -21,14 +21,14 @@ void CPUTensor::init(void *ptr, std::vector<int> shape, DataType dtype){
     if(ptr != nullptr) std::memcpy(raw_ptr,ptr,total_bytes);
     m_data.reset(raw_ptr);
 }
-void CPUTensor::reshape(std::initializer_list<int> newshape){
+void CPUTensor::reshape(std::initializer_list<int64_t> newshape){
     m_shape.clear();
     m_shape.assign(newshape.begin(), newshape.end());
 }
-CPUTensor::CPUTensor(std::vector<int> shape, DataType dtype){
+CPUTensor::CPUTensor(std::vector<int64_t> shape, DataType dtype){
     this->init(nullptr,shape,dtype);
 }
-CPUTensor::CPUTensor(void *ptr, std::vector<int> shape, DataType dtype){
+CPUTensor::CPUTensor(void *ptr, std::vector<int64_t> shape, DataType dtype){
     this->init(ptr,shape,dtype);
 }
 

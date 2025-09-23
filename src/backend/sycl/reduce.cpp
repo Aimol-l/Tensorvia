@@ -459,7 +459,7 @@ Tensor SumImpl<Device::SYCL>::execute(const Tensor& a,int axis){
     auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
     auto& q = ctx_impl->get_queue();
     // 移除 a.shape(axis) 所在的轴
-    std::vector<int> new_shape;
+    std::vector<int64_t> new_shape;
     for (int i = 0; i < a.shape().size(); i++) {
         if (i != axis)  new_shape.push_back(a.shape(i));
     }
@@ -501,7 +501,7 @@ Tensor MeanImpl<Device::SYCL>::execute(const Tensor& a,int axis){
     auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
     auto& q = ctx_impl->get_queue();
     // 移除 a.shape(axis) 所在的轴
-    std::vector<int> new_shape;
+    std::vector<int64_t> new_shape;
     for (int i = 0; i < a.shape().size(); i++) {
         if (i != axis)  new_shape.push_back(a.shape(i));
     }
@@ -540,7 +540,7 @@ Tensor MinImpl<Device::SYCL>::execute(const Tensor& a,int axis){
     auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
     auto& q = ctx_impl->get_queue();
     // 移除 a.shape(axis) 所在的轴
-    std::vector<int> new_shape;
+    std::vector<int64_t> new_shape;
     for (int i = 0; i < a.shape().size(); i++) {
         if (i != axis)  new_shape.push_back(a.shape(i));
     }
@@ -579,7 +579,7 @@ Tensor MaxImpl<Device::SYCL>::execute(const Tensor& a,int axis){
     auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
     auto& q = ctx_impl->get_queue();
     // 移除 a.shape(axis) 所在的轴
-    std::vector<int> new_shape;
+    std::vector<int64_t> new_shape;
     for (int i = 0; i < a.shape().size(); i++) {
         if (i != axis)  new_shape.push_back(a.shape(i));
     }
@@ -603,7 +603,7 @@ Tensor ArgMaxImpl<Device::SYCL>::execute(const Tensor &a, int axis){
     auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
     auto& q = ctx_impl->get_queue();
     // 移除 a.shape(axis) 所在的轴
-    std::vector<int> new_shape;
+    std::vector<int64_t> new_shape;
     for (int i = 0; i < a.shape().size(); i++) {
         if (i != axis)  new_shape.push_back(a.shape(i));
     }
@@ -626,7 +626,7 @@ Tensor ArgMinImpl<Device::SYCL>::execute(const Tensor &a, int axis) {
     auto src_impl = std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
     auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
     auto& q = ctx_impl->get_queue();
-    std::vector<int> new_shape;
+    std::vector<int64_t> new_shape;
     for (int i = 0; i < a.shape().size(); ++i) {
         if (i != axis)  new_shape.push_back(a.shape(i));
     }

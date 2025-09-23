@@ -71,7 +71,7 @@ Tensor ConcatImpl<Device::CUDA>::execute(const std::vector<Tensor>& tensors, int
     // 确定输出张量的类型，最高精度
     auto res_type = tensors[0].dtype();
     // 计算输出张量的形状
-    std::vector<int> out_shape = tensors[0].shape();
+    std::vector<int64_t> out_shape = tensors[0].shape();
     size_t concat_size = 0;
     for (auto& t : tensors) {
         concat_size += t.shape()[dim];
@@ -99,20 +99,20 @@ Tensor ConcatImpl<Device::CUDA>::execute(const std::vector<Tensor>& tensors, int
     size_t t_dim = tensors[0].shape().size();
 
     // 计算输出张量的坐标权重（步长）
-    std::vector<int> res_coord_weight(t_dim, 1);
+    std::vector<int64_t> res_coord_weight(t_dim, 1);
     for (int i = t_dim - 2; i >= 0; --i) {
         res_coord_weight[i] = res_coord_weight[i + 1] * out_shape[i + 1];
     }
 
     // 计算每个输入张量的偏移量
-    std::vector<int> offsets(num_tensor, 0);
+    std::vector<int64_t> offsets(num_tensor, 0);
     for (int i = 1; i < num_tensor; ++i) {
         offsets[i] = offsets[i - 1] + tensors[i - 1].shape()[dim];
     }
 
     // 预计算每个输入张量的步长和元素数量
-    std::vector<int> all_strides;
-    std::vector<int> all_shapes;
+    std::vector<int64_t> all_strides;
+    std::vector<int64_t> all_shapes;
     std::vector<size_t> all_numels;
     std::vector<const void*> input_ptrs;
     
@@ -128,7 +128,7 @@ Tensor ConcatImpl<Device::CUDA>::execute(const std::vector<Tensor>& tensors, int
         input_ptrs.push_back(tensors[i].data());
         
         // 计算当前张量的步长
-        std::vector<int> stride(t_dim, 1);
+        std::vector<int64_t> stride(t_dim, 1);
         for (int k = t_dim - 2; k >= 0; --k) {
             stride[k] = stride[k + 1] * t_shape[k + 1];
         }

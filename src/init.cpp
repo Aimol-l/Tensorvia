@@ -5,7 +5,7 @@
 #ifdef BACKEND_CPU
 struct CPURegistrar {
     CPURegistrar() {
-        register_tensor_impl(Device::CPU, [](void* ptr,std::vector<int> shape, DataType dtype) {
+        register_tensor_impl(Device::CPU, [](void* ptr,std::vector<int64_t> shape, DataType dtype) {
             return std::make_shared<CPUTensor>(ptr,shape, dtype);
         });
     }
@@ -18,14 +18,14 @@ struct CPURegistrar {
 struct CUDARegistrar {
     std::shared_ptr<CUDAContext> ctx =  std::make_shared<CUDAContext>();
     CUDARegistrar() {
-        register_tensor_impl(Device::CUDA, [&](void* ptr,std::vector<int> shape, DataType dtype) {
+        register_tensor_impl(Device::CUDA, [&](void* ptr,std::vector<int64_t> shape, DataType dtype) {
             return std::make_shared<CUDATensor>(ptr,shape, dtype,ctx);
         });
     }
 }cuda_registrar;
 struct CPURegistrar {
     CPURegistrar() {
-        register_tensor_impl(Device::CPU, [](void* ptr,std::vector<int> shape, DataType dtype) {
+        register_tensor_impl(Device::CPU, [](void* ptr,std::vector<int64_t> shape, DataType dtype) {
             return std::make_shared<CPUTensor>(ptr,shape, dtype);
         });
     }
@@ -38,14 +38,14 @@ struct CPURegistrar {
 struct SYCLRegistrar {
     std::shared_ptr<SYCLContext> ctx =  std::make_shared<SYCLContext>();
     SYCLRegistrar() {
-        register_tensor_impl(Device::SYCL, [&](void* ptr,std::vector<int> shape, DataType dtype) {
+        register_tensor_impl(Device::SYCL, [&](void* ptr,std::vector<int64_t> shape, DataType dtype) {
             return std::make_shared<SYCLTensor>(ptr,shape, dtype,ctx);
         });
     }
 } sycl_registrar;
 struct CPURegistrar {
     CPURegistrar() {
-        register_tensor_impl(Device::CPU, [](void* ptr,std::vector<int> shape, DataType dtype) {
+        register_tensor_impl(Device::CPU, [](void* ptr,std::vector<int64_t> shape, DataType dtype) {
             return std::make_shared<CPUTensor>(ptr,shape, dtype);
         });
     }

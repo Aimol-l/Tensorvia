@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <type_traits>
 
-// #define BACKEND_CUDA //临时使用
+// #define BACKEND_CPU //临时使用
 
 template<typename T>
 struct compute_type_helper { using type = T; };

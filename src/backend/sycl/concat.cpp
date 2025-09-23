@@ -33,7 +33,7 @@ Tensor ConcatImpl<Device::SYCL>::execute(const std::vector<Tensor> &tensors, int
         DataType dtype = tensors[0].dtype();
         Device device = tensors[0].device();
         // 2. 计算输出张量的形状
-        std::vector<int> output_shape = first_shape;
+        std::vector<int64_t> output_shape = first_shape;
         output_shape[dim] = 0;
         for (const auto& t : tensors) {
             output_shape[dim] += t.shape()[dim];

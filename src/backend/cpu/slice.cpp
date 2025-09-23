@@ -21,7 +21,7 @@ void slice_kernel(Tensor& out, const Tensor& in, const std::vector<std::pair<int
     const T* src_data = static_cast<const T*>(in.data());
     T* dest_data = static_cast<T*>(out.data());
     // 准备一个临时 index 缓冲区
-    std::vector<int> indices(new_shape.size(), 0);
+    std::vector<int64_t> indices(new_shape.size(), 0);
     const size_t total_elem = out.numel();
     for (size_t linear_idx = 0; linear_idx < total_elem; ++linear_idx) {
         // 将线性 idx 展开成多维坐标
@@ -45,7 +45,7 @@ Tensor SliceImpl<Device::CPU>::execute(const Tensor& t, const std::vector<std::p
     const size_t t_dim = t_shape.size();
     const size_t slice_dim = ranges.size();
     // 构建新 shape（切片维度为 [start, end)，非切片维度原样保留）
-    std::vector<int> new_shape;
+    std::vector<int64_t> new_shape;
     new_shape.reserve(t_dim);
     for (size_t i = 0; i < slice_dim; ++i) {
         new_shape.push_back(ranges[i].second - ranges[i].first);
@@ -92,7 +92,7 @@ Tensor SliceImpl<Device::CPU>::execute(const Tensor& t, const std::vector<std::p
 //     const size_t t_dim = t_shape.size();
 //     const size_t slice_dim = ranges.size();
 //     // 1. 构建输出 shape
-//     std::vector<int> new_shape;
+//     std::vector<int64_t> new_shape;
 //     new_shape.reserve(t_dim);
 //     for (size_t i = 0; i < slice_dim; ++i)
 //         new_shape.push_back(ranges[i].second - ranges[i].first);
@@ -104,7 +104,7 @@ Tensor SliceImpl<Device::CPU>::execute(const Tensor& t, const std::vector<std::p
 //     for (int i = static_cast<int>(t_dim) - 2; i >= 0; --i)
 //         strides[i] = strides[i + 1] * t_shape[i + 1];
 //     // 3. 预先计算右开起始值
-//     std::vector<int> starts;
+//     std::vector<int64_t> starts;
 //     starts.reserve(slice_dim);
 //     for (const auto& [start, _] : ranges)
 //         starts.push_back(start);
@@ -118,7 +118,7 @@ Tensor SliceImpl<Device::CPU>::execute(const Tensor& t, const std::vector<std::p
 //         out_strides[i] = out_strides[i + 1] * out_shape[i + 1];
 //     // 5. 避免动态分配 indices，使用 stack 分配（性能好）
 //     const size_t total = res.numel();
-//     std::vector<int> coord(out_shape.size());
+//     std::vector<int64_t> coord(out_shape.size());
 //     for (size_t linear_idx = 0; linear_idx < total; ++linear_idx) {
 //         // 解码线性索引为多维坐标
 //         size_t tmp = linear_idx;

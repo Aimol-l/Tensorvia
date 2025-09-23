@@ -2,7 +2,7 @@
 #include "context.h"
 #include "core/factory.h"
 
-// using TensorImplFactory = std::function<std::shared_ptr<TensorImpl>(void* ptr,std::vector<int> shape, DataType)>;
+// using TensorImplFactory = std::function<std::shared_ptr<TensorImpl>(void* ptr,std::vector<int64_t> shape, DataType)>;
 // static std::unordered_map<Device, TensorImplFactory> factories;
 
 void register_tensor_impl(Device device, TensorImplFactory factory) {
@@ -19,7 +19,7 @@ void register_tensor_impl(Device device, TensorImplFactory factory) {
     }
     factories[device] = std::move(factory);
 }
-std::shared_ptr<TensorImpl> create_tensor_impl(std::vector<int> shape, DataType dtype, Device device) {
+std::shared_ptr<TensorImpl> create_tensor_impl(std::vector<int64_t> shape, DataType dtype, Device device) {
     auto it = factories.find(device);
 
     // shape必须存在元素,且都大于0
@@ -32,7 +32,7 @@ std::shared_ptr<TensorImpl> create_tensor_impl(std::vector<int> shape, DataType 
     }
     return it->second(nullptr,shape, dtype);
 }
-std::shared_ptr<TensorImpl> create_tensor_impl(void*ptr,std::vector<int> shape, DataType dtype, Device device) {
+std::shared_ptr<TensorImpl> create_tensor_impl(void*ptr,std::vector<int64_t> shape, DataType dtype, Device device) {
     if (ptr == nullptr) 
         throw std::runtime_error("create_tensor_impl: ptr is null");
     auto it = factories.find(device);

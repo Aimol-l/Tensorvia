@@ -2,7 +2,7 @@
 #include "core/types.h"
 #include <print>
 
-void SYCLTensor::init(void *ptr, std::vector<int> shape, DataType dtype, std::shared_ptr<SYCLContext> context){
+void SYCLTensor::init(void *ptr, std::vector<int64_t> shape, DataType dtype, std::shared_ptr<SYCLContext> context){
     m_dtype = dtype;
     m_shape = shape;
     m_numel = calc_numel(shape);
@@ -27,12 +27,12 @@ void SYCLTensor::init(void *ptr, std::vector<int> shape, DataType dtype, std::sh
     m_data.reset(allocated_ptr);
 }
 
-SYCLTensor::SYCLTensor(std::vector<int> shape, DataType dtype,std::shared_ptr<SYCLContext> context):
+SYCLTensor::SYCLTensor(std::vector<int64_t> shape, DataType dtype,std::shared_ptr<SYCLContext> context):
     m_data(nullptr,FreeDeleter(context->get_queue(), dtype)){
     // LOG_INFO("Create SYCL tensor");
     this->init(nullptr, shape, dtype, context);
 }
-SYCLTensor::SYCLTensor(void *ptr, std::vector<int> shape, DataType dtype, std::shared_ptr<SYCLContext> context):
+SYCLTensor::SYCLTensor(void *ptr, std::vector<int64_t> shape, DataType dtype, std::shared_ptr<SYCLContext> context):
     m_data(nullptr,FreeDeleter(context->get_queue(), dtype))
 {
     // LOG_INFO("Create SYCL tensor from raw pointer");
@@ -70,11 +70,11 @@ void* SYCLTensor::data() { return m_data.get(); }
 const void* SYCLTensor::data() const  { return m_data.get();}
 size_t SYCLTensor::numel() const  { return m_numel; }
 
-void SYCLTensor::reshape(std::vector<int> &newshape){
+void SYCLTensor::reshape(std::vector<int64_t> &newshape){
     m_shape.clear();
     m_shape.assign(newshape.begin(), newshape.end());
 }
-void SYCLTensor::reshape(std::initializer_list<int> newshape){
+void SYCLTensor::reshape(std::initializer_list<int64_t> newshape){
     m_shape.clear();
     m_shape.assign(newshape.begin(), newshape.end());
 }

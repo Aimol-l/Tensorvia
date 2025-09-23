@@ -30,7 +30,7 @@ void fill_random_sycl(T* data_ptr, size_t numel, float min, float max, sycl::que
 }
 
 
-Tensor ZerosImpl<Device::SYCL>::execute(const std::vector<int>& shape, DataType dtype){
+Tensor ZerosImpl<Device::SYCL>::execute(const std::vector<int64_t>& shape, DataType dtype){
         Tensor temp(shape, dtype, Device::SYCL);
         size_t numel = temp.numel();
         auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(temp.get_impl()->context());
@@ -49,7 +49,7 @@ Tensor ZerosImpl<Device::SYCL>::execute(const std::vector<int>& shape, DataType 
     }
 
 
-Tensor OnesImpl<Device::SYCL>::execute(const std::vector<int>& shape, DataType dtype){
+Tensor OnesImpl<Device::SYCL>::execute(const std::vector<int64_t>& shape, DataType dtype){
         Tensor temp(shape, dtype, Device::SYCL);
         size_t numel = temp.numel();
         auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(temp.get_impl()->context());
@@ -67,7 +67,7 @@ Tensor OnesImpl<Device::SYCL>::execute(const std::vector<int>& shape, DataType d
         return  temp;
     }
 
- Tensor FillImpl<Device::SYCL>::execute(const std::vector<int>& shape, DataType dtype, float value){
+ Tensor FillImpl<Device::SYCL>::execute(const std::vector<int64_t>& shape, DataType dtype, float value){
         Tensor temp(shape, dtype, Device::SYCL);
         size_t numel = temp.numel();
         auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(temp.get_impl()->context());
@@ -86,7 +86,7 @@ Tensor OnesImpl<Device::SYCL>::execute(const std::vector<int>& shape, DataType d
     }
 
 
-Tensor RandomImpl<Device::SYCL>::execute(const std::vector<int>& shape, DataType dtype,double min,double max){
+Tensor RandomImpl<Device::SYCL>::execute(const std::vector<int64_t>& shape, DataType dtype,double min,double max){
         Tensor temp(shape, dtype, Device::SYCL);
         size_t numel = temp.numel();
         auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(temp.get_impl()->context());

@@ -48,7 +48,7 @@ void TransposeImpl<Device::CUDA>::execute(Tensor& a){
         transpose_cuda2d<<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<AType*>(a.data()), static_cast<AType*>(a.data()), rows, cols);
     },A);
     ctx_impl->wait();
-    std::vector<int> shape = {a.shape(1), a.shape(0)};
+    std::vector<int64_t> shape = {a.shape(1), a.shape(0)};
     a.reshape(shape);
 }
 
@@ -89,16 +89,16 @@ __global__ void transpose_cuda_nd(
     out[out_index] = in[tid];
 }
 
-Tensor TransposeImpl<Device::CUDA>::execute(Tensor& a, std::initializer_list<int> axes) { 
-    std::vector<int> new_shape;
-    std::vector<int> a_shape = a.shape();
+Tensor TransposeImpl<Device::CUDA>::execute(Tensor& a, std::initializer_list<int64_t> axes) { 
+    std::vector<int64_t> new_shape;
+    std::vector<int64_t> a_shape = a.shape();
     for (auto axe : axes) new_shape.push_back(a_shape[axe]);
     Tensor result(new_shape, a.dtype(), Device::CUDA);
     const int ndim = a_shape.size();
     const int numel = a.numel();
     // 计算输入和输出的步长
-    std::vector<int> in_strides(ndim, 1);
-    std::vector<int> out_strides(ndim, 1);
+    std::vector<int64_t> in_strides(ndim, 1);
+    std::vector<int64_t> out_strides(ndim, 1);
     for (int i = ndim - 2; i >= 0; --i) {
         in_strides[i] = in_strides[i + 1] * a_shape[i + 1];
         out_strides[i] = out_strides[i + 1] * result.shape(i + 1);

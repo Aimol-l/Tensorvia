@@ -138,7 +138,7 @@ __global__ void sum_reduce_cuda(
 
 
 Tensor SumImpl<Device::CUDA>::execute(const Tensor& a, int axis) {
-    std::vector<int> new_shape;
+    std::vector<int64_t> new_shape;
     for (int i = 0; i < a.shape().size(); ++i) {
         if (i != axis)  new_shape.push_back(a.shape(i));
     }
@@ -309,7 +309,7 @@ __global__ void min_reduce_cuda(
 }
 
 Tensor MinImpl<Device::CUDA>::execute(const Tensor& a, int axis) {
-    std::vector<int> new_shape;
+    std::vector<int64_t> new_shape;
     for (int i = 0; i < a.shape().size(); ++i) {
         if (i != axis)  new_shape.push_back(a.shape(i));
     }
@@ -476,7 +476,7 @@ __global__ void max_reduce_cuda(
 }
 
 Tensor MaxImpl<Device::CUDA>::execute(const Tensor& a, int axis) {
-    std::vector<int> new_shape;
+    std::vector<int64_t> new_shape;
     for (int i = 0; i < a.shape().size(); ++i) {
         if (i != axis)  new_shape.push_back(a.shape(i));
     }
@@ -570,7 +570,7 @@ __global__ void mean_reduce_cuda(
 }
 
 Tensor MeanImpl<Device::CUDA>::execute(const Tensor& a, int axis) {
-    std::vector<int> new_shape;
+    std::vector<int64_t> new_shape;
     for (int i = 0; i < a.shape().size(); ++i) {
         if (i != axis)  new_shape.push_back(a.shape(i));
     }
@@ -636,7 +636,7 @@ __global__ void argmax_cuda(
 }
 
 Tensor ArgMaxImpl<Device::CUDA>::execute(const Tensor& a, int axis) {
-    std::vector<int> new_shape;
+    std::vector<int64_t> new_shape;
     for (int i = 0; i < a.shape().size(); ++i) {
         if (i != axis)  new_shape.push_back(a.shape(i));
     }
@@ -703,7 +703,7 @@ __global__ void argmin_cuda(
 }
 
 Tensor ArgMinImpl<Device::CUDA>::execute(const Tensor& a, int axis) {
-    std::vector<int> new_shape;
+    std::vector<int64_t> new_shape;
     for (int i = 0; i < a.shape().size(); ++i) {
         if (i != axis)  new_shape.push_back(a.shape(i));
     }

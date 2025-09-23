@@ -101,7 +101,7 @@ Tensor MulImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
     int common =    a.shape().size() == 3?a.shape(2):a.shape(1);
     int cols =      a.shape().size() == 3?b.shape(2):b.shape(1);
     
-    std::vector<int> newshape;
+    std::vector<int64_t> newshape;
     if(a.shape().size() == 3){
         newshape = {batch,rows,cols};
     }else{

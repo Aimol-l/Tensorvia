@@ -53,7 +53,7 @@ namespace ops {
 
 Tensor SliceImpl<Device::SYCL>::execute(const Tensor& t, const std::vector<std::pair<int, int>>& ranges){
         // 计算新的shape
-        std::vector<int> new_shape;
+        std::vector<int64_t> new_shape;
         for (size_t i = 0; i < ranges.size(); ++i) {
             const auto& [start, end] = ranges[i];
             new_shape.push_back(end - start);

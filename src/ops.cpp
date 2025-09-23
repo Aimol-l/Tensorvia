@@ -73,7 +73,7 @@ namespace ops {
         }
         std::cout<<std::format("Tensor dtype: {} | Tensor device: {}",dtype_to_string(a.dtype()), device_to_string(dev))<<std::endl;
     }
-    Tensor Ones(const std::vector<int>& shape, DataType dtype){
+    Tensor Ones(const std::vector<int64_t>& shape, DataType dtype){
         // 合法性判断
         if(shape.empty()) 
             throw std::runtime_error("ops::Ones: shape is empty");
@@ -91,7 +91,7 @@ namespace ops {
             return OnesImpl<Device::VULKAN>::execute(shape,dtype);
         #endif
     }
-    Tensor Zeros(const std::vector<int>& shape, DataType dtype){
+    Tensor Zeros(const std::vector<int64_t>& shape, DataType dtype){
         // 合法性判断
         if(shape.empty()) 
             throw std::runtime_error("ops::Zeros: shape is empty");
@@ -109,7 +109,7 @@ namespace ops {
             return ZerosImpl<Device::VULKAN>::execute(shape,dtype);
         #endif
     }
-    Tensor Fill(const std::vector<int>& shape, DataType dtype,float val){
+    Tensor Fill(const std::vector<int64_t>& shape, DataType dtype,float val){
         // 合法性判断
         if(shape.empty()) 
             throw std::runtime_error("ops::Fill: shape is empty");
@@ -127,7 +127,7 @@ namespace ops {
             return FillImpl<Device::VULKAN>::execute(shape,dtype,val);
         #endif
     }
-    Tensor Random(const std::vector<int>& shape, DataType dtype,float min,float max){
+    Tensor Random(const std::vector<int64_t>& shape, DataType dtype,float min,float max){
         // 合法性判断
         if(shape.empty()) 
             throw std::runtime_error("ops::Random: shape is empty");
@@ -1182,7 +1182,7 @@ namespace ops {
             TransposeImpl<Device::VULKAN>::execute(a);
         #endif
     }
-    Tensor Transpose(Tensor& a,std::initializer_list<int> axes){
+    Tensor Transpose(Tensor& a,std::initializer_list<int64_t> axes){
         if(a.shape().empty()) 
             throw std::runtime_error("Input tensor must be not null.");
         if(a.shape().size() != axes.size()) 

@@ -11,7 +11,7 @@ template <>
 struct TransposeImpl<Device::CPU> {
     static void execute(Tensor& a);
 
-    static Tensor execute(Tensor& a, std::initializer_list<int> axes);
+    static Tensor execute(Tensor& a, std::initializer_list<int64_t> axes);
 };
 
 extern template struct TransposeImpl<Device::CPU>;

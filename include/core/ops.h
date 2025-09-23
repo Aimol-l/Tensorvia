@@ -16,10 +16,10 @@ namespace ops{
     OPS_API void println(Tensor & a);
     OPS_API void println(Tensor && a);
 
-    OPS_API Tensor Ones(const std::vector<int>& shape, DataType dtype);
-    OPS_API Tensor Zeros(const std::vector<int>& shape, DataType dtype);
-    OPS_API Tensor Fill(const std::vector<int>& shape, DataType dtype, float value);
-    OPS_API Tensor Random(const std::vector<int>& shape, DataType dtype,float min,float max);
+    OPS_API Tensor Ones(const std::vector<int64_t>& shape, DataType dtype);
+    OPS_API Tensor Zeros(const std::vector<int64_t>& shape, DataType dtype);
+    OPS_API Tensor Fill(const std::vector<int64_t>& shape, DataType dtype, float value);
+    OPS_API Tensor Random(const std::vector<int64_t>& shape, DataType dtype,float min,float max);
     
     OPS_API Tensor Slice(const Tensor& t, const std::vector<std::pair<int, int>>& ranges);
     
@@ -83,7 +83,7 @@ namespace ops{
     OPS_API Tensor Concat(const std::vector<Tensor> &tensors, int dim);
 
     OPS_API void Transpose(Tensor& a); // for 2-d (inplace)
-    OPS_API Tensor Transpose(Tensor& a,std::initializer_list<int> axes); // for n-d
+    OPS_API Tensor Transpose(Tensor& a,std::initializer_list<int64_t> axes); // for n-d
 
     OPS_API Tensor Equal(const Tensor& a,const Tensor& b);
     OPS_API Tensor NotEqual(const Tensor& a,const Tensor& b);
