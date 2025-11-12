@@ -39,6 +39,7 @@ struct AddImpl<Device::CPU> {
     static Tensor execute(const Tensor& a, const Tensor& b);
     static Tensor execute(const Tensor& a, float b);
 
+    static void execute(const Tensor& a, const Tensor& b,Tensor& dst);
 };
 
 template <>

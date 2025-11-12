@@ -245,63 +245,66 @@ void clamp_sycl(const T* src_ptr,T* dst_ptr,float min,float max,size_t size,sycl
 }
 
 
-
 void AddImpl<Device::SYCL>::execute(Tensor& a,float b){
         auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
         auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
         auto& q = ctx_impl->get_queue(); 
-        size_t size = a.numel();
-        // 分发到模板 kernel（根据 dtype 决定类型）
-        switch (a.dtype()) {
-            case DataType::INT8:            add_sycl<int8_t>(a, b,size, q);break;
-            case DataType::INT16:           add_sycl<int16_t>(a, b,size, q);break;
-            case DataType::INT32:           add_sycl<int32_t>(a, b,size, q);break;
-            case DataType::INT64:           add_sycl<int64_t>(a, b,size, q);break;
-            case DataType::FLOAT16:         add_sycl<float16>(a, b,size, q);break;
-            case DataType::BFLOAT16:        add_sycl<bfloat16>(a, b,size, q);break;
-            case DataType::FLOAT32:         add_sycl<float32>(a, b,size, q);break;
-            case DataType::FLOAT64:         add_sycl<float64>(a, b,size, q);break;
-            default:throw std::runtime_error("Unsupported dtype for add");
-        }
+        dispatch_dtype(a.dtype(), [&](auto type_id) {
+            using T = typename decltype(type_id)::type;
+            add_sycl<T>(static_cast<T*>(a.data()), b, a.numel(),q);
+        });
+        // size_t size = a.numel();
+        // // 分发到模板 kernel（根据 dtype 决定类型）
+        // switch (a.dtype()) {
+        //     case DataType::INT8:            add_sycl<int8_t>(a, b,size, q);break;
+        //     case DataType::INT16:           add_sycl<int16_t>(a, b,size, q);break;
+        //     case DataType::INT32:           add_sycl<int32_t>(a, b,size, q);break;
+        //     case DataType::INT64:           add_sycl<int64_t>(a, b,size, q);break;
+        //     case DataType::FLOAT16:         add_sycl<float16>(a, b,size, q);break;
+        //     case DataType::BFLOAT16:        add_sycl<bfloat16>(a, b,size, q);break;
+        //     case DataType::FLOAT32:         add_sycl<float32>(a, b,size, q);break;
+        //     case DataType::FLOAT64:         add_sycl<float64>(a, b,size, q);break;
+        //     default:throw std::runtime_error("Unsupported dtype for add");
+        // }
     }
-    // uninplace
-     Tensor AddImpl<Device::SYCL>::execute(const Tensor& a, const Tensor& b) {
-        // 避免自加修改：a + a 返回新 tensor
-        if (&a == &b) ops::Add(a.clone(), b.clone());
-       // 计算公共类别
-        DataType res_type = std::max(a.dtype(),b.dtype()); // 全是int 或 全是 float 
-        if(a.dtype() <= DataType::INT64 && b.dtype() > DataType::INT64){
-            res_type = std::max(b.dtype(),DataType::FLOAT32);
-        }else if(a.dtype() > DataType::INT64 && b.dtype() <= DataType::INT64){
-            res_type = std::max(a.dtype(),DataType::FLOAT32);
-        }
-        const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a,res_type);
-        const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b,res_type);
-
-        auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
-        auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
-        auto& q = ctx_impl->get_queue(); 
-
-        size_t size = a.numel();
-        Tensor result(a.shape(), res_type, Device::SYCL);
-
-        switch (res_type) {
-            case DataType::INT8:            add_sycl<int8_t>(A, B, result, size, q);break;
-            case DataType::INT16:           add_sycl<int16_t>(A, B, result, size, q);break;
-            case DataType::INT32:           add_sycl<int32_t>(A, B, result, size, q);break;
-            case DataType::INT64:           add_sycl<int64_t>(A, B, result, size, q);break;
-            case DataType::FLOAT16:         add_sycl<float16>(A, B, result, size, q);break;
-            case DataType::BFLOAT16:        add_sycl<bfloat16>(A, B, result, size, q);break;
-            case DataType::FLOAT32:         add_sycl<float32>(A, B, result, size, q);break;
-            case DataType::FLOAT64:         add_sycl<float64>(A, B, result, size, q);break;
-            default:throw std::runtime_error("Unsupported dtype for add");
-        }
-        return result;
+// uninplace
+Tensor AddImpl<Device::SYCL>::execute(const Tensor& a, const Tensor& b) {
+    // 避免自加修改：a + a 返回新 tensor
+    if (&a == &b) ops::Add(a.clone(), b.clone());
+    // 计算公共类别
+    DataType res_type = std::max(a.dtype(),b.dtype()); // 全是int 或 全是 float 
+    if(a.dtype() <= DataType::INT64 && b.dtype() > DataType::INT64){
+        res_type = std::max(b.dtype(),DataType::FLOAT32);
+    }else if(a.dtype() > DataType::INT64 && b.dtype() <= DataType::INT64){
+        res_type = std::max(a.dtype(),DataType::FLOAT32);
     }
-    Tensor AddImpl<Device::SYCL>::execute(const Tensor& a, float b){
-        Tensor t = ops::Fill(a.shape(),a.dtype(),b);
-        return ops::Add(a, t);
+    const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a,res_type);
+    const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b,res_type);
+
+    auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
+    auto& q = ctx_impl->get_queue(); 
+
+    size_t size = a.numel();
+    Tensor result(a.shape(), res_type, Device::SYCL);
+
+    switch (res_type) {
+        case DataType::INT8:            add_sycl<int8_t>(A, B, result, size, q);break;
+        case DataType::INT16:           add_sycl<int16_t>(A, B, result, size, q);break;
+        case DataType::INT32:           add_sycl<int32_t>(A, B, result, size, q);break;
+        case DataType::INT64:           add_sycl<int64_t>(A, B, result, size, q);break;
+        case DataType::FLOAT16:         add_sycl<float16>(A, B, result, size, q);break;
+        case DataType::BFLOAT16:        add_sycl<bfloat16>(A, B, result, size, q);break;
+        case DataType::FLOAT32:         add_sycl<float32>(A, B, result, size, q);break;
+        case DataType::FLOAT64:         add_sycl<float64>(A, B, result, size, q);break;
+        default:throw std::runtime_error("Unsupported dtype for add");
     }
+    return result;
+}
+Tensor AddImpl<Device::SYCL>::execute(const Tensor& a, float b){
+    Tensor t = ops::Fill(a.shape(),a.dtype(),b);
+    return ops::Add(a, t);
+}
 
 void SubImpl<Device::SYCL>::execute(Tensor& a,float b){
         auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());

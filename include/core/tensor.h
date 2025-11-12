@@ -29,13 +29,17 @@ private:
     std::vector<int64_t> m_shape;
     std::shared_ptr<TensorImpl> m_impl;
 public:
-    void* data();
+    void*data(){
+        return m_impl->data();
+    }
+    const void* data() const{
+        return m_impl->data();
+    }
     void to_host(); // 若使用cuda|sycl|vulkan后端，可同步回cpu
     Tensor clone() const;
     Device device() const;
     DataType dtype() const;
     Tensor to_type(DataType);
-    const void* data() const;
     void to_device(uint32_t id=0); // 若当前使用cpu,可以移动到device
 
     size_t dims()const;
@@ -77,17 +81,17 @@ public:
     Tensor dot(const Tensor& other) const;
     Tensor operator*(const Tensor& other) const;
     // 实现数与张量的交换率
-    friend Tensor operator+(double a, const Tensor& other);
-    Tensor operator+(double a) const;
-    friend Tensor operator-(double a, const Tensor& other);
-    Tensor operator-(double a) const;
-    friend Tensor operator*(double a, const Tensor& other);
-    Tensor operator*(double a) const;
+    friend Tensor operator+(float a, const Tensor& other);
+    Tensor operator+(float a) const;
+    friend Tensor operator-(float a, const Tensor& other);
+    Tensor operator-(float a) const;
+    friend Tensor operator*(float a, const Tensor& other);
+    Tensor operator*(float a) const;
     // 元素除法
     Tensor div(const Tensor& other) const;
     Tensor operator/(const Tensor& other) const;
     // 矩阵除数不具备交换律
-    Tensor operator/(double a) const;
+    Tensor operator/(float a) const;
     // 矩阵乘法
     Tensor matmul(const Tensor& other) const;
     

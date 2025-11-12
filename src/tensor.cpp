@@ -327,12 +327,7 @@ void Tensor::to_device(uint32_t id){
     m_device = Device::VULKAN;
 #endif
 }
-void *Tensor::data(){
-    return m_impl->data();
-}
-const void* Tensor::data() const{
-    return m_impl->data();
-}
+
 Tensor Tensor::empty_like(Tensor& tensor) const{
     return Tensor(tensor.shape(),this->m_dtype,this->m_device);
 }
@@ -368,29 +363,27 @@ Tensor Tensor::operator*(const Tensor& other) const{
     return ops::Dot(*this,other);
 }
 
-Tensor operator+(double a, const Tensor& other) {
-    
+Tensor operator+(float a, const Tensor& other) {
     return ops::Add(other, a);
 }
 
-Tensor Tensor::operator+(double a) const{
-    
+Tensor Tensor::operator+(float a) const{
     return ops::Add(*this, a);
 }
 
-Tensor operator-(double a, const Tensor& other) {
+Tensor operator-(float a, const Tensor& other) {
     return ops::Sub(other, a);
 }
 
-Tensor Tensor::operator-(double a) const{
+Tensor Tensor::operator-(float a) const{
     return ops::Sub(*this, a);
 }
 
-Tensor operator*(double a, const Tensor& other) {
+Tensor operator*(float a, const Tensor& other) {
     return ops::Dot(other, a);
 }
 
-Tensor Tensor::operator*(double a) const{
+Tensor Tensor::operator*(float a) const{
     return ops::Dot(*this, a);
 }
 
@@ -402,7 +395,7 @@ Tensor Tensor::operator/(const Tensor& other) const{
     return ops::Div(*this,other);
 }
 
-Tensor Tensor::operator/(double a) const {
+Tensor Tensor::operator/(float a) const {
     return ops::Div(*this,a);
 }
 

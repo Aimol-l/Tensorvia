@@ -35,10 +35,19 @@ namespace ops{
     OPS_API Tensor Dot(const Tensor& a, float b);
     OPS_API Tensor Div(const Tensor& a, float b);
     
+    // convenience wrapper
     OPS_API Tensor Add(const Tensor& a,const Tensor& b);
     OPS_API Tensor Sub(const Tensor& a,const Tensor& b);
     OPS_API Tensor Dot(const Tensor& a,const Tensor& b);
     OPS_API Tensor Div(const Tensor& a,const Tensor& b);
+
+    //  out-of-place
+    OPS_API void   Add(const Tensor& a,const Tensor& b,Tensor& dst);
+    // OPS_API void   Sub(const Tensor& a,const Tensor& b,Tensor& dst);
+    // OPS_API void   Dot(const Tensor& a,const Tensor& b,Tensor& dst);
+    // OPS_API void   Div(const Tensor& a,const Tensor& b,Tensor& dst);
+
+
 
     // [w,k] @ [k,h] --> [w,h]
     // [b,w,k] @ [b,k,h] --> [b,w,h]

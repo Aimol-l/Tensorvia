@@ -3,53 +3,52 @@
 
 namespace ops {
 
-template <typename T, typename R = T>
-void add_kernel(const T* a, const R* b, T* out, size_t size) {
-    // using PromotedType = decltype(std::declval<compute_type_t<T>>() + std::declval<compute_type_t<R>>());
-    #pragma omp parallel for
+template <typename T>
+void add_kernel(const T* RESTRICT a, const T* RESTRICT b, T* RESTRICT out, size_t size) {
+    // #pragma omp parallfor
     for (size_t i = 0; i < size; ++i) {
-        // out[i] = PromotedType(a[i] + b[i]);
         out[i] = a[i] + b[i];
     }
 }
-template <typename T>
+template <typename T> // T = int8_t ~ int64_t ,float16 ~ float64,bfloat16
 void add_kernel(T* a, float b, size_t size) {
-#pragma omp parallel for
+    const T b_cast = static_cast<T>(b); // 注意类型转换
+    // 让编译器去优化速度
     for (size_t i = 0; i < size; ++i) {
-        a[i] += static_cast<T>(b);  // 注意类型转换
+        a[i] += b_cast;  
     }
 }
 template <typename T>
 void sub_kernel(const T* a, const T* b, T* out, size_t size) {
-#pragma omp parallel for
+    #pragma omp parallel for
     for (size_t i = 0; i < size; ++i) {
         out[i] = static_cast<T>(a[i] - b[i]);  // 注意类型转换
     }
 }
 template <typename T>
 void sub_kernel(T* a, float b, size_t size) {
-#pragma omp parallel for
+    const T b_cast = static_cast<T>(b); // 注意类型转换
     for (size_t i = 0; i < size; ++i) {
-        a[i] -= T(b);  // 注意类型转换
+        a[i] -= b_cast;  // 注意类型转换
     }
 }
 template <typename T>
 void dot_kernel(const T* a, const T* b, T* out, size_t size) {
-#pragma omp parallel for
+    #pragma omp parallel for
     for (size_t i = 0; i < size; ++i) {
         out[i] = static_cast<T>(a[i] * b[i]);  // 注意类型转换
     }
 }
 template <typename T>
 void dot_kernel(T* a, float b, size_t size) {
-#pragma omp parallel for
+    const T b_cast = static_cast<T>(b); // 注意类型转换
     for (size_t i = 0; i < size; ++i) {
-        a[i] *= T(b);  // 注意类型转换
+        a[i] *= b_cast;  // 注意类型转换
     }
 }
 template <typename T>
 void div_kernel(const T* a, const T* b, T* out, size_t size) {
-#pragma omp parallel for
+    #pragma omp parallel for
     for (size_t i = 0; i < size; ++i) {
         if (b[i] != T(0))
             out[i] = static_cast<T>(a[i] / b[i]);  // 注意类型转换
@@ -59,9 +58,9 @@ void div_kernel(const T* a, const T* b, T* out, size_t size) {
 }
 template <typename T>
 void div_kernel(T* a, float b, size_t size) {
-#pragma omp parallel for
+    const T b_cast = T(b); // 注意类型转换
     for (size_t i = 0; i < size; ++i) {
-        a[i] = a[i] / T(b);  // 注意类型转换
+        a[i] /=b_cast;  // 注意类型转换
     }
 }
 
@@ -168,98 +167,82 @@ void log_kernel(const T* src_ptr, R* dst_ptr, size_t n, float val) {
     }
 }
 
+// ========================================================================
+
 void AddImpl<Device::CPU>::execute(Tensor& a, float b) {
-    auto A = data_as_const_variant(a.dtype(), a.data());
-    std::visit([&](auto ptr_A) {
-        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_A)>>;  // const T* --> const T --> T
-        add_kernel<AType>(static_cast<AType*>(a.data()), b, a.numel());
-    },A);
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        add_kernel<T>(static_cast<T*>(a.data()), b, a.numel());
+    });
 }
-// uninplace
 Tensor AddImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
     // 避免自加修改：a + a 返回新 tensor
     if (&a == &b) return ops::Add(a.clone(), b.clone());
-    // 计算公共类别
-    // DataType res_type = std::max(a.dtype(), b.dtype());  // 全是int 或 全是 float
-    // if (a.dtype() <= DataType::INT64 && b.dtype() > DataType::INT64) {
-    //     res_type = std::max(b.dtype(), DataType::FLOAT32);
-    // } else if (a.dtype() > DataType::INT64 && b.dtype() <= DataType::INT64) {
-    //     res_type = std::max(a.dtype(), DataType::FLOAT32);
-    // }
-
+    // 快速路径：相同类型且无需转换
+    if (a.dtype() == b.dtype()) {
+        Tensor result(a.shape(), a.dtype(), Device::CPU);
+        dispatch_dtype(a.dtype(), [&](auto type_id) {
+            using T = typename decltype(type_id)::type;
+            add_kernel<T>(
+                static_cast<const T*>(a.data()),
+                static_cast<const T*>(b.data()),
+                static_cast<T*>(result.data()),
+                a.numel()
+            );
+        });
+        return result;
+    }
+    // 慢速路径：类型不同，需要 Typecast
     DataType res_type = compute_type(a.dtype(), b.dtype());
     const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a, res_type);
     const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b, res_type);
-
     Tensor result(a.shape(), res_type, Device::CPU);
-
-    size_t size = a.numel();
-    switch (res_type) {
-        case DataType::INT8:
-            add_kernel<int8_t>(static_cast<const int8_t*>(A.data()), static_cast<const int8_t*>(B.data()), static_cast<int8_t*>(result.data()), size);
-            break;
-        case DataType::INT16:
-            add_kernel<int16_t>(static_cast<const int16_t*>(A.data()), static_cast<const int16_t*>(B.data()), static_cast<int16_t*>(result.data()), size);
-            break;
-        case DataType::INT32:
-            add_kernel<int32_t>(static_cast<const int32_t*>(A.data()), static_cast<const int32_t*>(B.data()), static_cast<int32_t*>(result.data()), size);
-            break;
-        case DataType::INT64:
-            add_kernel<int64_t>(static_cast<const int64_t*>(A.data()), static_cast<const int64_t*>(B.data()), static_cast<int64_t*>(result.data()), size);
-            break;
-        case DataType::FLOAT16:
-            add_kernel<float16>(static_cast<const float16*>(A.data()), static_cast<const float16*>(B.data()), static_cast<float16*>(result.data()), size);
-            break;
-        case DataType::BFLOAT16:
-            add_kernel<bfloat16>(static_cast<const bfloat16*>(A.data()), static_cast<const bfloat16*>(B.data()), static_cast<bfloat16*>(result.data()), size);
-            break;
-        case DataType::FLOAT32:
-            add_kernel<float32>(static_cast<const float32*>(A.data()), static_cast<const float32*>(B.data()), static_cast<float32*>(result.data()), size);
-            break;
-        case DataType::FLOAT64:
-            add_kernel<float64>(static_cast<const float64*>(A.data()), static_cast<const float64*>(B.data()), static_cast<float64*>(result.data()), size);
-            break;
-        default:
-            throw std::runtime_error("Unsupported dtype for add");
-    }
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        const T* a_ptr = static_cast<const T*>(A.data());
+        const T* b_ptr = static_cast<const T*>(B.data());
+        T* res_ptr = static_cast<T*>(result.data());
+        add_kernel<T>(a_ptr,b_ptr,res_ptr,a.numel());
+    });
     return result;
 }
+void AddImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b,Tensor& dst) {
+    // 快速路径：相同类型且无需转换
+    if (a.dtype() == b.dtype()) {
+        dispatch_dtype(a.dtype(), [&](auto type_id) {
+            using T = typename decltype(type_id)::type;
+            add_kernel<T>(
+                static_cast<const T*>(a.data()),
+                static_cast<const T*>(b.data()),
+                static_cast<T*>(dst.data()),
+                a.numel()
+            );
+        });
+        return; // ✅ 关键：快速路径后直接返回！
+    }
+    // 慢速路径：类型不同，需要 Typecast
+    DataType res_type = compute_type(a.dtype(), b.dtype());
+    const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a, res_type);
+    const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b, res_type);
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        const T* a_ptr = static_cast<const T*>(A.data());
+        const T* b_ptr = static_cast<const T*>(B.data());
+        T* res_ptr = static_cast<T*>(dst.data());
+        add_kernel<T>(a_ptr,b_ptr,res_ptr,a.numel());
+    });
+}
 Tensor AddImpl<Device::CPU>::execute(const Tensor& a, float b) {
-    Tensor t = ops::Fill(a.shape(), a.dtype(), b);
-    return ops::Add(a, t);
+    Tensor t = a.clone();
+    ops::Add(t,b);
+    return t;
 }
 
 void SubImpl<Device::CPU>::execute(Tensor& a, float b) {
-    size_t size = a.numel();
-    // 分发到模板 kernel（根据 dtype 决定类型）
-    switch (a.dtype()) {
-        case DataType::INT8:
-            sub_kernel<int8_t>(static_cast<int8_t*>(a.data()), b, size);
-            break;
-        case DataType::INT16:
-            sub_kernel<int16_t>(static_cast<int16_t*>(a.data()), b, size);
-            break;
-        case DataType::INT32:
-            sub_kernel<int32_t>(static_cast<int32_t*>(a.data()), b, size);
-            break;
-        case DataType::INT64:
-            sub_kernel<int64_t>(static_cast<int64_t*>(a.data()), b, size);
-            break;
-        case DataType::FLOAT16:
-            sub_kernel<float16>(static_cast<float16*>(a.data()), b, size);
-            break;
-        case DataType::BFLOAT16:
-            sub_kernel<bfloat16>(static_cast<bfloat16*>(a.data()), b, size);
-            break;
-        case DataType::FLOAT32:
-            sub_kernel<float32>(static_cast<float32*>(a.data()), b, size);
-            break;
-        case DataType::FLOAT64:
-            sub_kernel<float64>(static_cast<float64*>(a.data()), b, size);
-            break;
-        default:
-            throw std::runtime_error("Unsupported dtype for sub");
-    }
+   dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        sub_kernel<T>(static_cast<T*>(a.data()), b, a.numel());
+    });
 }
 
 Tensor SubImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
@@ -307,40 +290,15 @@ Tensor SubImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
     return result;
 }
 Tensor SubImpl<Device::CPU>::execute(const Tensor& a, float b) {
-    Tensor t = ops::Fill(a.shape(), a.dtype(), b);
-    return ops::Sub(a, t);
+    Tensor t = a.clone();
+    ops::Sub(t,b);
+    return t;
 }
 void DotImpl<Device::CPU>::execute(Tensor& a, float b) {
-    size_t size = a.numel();
-    // 分发到模板 kernel（根据 dtype 决定类型）
-    switch (a.dtype()) {
-        case DataType::INT8:
-            dot_kernel<int8_t>(static_cast<int8_t*>(a.data()), b, size);
-            break;
-        case DataType::INT16:
-            dot_kernel<int16_t>(static_cast<int16_t*>(a.data()), b, size);
-            break;
-        case DataType::INT32:
-            dot_kernel<int32_t>(static_cast<int32_t*>(a.data()), b, size);
-            break;
-        case DataType::INT64:
-            dot_kernel<int64_t>(static_cast<int64_t*>(a.data()), b, size);
-            break;
-        case DataType::FLOAT16:
-            dot_kernel<float16>(static_cast<float16*>(a.data()), b, size);
-            break;
-        case DataType::BFLOAT16:
-            dot_kernel<bfloat16>(static_cast<bfloat16*>(a.data()), b, size);
-            break;
-        case DataType::FLOAT32:
-            dot_kernel<float32>(static_cast<float32*>(a.data()), b, size);
-            break;
-        case DataType::FLOAT64:
-            dot_kernel<float64>(static_cast<float64*>(a.data()), b, size);
-            break;
-        default:
-            throw std::runtime_error("Unsupported dtype for dot");
-    }
+   dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        dot_kernel<T>(static_cast<T*>(a.data()), b, a.numel());
+    });
 }
 Tensor DotImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
     // 避免自修改
@@ -389,40 +347,15 @@ Tensor DotImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
     return result;
 }
 Tensor DotImpl<Device::CPU>::execute(const Tensor& a, float b) {
-    Tensor t = ops::Fill(a.shape(), a.dtype(), b);
-    return ops::Dot(a, t);
+    Tensor t = a.clone();
+    ops::Dot(t,b);
+    return t;
 }
 void DivImpl<Device::CPU>::execute(Tensor& a, float b) {
-    size_t size = a.numel();
-    // 分发到模板 kernel（根据 dtype 决定类型）
-    switch (a.dtype()) {
-        case DataType::INT8:
-            div_kernel<int8_t>(static_cast<int8_t*>(a.data()), b, size);
-            break;
-        case DataType::INT16:
-            div_kernel<int16_t>(static_cast<int16_t*>(a.data()), b, size);
-            break;
-        case DataType::INT32:
-            div_kernel<int32_t>(static_cast<int32_t*>(a.data()), b, size);
-            break;
-        case DataType::INT64:
-            div_kernel<int64_t>(static_cast<int64_t*>(a.data()), b, size);
-            break;
-        case DataType::FLOAT16:
-            div_kernel<float16>(static_cast<float16*>(a.data()), b, size);
-            break;
-        case DataType::BFLOAT16:
-            div_kernel<bfloat16>(static_cast<bfloat16*>(a.data()), b, size);
-            break;
-        case DataType::FLOAT32:
-            div_kernel<float32>(static_cast<float32*>(a.data()), b, size);
-            break;
-        case DataType::FLOAT64:
-            div_kernel<float64>(static_cast<float64*>(a.data()), b, size);
-            break;
-        default:
-            throw std::runtime_error("Unsupported dtype for div");
-    }
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        div_kernel<T>(static_cast<T*>(a.data()), b, a.numel());
+    });
 }
 Tensor DivImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
     // 避免加修改
@@ -466,8 +399,9 @@ Tensor DivImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
     return result;
 }
 Tensor DivImpl<Device::CPU>::execute(const Tensor& a, float b) {
-    Tensor t = ops::Fill(a.shape(), a.dtype(), b);
-    return ops::Div(a, t);
+    Tensor t = a.clone();
+    ops::Div(t,b);
+    return t;
 }
 void AbsImpl<Device::CPU>::execute(Tensor& a) {
     void* src = a.data();

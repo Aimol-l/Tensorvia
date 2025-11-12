@@ -1,19 +1,16 @@
 #include "ops.h"
+#include <format>
 
 int main() {
-    Tensor a = Tensor::Random({5,5},-10,10,DataType::INT8);
-    Tensor b = Tensor::Random({5,5},-10,10,DataType::INT16);
-    Tensor c = Tensor::Random({5,5},-10,10,DataType::INT32);
-    Tensor d = Tensor::Random({5,5},-10,10,DataType::INT64);
-    Tensor e = Tensor::Random({5,5},-10,10,DataType::FLOAT16);
-    Tensor f = Tensor::Random({5,5},-10,10,DataType::BFLOAT16);
-    Tensor g = Tensor::Random({5,5},-10,10,DataType::FLOAT32);
-    Tensor h = Tensor::Random({5,5},-10,10,DataType::FLOAT64);
+    Tensor a = Tensor::Random({1000,1000},-10,10,DataType::FLOAT32);
+    Tensor b = Tensor::Random({1000,1000},-10,10,DataType::FLOAT32);
+    Tensor result(a.shape(), a.dtype(), Device::CPU);
 
-    ops::println(a + b);
-    ops::println(c - d);
-    ops::println(e * f);
-    ops::println(g / h);
-    
+    auto start = std::chrono::high_resolution_clock::now();
+    for(int i = 0;i<10000;i++)
+        ops::Add(a,b,result);
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / 10000;
+    std::cout<<std::format("total time = {}us", duration)<<std::endl;
     return 0;
 }

@@ -164,6 +164,22 @@ inline ConstCppDTypeVariant data_as_const_variant(DataType type, const void* src
             throw std::runtime_error("Unsupported dtype for variant");
     }
 }
+template<typename Func>
+void dispatch_dtype(DataType type, Func&& f) {
+    switch (type) {
+        case DataType::INT8:     f(std::type_identity<int8_t>{}); break;
+        case DataType::INT16:    f(std::type_identity<int16_t>{}); break;
+        case DataType::INT32:    f(std::type_identity<int32_t>{}); break;
+        case DataType::INT64:    f(std::type_identity<int64_t>{}); break;
+        case DataType::FLOAT16:  f(std::type_identity<float16>{}); break;
+        case DataType::BFLOAT16: f(std::type_identity<bfloat16>{}); break;
+        case DataType::FLOAT32:  f(std::type_identity<float>{}); break;
+        case DataType::FLOAT64:  f(std::type_identity<double>{}); break;
+        default:
+            throw std::runtime_error("Unsupported dtype");
+    }
+}
+
 // int8*int8 -> int8; int8*int16 -> int16; int8*int32 -> int32;int8*int64 -> int64; int8*float16 -> float16; int8*bfloat16 -> bfloat16; int8*float32 -> float32; int8*float64 -> float64;
 // int16*int16 -> int16; int16*int32 -> int32; int16*int64 -> int64; int16*float16 -> float16; int16*bfloat16 -> bfloat16; int16*float32 -> float32; int16*float64 -> float64;
 // int32*int32 -> int32; int32*int64 -> int64; int32*float16 -> float16; int32*bfloat16 -> bfloat16; int32*float32 -> float32; int32*float64 -> float64;

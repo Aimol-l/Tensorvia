@@ -327,8 +327,6 @@ namespace ops {
         for(int i=0;i<a.shape().size();i++){
             if(a.shape(i) != b.shape(i)) throw std::runtime_error("Tensor shape mismatch!");
         }
-        // 广播
-        // todo....
         // 后端实现分发
         if(a.device() == Device::CPU){
             return AddImpl<Device::CPU>::execute(a,b);
@@ -420,6 +418,34 @@ namespace ops {
             return DivImpl<Device::VULKAN>::execute(a,b);
         #endif
     }
+    
+    void  Add(const Tensor& a,const Tensor& b,Tensor& dst){
+        if(a.device() != b.device()) 
+            throw std::runtime_error("Tensor Device mismatch!");
+        if(a.shape().size() != b.shape().size()) 
+            throw std::runtime_error("Tensor dims mismatch!");
+        
+        for(int i=0;i<a.shape().size();i++){
+            if(a.shape(i) != b.shape(i)) throw std::runtime_error("Tensor shape mismatch!");
+        }
+        // 后端实现分发
+        if(a.device() == Device::CPU){
+            AddImpl<Device::CPU>::execute(a,b,dst);
+        }
+        #ifdef BACKEND_CPU
+            AddImpl<Device::CPU>::execute(a,b,dst);
+        #endif
+        #ifdef BACKEND_SYCL
+            AddImpl<Device::SYCL>::execute(a,b,dst);
+        #endif
+        #ifdef BACKEND_CUDA
+            AddImpl<Device::CUDA>::execute(a,b,dst);
+        #endif
+        #ifdef BACKEND_VULKAN
+            AddImpl<Device::VULKAN>::execute(a,b,dst);
+        #endif
+    }
+    
     Tensor Mul(const Tensor& a,const Tensor& b){
         // 合法性判断
         if(a.device()!=b.device()) 
