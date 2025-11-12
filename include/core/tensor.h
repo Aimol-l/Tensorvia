@@ -95,8 +95,7 @@ public:
     // 矩阵乘法
     Tensor matmul(const Tensor& other) const;
     
-
-    // 支持负数下标的访问：int val = shape(-1);
+    // 支持负数下标的访问：int64_t val = shape(-1);
     int64_t shape(int i);
     int64_t shape(int i)const;
     std::vector<int64_t> shape()const;
