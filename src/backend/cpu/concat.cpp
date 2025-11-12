@@ -51,39 +51,15 @@ Tensor ConcatImpl<Device::CPU>::execute(const std::vector<Tensor>& tensors, int 
     std::vector<int64_t> out_shape = tensors[0].shape();
     size_t concat_size = 0;
     for (auto& t : tensors) {
-        concat_size += t.shape()[dim];
+        concat_size += t.shape(dim);
         res_type = std::max(res_type, t.dtype());
     }
     out_shape[dim] = concat_size;
     Tensor res(out_shape, res_type, Device::CPU);
-    switch (res_type) {
-        case DataType::FLOAT64:
-            concat_kernel<double>(res, tensors, dim);
-            break;
-        case DataType::FLOAT32:
-            concat_kernel<float>(res, tensors, dim);
-            break;
-        case DataType::FLOAT16:
-            concat_kernel<float16>(res, tensors, dim);
-            break;
-        case DataType::BFLOAT16:
-            concat_kernel<bfloat16>(res, tensors, dim);
-            break;
-        case DataType::INT64:
-            concat_kernel<int64_t>(res, tensors, dim);
-            break;
-        case DataType::INT32:
-            concat_kernel<int32_t>(res, tensors, dim);
-            break;
-        case DataType::INT16:
-            concat_kernel<int16_t>(res, tensors, dim);
-            break;
-        case DataType::INT8:
-            concat_kernel<int8_t>(res, tensors, dim);
-            break;
-        default:
-            throw std::runtime_error("concat not support this data type");
-    }
+    dispatch_dtype(res_type, [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        concat_kernel<T>(res,tensors,dim);
+    });
     return res;
 }
 

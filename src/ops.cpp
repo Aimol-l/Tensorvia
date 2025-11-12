@@ -1208,7 +1208,33 @@ namespace ops {
             TransposeImpl<Device::VULKAN>::execute(a);
         #endif
     }
-    Tensor Transpose(Tensor& a,std::initializer_list<int64_t> axes){
+    void Transpose(const Tensor& a,Tensor& dst,std::initializer_list<int64_t> axes){
+        if(a.shape().empty()) 
+            throw std::runtime_error("Input tensor must be not null.");
+        if(a.shape().size() != axes.size()) 
+            throw std::runtime_error("transpose shape and axes size not match");
+        if(a.numel() != dst.numel()){
+            throw std::runtime_error("dst numel not enough");
+        }
+        // 后端实现分发
+        if(a.device() == Device::CPU){
+            TransposeImpl<Device::CPU>::execute(a,dst,axes);
+        }
+        #ifdef BACKEND_CPU
+            TransposeImpl<Device::CPU>::execute(a,dst,axes);
+        #endif
+        #ifdef BACKEND_SYCL
+            TransposeImpl<Device::SYCL>::execute(a,dst,axes);
+        #endif
+        #ifdef BACKEND_CUDA
+            TransposeImpl<Device::CUDA>::execute(a,dst,axes);
+        #endif
+        #ifdef BACKEND_VULKAN
+            TransposeImpl<Device::VULKAN>::execute(a,dst,axes);
+        #endif
+    }
+
+    Tensor Transpose(const Tensor& a,std::initializer_list<int64_t> axes){
         if(a.shape().empty()) 
             throw std::runtime_error("Input tensor must be not null.");
         if(a.shape().size() != axes.size()) 

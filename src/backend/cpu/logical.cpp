@@ -142,8 +142,7 @@ Tensor EqualImpl<Device::CPU>::execute(const Tensor &a, const Tensor &b) {
         using AType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_A)>>;
         using BType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_B)>>;
         equal_kernel<AType, BType>(static_cast<int8_t *>(res.data()), ptr_A, ptr_B, res.numel());
-    },
-               A, B);
+    },A, B);
     return res;
 }
 
@@ -155,8 +154,7 @@ Tensor LessImpl<Device::CPU>::execute(const Tensor &a, const Tensor &b) {
         using AType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_A)>>;
         using BType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_B)>>;
         less_kernel<AType, BType>(static_cast<int8_t *>(res.data()), ptr_A, ptr_B, res.numel());
-    },
-               A, B);
+    },A, B);
     return res;
 }
 
@@ -168,8 +166,7 @@ Tensor GreaterImpl<Device::CPU>::execute(const Tensor &a, const Tensor &b) {
         using AType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_A)>>;
         using BType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_B)>>;
         greater_kernel<AType, BType>(static_cast<int8_t *>(res.data()), ptr_A, ptr_B, res.numel());
-    },
-               A, B);
+    }, A, B);
     return res;
 }
 
@@ -181,8 +178,7 @@ Tensor LessEqualImpl<Device::CPU>::execute(const Tensor &a, const Tensor &b) {
         using AType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_A)>>;
         using BType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_B)>>;
         less_equal_kernel<AType, BType>(static_cast<int8_t *>(res.data()), ptr_A, ptr_B, res.numel());
-    },
-               A, B);
+    },A, B);
     return res;
 }
 
@@ -194,8 +190,7 @@ Tensor GreaterEqualImpl<Device::CPU>::execute(const Tensor &a, const Tensor &b) 
         using AType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_A)>>;
         using BType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_B)>>;
         greater_equal_kernel<AType, BType>(static_cast<int8_t *>(res.data()), ptr_A, ptr_B, res.numel());
-    },
-               A, B);
+    },A, B);
     return res;
 }
 
@@ -207,32 +202,18 @@ Tensor NotEqualImpl<Device::CPU>::execute(const Tensor &a, const Tensor &b) {
         using AType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_A)>>;
         using BType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_B)>>;
         not_equal_kernel<AType, BType>(static_cast<int8_t *>(res.data()), ptr_A, ptr_B, res.numel());
-    },
-               A, B);
+    },A, B);
     return res;
 }
 
 size_t NonZeroImpl<Device::CPU>::execute(const Tensor &a) {
-    switch (a.dtype()) {
-        case DataType::INT8:
-            return not_zero_kernel<int8_t>(static_cast<const int8_t *>(a.data()), a.numel());
-        case DataType::INT16:
-            return not_zero_kernel<int16_t>(static_cast<const int16_t *>(a.data()), a.numel());
-        case DataType::INT32:
-            return not_zero_kernel<int32_t>(static_cast<const int32_t *>(a.data()), a.numel());
-        case DataType::INT64:
-            return not_zero_kernel<int64_t>(static_cast<const int64_t *>(a.data()), a.numel());
-        case DataType::FLOAT16:
-            return not_zero_kernel<float16>(static_cast<const float16 *>(a.data()), a.numel());
-        case DataType::BFLOAT16:
-            return not_zero_kernel<bfloat16>(static_cast<const bfloat16 *>(a.data()), a.numel());
-        case DataType::FLOAT32:
-            return not_zero_kernel<float32>(static_cast<const float32 *>(a.data()), a.numel());
-        case DataType::FLOAT64:
-            return not_zero_kernel<float64>(static_cast<const float64 *>(a.data()), a.numel());
-        default:
-            throw std::runtime_error("mean: unsupported data type");
-    }
+    size_t count = 0;
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        const T* a_ptr = static_cast<const T*>(a.data());
+        count = not_zero_kernel<T>(a_ptr,a.numel());
+    });
+    return count;
 }
 
 template struct EqualImpl<Device::CPU>;
@@ -242,6 +223,4 @@ template struct LessEqualImpl<Device::CPU>;
 template struct GreaterEqualImpl<Device::CPU>;
 template struct NotEqualImpl<Device::CPU>;
 template struct NonZeroImpl<Device::CPU>;
-
-
 }  // namespace ops

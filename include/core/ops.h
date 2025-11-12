@@ -92,7 +92,8 @@ namespace ops{
     OPS_API Tensor Concat(const std::vector<Tensor> &tensors, int dim);
 
     OPS_API void Transpose(Tensor& a); // for 2-d (inplace)
-    OPS_API Tensor Transpose(Tensor& a,std::initializer_list<int64_t> axes); // for n-d
+    OPS_API Tensor Transpose(const Tensor& a,std::initializer_list<int64_t> axes); // for n-d
+    OPS_API void Transpose(const Tensor& a,Tensor& dst,std::initializer_list<int64_t> axes); // for n-d
 
     OPS_API Tensor Equal(const Tensor& a,const Tensor& b);
     OPS_API Tensor NotEqual(const Tensor& a,const Tensor& b);

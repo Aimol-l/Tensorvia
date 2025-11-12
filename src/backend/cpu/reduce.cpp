@@ -82,15 +82,12 @@ float mean_kernel(const Tensor& src) {
 
 template <typename T>
 float min_kernel(const T *ptr, size_t size) {
-
     float min_val = std::numeric_limits<float>::max();
-
     #pragma omp simd reduction(min:min_val)
     for (size_t i = 0; i < size; ++i) {
         float val = static_cast<float>(ptr[i]);
         min_val = std::min(min_val, val);
     }
-
     return min_val;
 }
 
@@ -256,17 +253,13 @@ bool any_kernel(const T *ptr, float val, size_t n) {
 
 // ************************************** 特化 **************************************
 float SumImpl<Device::CPU>::execute(const Tensor& a) {
-    switch (a.dtype()) {
-        case DataType::INT8:     return sum_kernel<int8_t>(static_cast<const int8_t*>(a.data()), a.numel());
-        case DataType::INT16:    return sum_kernel<int16_t>(static_cast<const int16_t*>(a.data()), a.numel());
-        case DataType::INT32:    return sum_kernel<int32_t>(static_cast<const int32_t*>(a.data()), a.numel());
-        case DataType::INT64:    return sum_kernel<int64_t>(static_cast<const int64_t*>(a.data()), a.numel());
-        case DataType::FLOAT16:  return sum_kernel<float16>(static_cast<const float16*>(a.data()), a.numel());
-        case DataType::BFLOAT16: return sum_kernel<bfloat16>(static_cast<const bfloat16*>(a.data()), a.numel());
-        case DataType::FLOAT32:  return sum_kernel<float32>(static_cast<const float32*>(a.data()), a.numel());
-        case DataType::FLOAT64:  return sum_kernel<float64>(static_cast<const float64*>(a.data()), a.numel());
-        default: throw std::runtime_error("sum: unsupported data type");
-    }
+    float sum = 0;
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        const T* a_ptr = static_cast<const T*>(a.data());
+        sum = sum_kernel<T>(a_ptr,a.numel());
+    });
+    return sum;
 }
 
 Tensor SumImpl<Device::CPU>::execute(const Tensor& a, int axis) {
@@ -276,40 +269,30 @@ Tensor SumImpl<Device::CPU>::execute(const Tensor& a, int axis) {
     }
     auto a_shape = a.shape();
     int dim = a_shape.size();
-
     size_t outer_size = 1;
     for(int i = 0; i < axis; ++i) outer_size *= a_shape[i];
-    size_t axis_size = a.shape()[axis];
+    size_t axis_size = a.shape(axis);
     size_t inner_size = 1;
     for(int i = axis+1; i < dim; ++i) inner_size *= a_shape[i];
 
-    Tensor result(new_shape, a.dtype(), Device::CPU);
 
-    switch (a.dtype()) {
-        case DataType::INT8:      sum_kernel<int8_t>(static_cast<const int8_t*>(a.data()), static_cast<int8_t*>(result.data()), outer_size, inner_size, axis_size);break;
-        case DataType::INT16:     sum_kernel<int16_t>(static_cast<const int16_t*>(a.data()), static_cast<int16_t*>(result.data()), outer_size, inner_size, axis_size);break;
-        case DataType::INT32:     sum_kernel<int32_t>(static_cast<const int32_t*>(a.data()), static_cast<int32_t*>(result.data()), outer_size, inner_size, axis_size);break;
-        case DataType::INT64:     sum_kernel<int64_t>(static_cast<const int64_t*>(a.data()), static_cast<int64_t*>(result.data()), outer_size, inner_size, axis_size);break;
-        case DataType::FLOAT16:   sum_kernel<float16>(static_cast<const float16*>(a.data()), static_cast<float16*>(result.data()), outer_size, inner_size, axis_size);break;
-        case DataType::BFLOAT16:  sum_kernel<bfloat16>(static_cast<const bfloat16*>(a.data()), static_cast<bfloat16*>(result.data()), outer_size, inner_size, axis_size);break;
-        case DataType::FLOAT32:   sum_kernel<float32>(static_cast<const float32*>(a.data()), static_cast<float32*>(result.data()), outer_size, inner_size, axis_size);break;
-        case DataType::FLOAT64:   sum_kernel<float64>(static_cast<const float64*>(a.data()), static_cast<float64*>(result.data()), outer_size, inner_size, axis_size);break;
-        default: throw std::runtime_error("sum: unsupported data type");
-    }
+    Tensor result(new_shape, a.dtype(), Device::CPU);
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        const T* a_ptr = static_cast<const T*>(a.data());
+        T* res_ptr = static_cast<T*>(result.data());
+        sum_kernel<T>(a_ptr,res_ptr,outer_size, inner_size, axis_size);
+    });
     return result;
 }
 float MinImpl<Device::CPU>::execute(const Tensor& a) {
-    switch (a.dtype()) {
-        case DataType::INT8:     return min_kernel<int8_t>(static_cast<const int8_t*>(a.data()), a.numel());
-        case DataType::INT16:    return min_kernel<int16_t>(static_cast<const int16_t*>(a.data()), a.numel());
-        case DataType::INT32:    return min_kernel<int32_t>(static_cast<const int32_t*>(a.data()), a.numel());
-        case DataType::INT64:    return min_kernel<int64_t>(static_cast<const int64_t*>(a.data()), a.numel());
-        case DataType::FLOAT16:  return min_kernel<float16>(static_cast<const float16*>(a.data()), a.numel());
-        case DataType::BFLOAT16: return min_kernel<bfloat16>(static_cast<const bfloat16*>(a.data()), a.numel());
-        case DataType::FLOAT32:  return min_kernel<float32>(static_cast<const float32*>(a.data()), a.numel());
-        case DataType::FLOAT64:  return min_kernel<float64>(static_cast<const float64*>(a.data()), a.numel());
-        default: throw std::runtime_error("min: unsupported data type");
-    }
+    float min = 0;
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        const T* a_ptr = static_cast<const T*>(a.data());
+        min = min_kernel<T>(a_ptr,a.numel());
+    });
+    return min;
 }
 
 Tensor MinImpl<Device::CPU>::execute(const Tensor& a, int axis) {
@@ -325,34 +308,23 @@ Tensor MinImpl<Device::CPU>::execute(const Tensor& a, int axis) {
     size_t axis_size = a.shape()[axis];
     size_t inner_size = 1;
     for(int i = axis+1; i < dim; ++i) inner_size *= a_shape[i];
-
     Tensor result(new_shape, a.dtype(), Device::CPU);
-
-    switch (a.dtype()) {
-        case DataType::INT8:     min_kernel<int8_t>(static_cast<const int8_t*>(a.data()), static_cast<int8_t*>(result.data()), outer_size, inner_size, axis_size);break;
-        case DataType::INT16:    min_kernel<int16_t>(static_cast<const int16_t*>(a.data()), static_cast<int16_t*>(result.data()), outer_size, inner_size, axis_size);break;
-        case DataType::INT32:    min_kernel<int32_t>(static_cast<const int32_t*>(a.data()), static_cast<int32_t*>(result.data()), outer_size, inner_size, axis_size);break;
-        case DataType::INT64:    min_kernel<int64_t>(static_cast<const int64_t*>(a.data()), static_cast<int64_t*>(result.data()), outer_size, inner_size, axis_size);break;
-        case DataType::FLOAT16:  min_kernel<float16>(static_cast<const float16*>(a.data()), static_cast<float16*>(result.data()), outer_size, inner_size, axis_size);break;
-        case DataType::BFLOAT16: min_kernel<bfloat16>(static_cast<const bfloat16*>(a.data()), static_cast<bfloat16*>(result.data()), outer_size, inner_size, axis_size);break;
-        case DataType::FLOAT32:  min_kernel<float32>(static_cast<const float32*>(a.data()), static_cast<float32*>(result.data()), outer_size, inner_size, axis_size);break;
-        case DataType::FLOAT64:  min_kernel<float64>(static_cast<const float64*>(a.data()), static_cast<float64*>(result.data()), outer_size, inner_size, axis_size);break;
-        default: throw std::runtime_error("min: unsupported data type");
-    }
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        const T* a_ptr = static_cast<const T*>(a.data());
+        T* res_ptr = static_cast<T*>(result.data());
+        min_kernel<T>(a_ptr,res_ptr,outer_size, inner_size, axis_size);
+    });
     return result;
 }
 float MaxImpl<Device::CPU>::execute(const Tensor& a) {
-    switch (a.dtype()) {
-        case DataType::INT8:     return max_kernel<int8_t>(static_cast<const int8_t*>(a.data()), a.numel());
-        case DataType::INT16:    return max_kernel<int16_t>(static_cast<const int16_t*>(a.data()), a.numel());
-        case DataType::INT32:    return max_kernel<int32_t>(static_cast<const int32_t*>(a.data()), a.numel());
-        case DataType::INT64:    return max_kernel<int64_t>(static_cast<const int64_t*>(a.data()), a.numel());
-        case DataType::FLOAT16:  return max_kernel<float16>(static_cast<const float16*>(a.data()), a.numel());
-        case DataType::BFLOAT16: return max_kernel<bfloat16>(static_cast<const bfloat16*>(a.data()), a.numel());
-        case DataType::FLOAT32:  return max_kernel<float32>(static_cast<const float32*>(a.data()), a.numel());
-        case DataType::FLOAT64:  return max_kernel<float64>(static_cast<const float64*>(a.data()), a.numel());
-        default: throw std::runtime_error("max: unsupported data type");
-    }
+    float max = 0;
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        const T* a_ptr = static_cast<const T*>(a.data());
+        max = max_kernel<T>(a_ptr,a.numel());
+    });
+    return max;
 }
 
 Tensor MaxImpl<Device::CPU>::execute(const Tensor& a, int axis) {
@@ -370,32 +342,21 @@ Tensor MaxImpl<Device::CPU>::execute(const Tensor& a, int axis) {
     for(int i = axis+1; i < dim; ++i) inner_size *= a_shape[i];
 
     Tensor result(new_shape, a.dtype(), Device::CPU);
-
-    switch (a.dtype()) {
-        case DataType::INT8:     max_kernel<int8_t>(static_cast<const int8_t*>(a.data()), static_cast<int8_t*>(result.data()), outer_size, inner_size, axis_size);break;
-        case DataType::INT16:    max_kernel<int16_t>(static_cast<const int16_t*>(a.data()), static_cast<int16_t*>(result.data()), outer_size, inner_size, axis_size);break;
-        case DataType::INT32:    max_kernel<int32_t>(static_cast<const int32_t*>(a.data()), static_cast<int32_t*>(result.data()), outer_size, inner_size, axis_size);break;
-        case DataType::INT64:    max_kernel<int64_t>(static_cast<const int64_t*>(a.data()), static_cast<int64_t*>(result.data()), outer_size, inner_size, axis_size);break;
-        case DataType::FLOAT16:  max_kernel<float16>(static_cast<const float16*>(a.data()), static_cast<float16*>(result.data()), outer_size, inner_size, axis_size);break;
-        case DataType::BFLOAT16: max_kernel<bfloat16>(static_cast<const bfloat16*>(a.data()), static_cast<bfloat16*>(result.data()), outer_size, inner_size, axis_size);break;
-        case DataType::FLOAT32:  max_kernel<float32>(static_cast<const float32*>(a.data()), static_cast<float32*>(result.data()), outer_size, inner_size, axis_size);break;
-        case DataType::FLOAT64:  max_kernel<float64>(static_cast<const float64*>(a.data()), static_cast<float64*>(result.data()), outer_size, inner_size, axis_size);break;
-        default: throw std::runtime_error("max: unsupported data type");
-    }
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        const T* a_ptr = static_cast<const T*>(a.data());
+        T* res_ptr = static_cast<T*>(result.data());
+        max_kernel<T>(a_ptr,res_ptr,outer_size, inner_size, axis_size);
+    });
     return result;
 }
 float MeanImpl<Device::CPU>::execute(const Tensor& a) {
-    switch (a.dtype()) {
-        case DataType::INT8:     return mean_kernel<int8_t>(a);
-        case DataType::INT16:    return mean_kernel<int16_t>(a);
-        case DataType::INT32:    return mean_kernel<int32_t>(a);
-        case DataType::INT64:    return mean_kernel<int64_t>(a);
-        case DataType::FLOAT16:  return mean_kernel<float16>(a);
-        case DataType::BFLOAT16: return mean_kernel<bfloat16>(a);
-        case DataType::FLOAT32:  return mean_kernel<float32>(a);
-        case DataType::FLOAT64:  return mean_kernel<float64>(a);
-        default: throw std::runtime_error("mean: unsupported data type");
-    }
+    float mean = 0;
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        mean = mean_kernel<T>(a);
+    });
+    return mean;
 }
 Tensor MeanImpl<Device::CPU>::execute(const Tensor& a, int axis) {
     std::vector<int64_t> new_shape;
@@ -412,18 +373,12 @@ Tensor MeanImpl<Device::CPU>::execute(const Tensor& a, int axis) {
     for(int i = axis+1; i < dim; ++i) inner_size *= a_shape[i];
 
     Tensor result(new_shape, DataType::FLOAT32, Device::CPU);
-
-    switch (a.dtype()) {
-        case DataType::INT8:     mean_kernel<int8_t>(static_cast<const int8_t*>(a.data()), static_cast<float*>(result.data()), outer_size, inner_size, axis_size);break;
-        case DataType::INT16:    mean_kernel<int16_t>(static_cast<const int16_t*>(a.data()), static_cast<float*>(result.data()), outer_size, inner_size, axis_size);break;
-        case DataType::INT32:    mean_kernel<int32_t>(static_cast<const int32_t*>(a.data()), static_cast<float*>(result.data()), outer_size, inner_size, axis_size);break;
-        case DataType::INT64:    mean_kernel<int64_t>(static_cast<const int64_t*>(a.data()), static_cast<float*>(result.data()), outer_size, inner_size, axis_size);break;
-        case DataType::FLOAT16:  mean_kernel<float16>(static_cast<const float16*>(a.data()), static_cast<float*>(result.data()), outer_size, inner_size, axis_size);break;
-        case DataType::BFLOAT16: mean_kernel<bfloat16>(static_cast<const bfloat16*>(a.data()), static_cast<float*>(result.data()), outer_size, inner_size, axis_size);break;
-        case DataType::FLOAT32:  mean_kernel<float32>(static_cast<const float32*>(a.data()), static_cast<float*>(result.data()), outer_size, inner_size, axis_size);break;
-        case DataType::FLOAT64:  mean_kernel<float64>(static_cast<const float64*>(a.data()), static_cast<float*>(result.data()), outer_size, inner_size, axis_size);break;
-        default: throw std::runtime_error("mean: unsupported data type");
-    }
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        const T* a_ptr = static_cast<const T*>(a.data());
+        float* res_ptr = static_cast<float*>(result.data());
+        mean_kernel<T>(a_ptr,res_ptr,outer_size, inner_size, axis_size);
+    });
     return result;
 }
 Tensor ArgMaxImpl<Device::CPU>::execute(const Tensor &a, int axis){
@@ -442,17 +397,12 @@ Tensor ArgMaxImpl<Device::CPU>::execute(const Tensor &a, int axis){
     for(int i = axis+1; i < dim; ++i) inner_size *= a.shape()[i];
     
     Tensor result(new_shape,DataType::INT32,Device::CPU);
-    switch (a.dtype()) {
-        case DataType::INT8:     argmax_kernel<int8_t>(static_cast<const int8_t*>(a.data()), static_cast<int8_t*>(result.data()), outer_size, inner_size, axis_size); break;
-        case DataType::INT16:    argmax_kernel<int16_t>(static_cast<const int16_t*>(a.data()), static_cast<int16_t*>(result.data()), outer_size, inner_size, axis_size); break;
-        case DataType::INT32:    argmax_kernel<int32_t>(static_cast<const int32_t*>(a.data()), static_cast<int32_t*>(result.data()), outer_size, inner_size, axis_size); break;
-        case DataType::INT64:    argmax_kernel<int64_t>(static_cast<const int64_t*>(a.data()), static_cast<int64_t*>(result.data()), outer_size, inner_size, axis_size); break;
-        case DataType::FLOAT16:  argmax_kernel<float16>(static_cast<const float16*>(a.data()), static_cast<float16*>(result.data()), outer_size, inner_size, axis_size); break;
-        case DataType::FLOAT32:  argmax_kernel<float32>(static_cast<const float32*>(a.data()), static_cast<float32*>(result.data()), outer_size, inner_size, axis_size); break;
-        case DataType::FLOAT64:  argmax_kernel<float64>(static_cast<const float64*>(a.data()), static_cast<float64*>(result.data()), outer_size, inner_size, axis_size); break;
-        case DataType::BFLOAT16: argmax_kernel<bfloat16>(static_cast<const bfloat16*>(a.data()), static_cast<bfloat16*>(result.data()), outer_size, inner_size, axis_size); break;
-        default: throw std::runtime_error("argmax: unsupported data type");
-    }
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        const T* a_ptr = static_cast<const T*>(a.data());
+        T* res_ptr = static_cast<T*>(result.data());
+        argmax_kernel<T>(a_ptr,res_ptr,outer_size, inner_size, axis_size);
+    });
     return result;
 }
 Tensor ArgMinImpl<Device::CPU>::execute(const Tensor &a, int axis) {
@@ -470,46 +420,31 @@ Tensor ArgMinImpl<Device::CPU>::execute(const Tensor &a, int axis) {
     for(int i = axis+1; i < dim; ++i) inner_size *= a_shape[i];
 
     Tensor result(new_shape, DataType::INT32, Device::CPU);
-    switch (a.dtype()) {
-        case DataType::INT8:     argmin_kernel<int8_t>(static_cast<const int8_t*>(a.data()), static_cast<int8_t*>(result.data()), outer_size, inner_size, axis_size); break;
-        case DataType::INT16:    argmin_kernel<int16_t>(static_cast<const int16_t*>(a.data()), static_cast<int16_t*>(result.data()), outer_size, inner_size, axis_size); break;
-        case DataType::INT32:    argmin_kernel<int32_t>(static_cast<const int32_t*>(a.data()), static_cast<int32_t*>(result.data()), outer_size, inner_size, axis_size); break;
-        case DataType::INT64:    argmin_kernel<int64_t>(static_cast<const int64_t*>(a.data()), static_cast<int64_t*>(result.data()), outer_size, inner_size, axis_size); break;
-        case DataType::FLOAT16:  argmin_kernel<float16>(static_cast<const float16*>(a.data()), static_cast<float16*>(result.data()), outer_size, inner_size, axis_size); break;
-        case DataType::FLOAT32:  argmin_kernel<float32>(static_cast<const float32*>(a.data()), static_cast<float32*>(result.data()), outer_size, inner_size, axis_size); break;
-        case DataType::FLOAT64:  argmin_kernel<float64>(static_cast<const float64*>(a.data()), static_cast<float64*>(result.data()), outer_size, inner_size, axis_size); break;
-        case DataType::BFLOAT16: argmin_kernel<bfloat16>(static_cast<const bfloat16*>(a.data()), static_cast<bfloat16*>(result.data()), outer_size, inner_size, axis_size); break;
-        default: throw std::runtime_error("argmin: unsupported data type");
-    }
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        const T* a_ptr = static_cast<const T*>(a.data());
+        T* res_ptr = static_cast<T*>(result.data());
+        argmin_kernel<T>(a_ptr,res_ptr,outer_size, inner_size, axis_size);
+    });
     return result;
 }
 bool AllImpl<Device::CPU>::execute(const Tensor& a, float value) {
-    switch (a.dtype()) {
-        case DataType::INT8:     return all_kernel<int8_t>(static_cast<const int8_t*>(a.data()), value, a.numel());
-        case DataType::INT16:    return all_kernel<int16_t>(static_cast<const int16_t*>(a.data()), value, a.numel());
-        case DataType::INT32:    return all_kernel<int32_t>(static_cast<const int32_t*>(a.data()), value, a.numel());
-        case DataType::INT64:    return all_kernel<int64_t>(static_cast<const int64_t*>(a.data()), value, a.numel());
-        case DataType::FLOAT16:  return all_kernel<float16>(static_cast<const float16*>(a.data()), value, a.numel());
-        case DataType::BFLOAT16: return all_kernel<bfloat16>(static_cast<const bfloat16*>(a.data()), value, a.numel());
-        case DataType::FLOAT32:  return all_kernel<float32>(static_cast<const float32*>(a.data()), value, a.numel());
-        case DataType::FLOAT64:  return all_kernel<float64>(static_cast<const float64*>(a.data()), value, a.numel());
-        default: throw std::runtime_error("mean: unsupported data type");
-    }
+    bool all;
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        const T* a_ptr = static_cast<const T*>(a.data());
+        all = all_kernel<T>(a_ptr, value, a.numel());
+    });
+    return all;
 }
 bool AnyImpl<Device::CPU>::execute(const Tensor& a, float value) {
-    switch (a.dtype()) {
-        case DataType::INT8:
-            return any_kernel<int8_t>(static_cast<const int8_t *>(a.data()), value, a.numel());
-        case DataType::INT16:
-            return any_kernel<int16_t>(static_cast<const int16_t *>(a.data()), value, a.numel());
-        case DataType::INT32:    return any_kernel<int32_t>(static_cast<const int32_t*>(a.data()), value, a.numel());
-        case DataType::INT64:    return any_kernel<int64_t>(static_cast<const int64_t*>(a.data()), value, a.numel());
-        case DataType::FLOAT16:  return any_kernel<float16>(static_cast<const float16*>(a.data()), value, a.numel());
-        case DataType::BFLOAT16: return any_kernel<bfloat16>(static_cast<const bfloat16*>(a.data()), value, a.numel());
-        case DataType::FLOAT32:  return any_kernel<float32>(static_cast<const float32*>(a.data()), value, a.numel());
-        case DataType::FLOAT64:  return any_kernel<float64>(static_cast<const float64*>(a.data()), value, a.numel());
-        default: throw std::runtime_error("mean: unsupported data type");
-    }
+    bool any;
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        const T* a_ptr = static_cast<const T*>(a.data());
+        any = any_kernel<T>(a_ptr, value, a.numel());
+    });
+    return any;
 }
 template struct SumImpl<Device::CPU>;
 template struct MaxImpl<Device::CPU>;

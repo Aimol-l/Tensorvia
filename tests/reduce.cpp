@@ -15,11 +15,11 @@ std::vector<DataType> GetAllDataTypes() {
 
 int main() {
     for(auto& dtype : GetAllDataTypes()) {
-        Tensor temp = Tensor::Random({3,3},-10,10,dtype);
-        ops::println(temp);
-        LOG_INFO("res: " << ops::Any(static_cast<const Tensor&>(temp), 0));
-        // ops::println(ops::Argmax(temp, 1));
-        LOG_INFO("Data type: " << dtype_to_string(dtype));
+        Tensor temp = Tensor::Random({3000,3000},-10,10,dtype);
+        RUNNING_TIME(ops::Min(static_cast<const Tensor&>(temp)));
+        RUNNING_TIME(ops::Max(static_cast<const Tensor&>(temp)));
+        RUNNING_TIME(ops::Mean(static_cast<const Tensor&>(temp)));
+        RUNNING_TIME(ops::Sum(static_cast<const Tensor&>(temp)));
     }
     return 0;
 }

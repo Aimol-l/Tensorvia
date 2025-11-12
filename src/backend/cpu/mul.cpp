@@ -110,11 +110,8 @@ Tensor MulImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
 
     const Tensor& a_ = (a.dtype() == DataType::FLOAT16 || a.dtype() == DataType::BFLOAT16)?ops::Typecast(a,DataType::FLOAT32) : a;
     const Tensor& b_ = (b.dtype() == DataType::FLOAT16 || b.dtype() == DataType::BFLOAT16)?ops::Typecast(b,DataType::FLOAT32) : b;
-
-
     DataType res_type = compute_type(a_.dtype(),b_.dtype());
     Tensor result(newshape,res_type,Device::CPU);
-
     omp_set_num_threads(std::min(omp_get_max_threads(), 16));
     auto c_visitor = [&]<typename T, typename R>(const T* a_ptr,const R* b_ptr) {
         switch (res_type) {
@@ -139,6 +136,7 @@ Tensor MulImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
     };
     auto A = data_as_const_variant(a_.dtype(),a_.data());
     auto B = data_as_const_variant(b_.dtype(),b_.data());
+    
     std::visit([&](auto A_ptr, auto B_ptr){
         using T = std::remove_cv_t<std::remove_pointer_t<decltype(A_ptr)>>;
         using R = std::remove_cv_t<std::remove_pointer_t<decltype(B_ptr)>>;

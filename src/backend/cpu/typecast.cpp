@@ -26,36 +26,39 @@ Tensor TypecastImpl<Device::CPU>::execute(const Tensor& a, DataType dst_type) {
                 dst_typed_ptr,
                 size);
         };
-        switch (dst_type) {
-            case DataType::INT8:
-                dispatch_dst(static_cast<int8_t*>(result.data()));
-                break;
-            case DataType::INT16:
-                dispatch_dst(static_cast<int16_t*>(result.data()));
-                break;
-            case DataType::INT32:
-                dispatch_dst(static_cast<int32_t*>(result.data()));
-                break;
-            case DataType::INT64:
-                dispatch_dst(static_cast<int64_t*>(result.data()));
-                break;
-            case DataType::FLOAT16:
-                dispatch_dst(static_cast<float16*>(result.data()));
-                break;
-            case DataType::BFLOAT16:
-                dispatch_dst(static_cast<bfloat16*>(result.data()));
-                break;
-            case DataType::FLOAT32:
-                dispatch_dst(static_cast<float32*>(result.data()));
-                break;
-            case DataType::FLOAT64:
-                dispatch_dst(static_cast<float64*>(result.data()));
-                break;
-            default:
-                throw std::runtime_error("Unsupported destination type");
-        }
-    },
-               src_ptr);
+        dispatch_dtype(dst_type, [&](auto type_id) {
+            using T = typename decltype(type_id)::type;
+            dispatch_dst(static_cast<T*>(result.data()));
+        });
+        // switch (dst_type) {
+        //     case DataType::INT8:
+        //         dispatch_dst(static_cast<int8_t*>(result.data()));
+        //         break;
+        //     case DataType::INT16:
+        //         dispatch_dst(static_cast<int16_t*>(result.data()));
+        //         break;
+        //     case DataType::INT32:
+        //         dispatch_dst(static_cast<int32_t*>(result.data()));
+        //         break;
+        //     case DataType::INT64:
+        //         dispatch_dst(static_cast<int64_t*>(result.data()));
+        //         break;
+        //     case DataType::FLOAT16:
+        //         dispatch_dst(static_cast<float16*>(result.data()));
+        //         break;
+        //     case DataType::BFLOAT16:
+        //         dispatch_dst(static_cast<bfloat16*>(result.data()));
+        //         break;
+        //     case DataType::FLOAT32:
+        //         dispatch_dst(static_cast<float32*>(result.data()));
+        //         break;
+        //     case DataType::FLOAT64:
+        //         dispatch_dst(static_cast<float64*>(result.data()));
+        //         break;
+        //     default:
+        //         throw std::runtime_error("Unsupported destination type");
+        // }
+    },src_ptr);
     return result;
 }
 

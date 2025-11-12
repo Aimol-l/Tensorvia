@@ -16,7 +16,6 @@ inline void fill_value_impl(T* ptr, float val, size_t numel) {
 }
 template <typename T>
 void fill_random_impl(T* typed_ptr, size_t numel, float min, float max) {
-// T* typed_ptr = static_cast<T*>(ptr);
     #pragma omp parallel
     {
         std::mt19937 rng(static_cast<unsigned int>(
@@ -36,145 +35,48 @@ void fill_random_impl(T* typed_ptr, size_t numel, float min, float max) {
 }
 
 //****************************** 特化 ***********************************
-
 Tensor ZerosImpl<Device::CPU>::execute(const std::vector<int64_t>& shape, DataType dtype) {
-    Tensor temp(shape, dtype, Device::CPU);
-    void* data_ptr = temp.data();
-    size_t numel = temp.numel();
-    switch (dtype) {
-        case DataType::INT8:
-            fill_value_impl<int8_t>(static_cast<int8_t*>(data_ptr), 0, numel);
-            break;
-        case DataType::INT16:
-            fill_value_impl<int16_t>(static_cast<int16_t*>(data_ptr), 0, numel);
-            break;
-        case DataType::INT32:
-            fill_value_impl<int32_t>(static_cast<int32_t*>(data_ptr), 0, numel);
-            break;
-        case DataType::INT64:
-            fill_value_impl<int64_t>(static_cast<int64_t*>(data_ptr), 0, numel);
-            break;
-        case DataType::FLOAT16:
-            fill_value_impl<float16>(static_cast<float16*>(data_ptr), 0, numel);
-            break;
-        case DataType::FLOAT32:
-            fill_value_impl<float32>(static_cast<float32*>(data_ptr), 0, numel);
-            break;
-        case DataType::FLOAT64:
-            fill_value_impl<float64>(static_cast<float64*>(data_ptr), 0, numel);
-            break;
-        case DataType::BFLOAT16:
-            fill_value_impl<bfloat16>(static_cast<bfloat16*>(data_ptr), 0, numel);
-            break;
-    }
-    return temp;
+    Tensor res(shape, dtype, Device::CPU);
+    dispatch_dtype(dtype, [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        T* res_ptr = static_cast<T*>(res.data());
+        fill_value_impl<T>(res_ptr, 0,res.numel());
+    });
+    return res;
 }
 
 Tensor OnesImpl<Device::CPU>::execute(const std::vector<int64_t>& shape, DataType dtype) {
-    Tensor temp(shape, dtype, Device::CPU);
-    void* data_ptr = temp.data();
-    size_t numel = temp.numel();
-    switch (dtype) {
-        case DataType::INT8:
-            fill_value_impl<int8_t>(static_cast<int8_t*>(data_ptr), 1, numel);
-            break;
-        case DataType::INT16:
-            fill_value_impl<int16_t>(static_cast<int16_t*>(data_ptr), 1, numel);
-            break;
-        case DataType::INT32:
-            fill_value_impl<int32_t>(static_cast<int32_t*>(data_ptr), 1, numel);
-            break;
-        case DataType::INT64:
-            fill_value_impl<int64_t>(static_cast<int64_t*>(data_ptr), 1, numel);
-            break;
-        case DataType::FLOAT16:
-            fill_value_impl<float16>(static_cast<float16*>(data_ptr), 1, numel);
-            break;
-        case DataType::FLOAT32:
-            fill_value_impl<float32>(static_cast<float32*>(data_ptr), 1, numel);
-            break;
-        case DataType::FLOAT64:
-            fill_value_impl<float64>(static_cast<float64*>(data_ptr), 1, numel);
-            break;
-        case DataType::BFLOAT16:
-            fill_value_impl<bfloat16>(static_cast<bfloat16*>(data_ptr), 1, numel);
-            break;
-    }
-    return temp;
+   Tensor res(shape, dtype, Device::CPU);
+    dispatch_dtype(dtype, [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        T* res_ptr = static_cast<T*>(res.data());
+        fill_value_impl<T>(res_ptr, 1,res.numel());
+    });
+    return res;
 }
 
 Tensor FillImpl<Device::CPU>::execute(const std::vector<int64_t>& shape, DataType dtype, float value) {
-    Tensor temp(shape, dtype, Device::CPU);
-    void* data_ptr = temp.data();
-    size_t numel = temp.numel();
-    switch (dtype) {
-        case DataType::INT8:
-            fill_value_impl<int8_t>(static_cast<int8_t*>(data_ptr), value, numel);
-            break;
-        case DataType::INT16:
-            fill_value_impl<int16_t>(static_cast<int16_t*>(data_ptr), value, numel);
-            break;
-        case DataType::INT32:
-            fill_value_impl<int32_t>(static_cast<int32_t*>(data_ptr), value, numel);
-            break;
-        case DataType::INT64:
-            fill_value_impl<int64_t>(static_cast<int64_t*>(data_ptr), value, numel);
-            break;
-        case DataType::FLOAT16:
-            fill_value_impl<float16>(static_cast<float16*>(data_ptr), value, numel);
-            break;
-        case DataType::FLOAT32:
-            fill_value_impl<float32>(static_cast<float32*>(data_ptr), value, numel);
-            break;
-        case DataType::FLOAT64:
-            fill_value_impl<float64>(static_cast<float64*>(data_ptr), value, numel);
-            break;
-        case DataType::BFLOAT16:
-            fill_value_impl<bfloat16>(static_cast<bfloat16*>(data_ptr), value, numel);
-            break;
-    }
-    return temp;
+    Tensor res(shape, dtype, Device::CPU);
+    dispatch_dtype(dtype, [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        T* res_ptr = static_cast<T*>(res.data());
+        fill_value_impl<T>(res_ptr, value,res.numel());
+    });
+    return res;
 }
 
 Tensor RandomImpl<Device::CPU>::execute(const std::vector<int64_t>& shape, DataType dtype, float min, float max) {
-    Tensor temp(shape, dtype, Device::CPU);
-    void* data_ptr = temp.data();
-    size_t numel = temp.numel();
-    switch (dtype) {
-        case DataType::INT8:
-            fill_random_impl<int8_t>(static_cast<int8_t*>(data_ptr), numel, min, max);
-            break;
-        case DataType::INT16:
-            fill_random_impl<int16_t>(static_cast<int16_t*>(data_ptr), numel, min, max);
-            break;
-        case DataType::INT32:
-            fill_random_impl<int32_t>(static_cast<int32_t*>(data_ptr), numel, min, max);
-            break;
-        case DataType::INT64:
-            fill_random_impl<int64_t>(static_cast<int64_t*>(data_ptr), numel, min, max);
-            break;
-        case DataType::FLOAT16:
-            fill_random_impl<float16>(static_cast<float16*>(data_ptr), numel, min, max);
-            break;
-        case DataType::FLOAT32:
-            fill_random_impl<float32>(static_cast<float32*>(data_ptr), numel, min, max);
-            break;
-        case DataType::FLOAT64:
-            fill_random_impl<float64>(static_cast<float64*>(data_ptr), numel, min, max);
-            break;
-        case DataType::BFLOAT16:
-            fill_random_impl<bfloat16>(static_cast<bfloat16*>(data_ptr), numel, min, max);
-            break;
-        default:
-            throw std::runtime_error("Unsupported dtype for random initializer.");
-    }
-    return temp;
+    Tensor res(shape, dtype, Device::CPU);
+    dispatch_dtype(dtype, [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        T* res_ptr = static_cast<T*>(res.data());
+        fill_random_impl<T>(res_ptr,res.numel(),min,max);
+    });
+    return res;
 }
 
 template struct ZerosImpl<Device::CPU>;
 template struct OnesImpl<Device::CPU>;
 template struct FillImpl<Device::CPU>;
 template struct RandomImpl<Device::CPU>;
-
-
 }  // namespace ops

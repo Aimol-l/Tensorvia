@@ -55,88 +55,11 @@ Tensor SliceImpl<Device::CPU>::execute(const Tensor& t, const std::vector<std::p
     }
     // 创建输出 Tensor
     Tensor res(new_shape, t.dtype(), t.device());
-    switch (t.dtype()) {
-        case DataType::INT8:
-            slice_kernel<int8_t>(res, t, ranges);
-            break;
-        case DataType::INT16:
-            slice_kernel<int16_t>(res, t, ranges);
-            break;
-        case DataType::INT32:
-            slice_kernel<int32_t>(res, t, ranges);
-            break;
-        case DataType::INT64:
-            slice_kernel<int64_t>(res, t, ranges);
-            break;
-        case DataType::FLOAT16:
-            slice_kernel<float16>(res, t, ranges);
-            break;
-        case DataType::FLOAT32:
-            slice_kernel<float32>(res, t, ranges);
-            break;
-        case DataType::FLOAT64:
-            slice_kernel<float64>(res, t, ranges);
-            break;
-        case DataType::BFLOAT16:
-            slice_kernel<bfloat16>(res, t, ranges);
-            break;
-        default:
-            throw std::runtime_error("slice: unsupported data type");
-    }
+    dispatch_dtype(res.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        slice_kernel<T>(res, t, ranges);
+    });
     return res;
 }
-
-// 性能优化版本(未测试)
-// static Tensor execute(const Tensor& t, const std::vector<std::pair<int, int>>& ranges) {
-//     const auto& t_shape = t.shape();
-//     const size_t t_dim = t_shape.size();
-//     const size_t slice_dim = ranges.size();
-//     // 1. 构建输出 shape
-//     std::vector<int64_t> new_shape;
-//     new_shape.reserve(t_dim);
-//     for (size_t i = 0; i < slice_dim; ++i)
-//         new_shape.push_back(ranges[i].second - ranges[i].first);
-//     for (size_t i = slice_dim; i < t_dim; ++i)
-//         new_shape.push_back(t_shape[i]);
-//     Tensor res(new_shape, t.dtype(), t.device());
-//     // 2. 构建原张量 strides（行主序）
-//     std::vector<size_t> strides(t_dim, 1);
-//     for (int i = static_cast<int>(t_dim) - 2; i >= 0; --i)
-//         strides[i] = strides[i + 1] * t_shape[i + 1];
-//     // 3. 预先计算右开起始值
-//     std::vector<int64_t> starts;
-//     starts.reserve(slice_dim);
-//     for (const auto& [start, _] : ranges)
-//         starts.push_back(start);
-//     const size_t elem_size = calc_dtype_size(t.dtype());
-//     const char* __restrict src_data = static_cast<const char*>(t.data());
-//     char* __restrict dst_data = static_cast<char*>(res.data());
-//     const auto& out_shape = res.shape();
-//     // 4. 预计算每一维的 out_strides（帮助将线性idx转为多维索引）
-//     std::vector<size_t> out_strides(out_shape.size(), 1);
-//     for (int i = static_cast<int>(out_shape.size()) - 2; i >= 0; --i)
-//         out_strides[i] = out_strides[i + 1] * out_shape[i + 1];
-//     // 5. 避免动态分配 indices，使用 stack 分配（性能好）
-//     const size_t total = res.numel();
-//     std::vector<int64_t> coord(out_shape.size());
-//     for (size_t linear_idx = 0; linear_idx < total; ++linear_idx) {
-//         // 解码线性索引为多维坐标
-//         size_t tmp = linear_idx;
-//         for (size_t i = 0; i < out_shape.size(); ++i) {
-//             coord[i] = tmp / out_strides[i];
-//             tmp %= out_strides[i];
-//         }
-//         // 计算源 tensor 偏移（考虑 range 起点）
-//         size_t src_offset = 0;
-//         for (size_t i = 0; i < t_dim; ++i) {
-//             int idx = (i < slice_dim) ? (starts[i] + coord[i]) : coord[i];
-//             src_offset += idx * strides[i];
-//         }
-//         // 快速按元素复制
-//         std::memcpy(dst_data + linear_idx * elem_size, src_data + src_offset * elem_size, elem_size);
-//     }
-//     return res;
-// }
-
 template struct SliceImpl<Device::CPU>;
 }  // namespace ops
