@@ -69,8 +69,6 @@ namespace ops {
     }
     
 
-
-
      void TransposeImpl<Device::SYCL>::execute(Tensor& a){
         auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
         auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
@@ -89,7 +87,7 @@ namespace ops {
         a.reshape(shape);
 
     }
-     Tensor TransposeImpl<Device::SYCL>::execute(Tensor& a,std::initializer_list<int64_t> axes){
+    Tensor TransposeImpl<Device::SYCL>::execute(Tensor& a,std::initializer_list<int64_t> axes){
         // 创建结果张量
         std::vector<int64_t> new_shape;
         std::vector<int64_t> axes_v(axes);
@@ -111,4 +109,4 @@ namespace ops {
         return result;
     }
     template struct TransposeImpl<Device::SYCL>;
-    }  // namespace ops
+}  // namespace ops

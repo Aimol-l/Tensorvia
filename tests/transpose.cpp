@@ -15,21 +15,19 @@ std::vector<DataType> GetAllDataTypes() {
 
 int main() {
 
-    Tensor a = Tensor::Random({3,2000,2500},-10,10,DataType::FLOAT32);
-    Tensor res = Tensor::Random({3,2000,2500},-10,10,DataType::FLOAT32);
-
+    Tensor a = Tensor::Random({2000,2500},-10,10,DataType::FLOAT32);
+    Tensor res = Tensor::Random({2000,2500},-10,10,DataType::FLOAT32);
 
     ops::println(a);
     auto start = std::chrono::high_resolution_clock::now();
 
-    ops::Transpose(a,res,{0,2,1});
+    for(int i =0;i<100;i++)
+        ops::Transpose(a);
 
     auto end = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / 100;
 
-    
-    ops::println(res);
-
-    std::println("avg times = {}us",duration);
+    ops::println(a);
+    ops::println("avg times = {}us",duration);
     return 0;
 }

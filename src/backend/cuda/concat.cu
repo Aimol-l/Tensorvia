@@ -79,19 +79,6 @@ Tensor ConcatImpl<Device::CUDA>::execute(const std::vector<Tensor>& tensors, int
     }
     size_t num_tensor = tensors.size();
 
-    /*
-    @todo 等待测试，暂不考虑
-    // 将所有张量先统一成res_type类型
-    std::vector<Tensor> res_type_tensors(num_tensor);
-    for (int i = 0; i < num_tensor; ++i) {
-        if (tensors[i].dtype() != res_type) {
-            res_type_tensors[i] = ops::ops::Typecast(tensors[i], res_type);
-        }else {
-            res_type_tensors[i] = tensors[i]; // 确保复制张量
-        }
-    }
-    */
-
     out_shape[dim] = concat_size;
     Tensor res(out_shape, res_type, Device::CUDA);
 

@@ -124,13 +124,9 @@ Tensor TransposeImpl<Device::CPU>::execute(const Tensor& a, std::initializer_lis
     return result;
 }
 void TransposeImpl<Device::CPU>::execute(const Tensor& a, Tensor& dst,std::initializer_list<int64_t> axes) {
-    
     std::vector<int64_t> new_shape;
     for (auto axe : axes) new_shape.push_back(a.shape(axe));
-
-    std::println("{}",new_shape);
     dst.reshape(new_shape);
-
     dispatch_dtype(a.dtype(), [&](auto type_id) {
         using T = typename decltype(type_id)::type;
         T* res_ptr = static_cast<T*>(dst.data());

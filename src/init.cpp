@@ -50,4 +50,24 @@ struct CPURegistrar {
         });
     }
 } cpu_registrar;
+
+#ifdef BACKEND_VULKAN // 需要同时使用cpu和sycl
+#include "backend/vulkan/vulkan_tensor.h"
+#include "backend/vulkan/vulkan_context.h"
+struct VulkanRegistrar {
+    std::shared_ptr<VulkanContext> ctx =  std::make_shared<VulkanContext>();
+    VulkanRegistrar() {
+        register_tensor_impl(Device::SYCL, [&](void* ptr,std::vector<int64_t> shape, DataType dtype) {
+            return std::make_shared<VulkanContext>(ptr,shape, dtype,ctx);
+        });
+    }
+} vulkan_registrar;
+struct CPURegistrar {
+    CPURegistrar() {
+        register_tensor_impl(Device::CPU, [](void* ptr,std::vector<int64_t> shape, DataType dtype) {
+            return std::make_shared<CPUTensor>(ptr,shape, dtype);
+        });
+    }
+} cpu_registrar;
+
 #endif

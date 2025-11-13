@@ -12,6 +12,12 @@
 
 namespace ops{ 
 
+    // 打印文本
+    template<typename... Args>
+    OPS_API void println(std::format_string<Args...> fmt, Args&&... args) {
+        std::cout << std::format(fmt, std::forward<Args>(args)...) << '\n';
+    }
+
     // 非CPU后端Tensor会先 to_host(),然后再打印
     OPS_API void println(Tensor & a);
     OPS_API void println(Tensor && a);
@@ -46,7 +52,6 @@ namespace ops{
     // OPS_API void   Sub(const Tensor& a,const Tensor& b,Tensor& dst);
     // OPS_API void   Dot(const Tensor& a,const Tensor& b,Tensor& dst);
     // OPS_API void   Div(const Tensor& a,const Tensor& b,Tensor& dst);
-
 
 
     // [w,k] @ [k,h] --> [w,h]

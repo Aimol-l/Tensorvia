@@ -3,7 +3,9 @@
 #include <cstdint>
 #include <type_traits>
 
-// #define BACKEND_CPU //临时使用
+#ifndef BACKEND_VULKAN
+  #define BACKEND_VULKAN //临时使用
+#endif
 
 template<typename T>
 struct compute_type_helper { using type = T; };
@@ -31,8 +33,8 @@ struct compute_type_helper { using type = T; };
   #include <sycl/sycl.hpp>
   using float16 = sycl::half;
   using bfloat16 = sycl::ext::oneapi::bfloat16;
-  using float32 = float;
-  using float64 = double;
+  using float32 = float;    // 标准单精度浮点
+  using float64 = double;    // 标准双精度浮点
 #endif
 
 #ifdef BACKEND_CUDA // 默认指用nvcc 编译

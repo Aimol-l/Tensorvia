@@ -68,10 +68,8 @@ Tensor AddImpl<Device::CUDA>::execute(const Tensor& a,const Tensor& b){
     // 计算公共类别
     DataType res_type = compute_type(a.dtype(),b.dtype());
     Tensor res(a.shape(),res_type,a.device());
-
     const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a,res_type);
     const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b,res_type);
-
     switch (res_type) {
         case DataType::INT8:            
             add_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const int8_t*>(A.data()),static_cast<const int8_t*>(B.data()), static_cast<int8_t*>(res.data()),numel);break;
@@ -94,7 +92,45 @@ Tensor AddImpl<Device::CUDA>::execute(const Tensor& a,const Tensor& b){
     ctx_impl->wait(); 
     return res;
 }
-
+void AddImpl<Device::CUDA>::execute(const Tensor& a,const Tensor& b,Tensor& dst){
+    DataType res_type = compute_type(a.dtype(),b.dtype());
+    if(dst.dtype() != res_type){
+        throw std::runtime_error("dst dtype error!");
+    }
+    constexpr size_t threads = 256;
+    size_t blocks = (a.numel() + threads - 1) / threads;
+    auto src_impl =  std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_impl->context());
+    // 快速路径：相同类型且无需转换
+    if(a.dtype() == b.dtype()){
+        dispatch_dtype(a.dtype(), [&](auto type_id) {
+            using T = typename decltype(type_id)::type;
+            if constexpr(std::is_same_v<T,float16>){
+                add_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const __half*>(a.data()),static_cast<const __half*>(b.data()), static_cast<__half*>(dst.data()), a.numel());
+            }else if constexpr(std::is_same_v<T,bfloat16>){
+                add_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()),static_cast<const __nv_bfloat16*>(b.data()), static_cast<__nv_bfloat16*>(dst.data()), a.numel());
+            }else{
+                add_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const T*>(a.data()),static_cast<const T*>(b.data()), static_cast<T*>(dst.data()), a.numel());
+            }
+        });
+        ctx_impl->wait(); 
+        return;
+    }
+    // 慢速路径：类型不同，需要 Typecast
+    const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a,res_type);
+    const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b,res_type);
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        if constexpr(std::is_same_v<T,float16>){
+            add_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const __half*>(A.data()),static_cast<const __half*>(B.data()), static_cast<__half*>(dst.data()), a.numel());
+        }else if constexpr(std::is_same_v<T,bfloat16>){
+            add_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(A.data()),static_cast<const __nv_bfloat16*>(B.data()), static_cast<__nv_bfloat16*>(dst.data()), a.numel());
+        }else{
+            add_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const T*>(A.data()),static_cast<const T*>(B.data()), static_cast<T*>(dst.data()), a.numel());
+        }
+    });
+    ctx_impl->wait(); 
+}
 
 template <typename T>
 __global__ void sub_cuda(const T* a_ptr,T* out_ptr,float b, size_t size) {

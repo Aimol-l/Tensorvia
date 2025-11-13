@@ -253,19 +253,6 @@ void AddImpl<Device::SYCL>::execute(Tensor& a,float b){
             using T = typename decltype(type_id)::type;
             add_sycl<T>(static_cast<T*>(a.data()), b, a.numel(),q);
         });
-        // size_t size = a.numel();
-        // // 分发到模板 kernel（根据 dtype 决定类型）
-        // switch (a.dtype()) {
-        //     case DataType::INT8:            add_sycl<int8_t>(a, b,size, q);break;
-        //     case DataType::INT16:           add_sycl<int16_t>(a, b,size, q);break;
-        //     case DataType::INT32:           add_sycl<int32_t>(a, b,size, q);break;
-        //     case DataType::INT64:           add_sycl<int64_t>(a, b,size, q);break;
-        //     case DataType::FLOAT16:         add_sycl<float16>(a, b,size, q);break;
-        //     case DataType::BFLOAT16:        add_sycl<bfloat16>(a, b,size, q);break;
-        //     case DataType::FLOAT32:         add_sycl<float32>(a, b,size, q);break;
-        //     case DataType::FLOAT64:         add_sycl<float64>(a, b,size, q);break;
-        //     default:throw std::runtime_error("Unsupported dtype for add");
-        // }
     }
 // uninplace
 Tensor AddImpl<Device::SYCL>::execute(const Tensor& a, const Tensor& b) {

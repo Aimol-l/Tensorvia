@@ -205,6 +205,10 @@ Tensor AddImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
     return result;
 }
 void AddImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b,Tensor& dst) {
+    DataType res_type = compute_type(a.dtype(),b.dtype());
+    if(dst.dtype() != res_type){
+        throw std::runtime_error("dst dtype error!");
+    }
     // 快速路径：相同类型且无需转换
     if (a.dtype() == b.dtype()) {
         dispatch_dtype(a.dtype(), [&](auto type_id) {
@@ -219,7 +223,6 @@ void AddImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b,Tensor& dst)
         return; // ✅ 关键：快速路径后直接返回！
     }
     // 慢速路径：类型不同，需要 Typecast
-    DataType res_type = compute_type(a.dtype(), b.dtype());
     const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a, res_type);
     const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b, res_type);
     dispatch_dtype(a.dtype(), [&](auto type_id) {

@@ -43,8 +43,8 @@ public:
         std::cout << "Compute Capability: " << prop.major << "." << prop.minor << std::endl;
         std::cout << "Global memory size: " << prop.totalGlobalMem / (1024 * 1024) << " MB" << std::endl;
         std::cout << "Max threads per block: " << prop.maxThreadsPerBlock << std::endl;
-        std::cout << "Max block dimensions: " << prop.maxThreadsDim[0] << " x " << prop.maxThreadsDim[1] << " x " << prop.maxThreadsDim[2] << std::endl;
-        std::cout << "Max grid size: " << prop.maxGridSize[0] << " x " << prop.maxGridSize[1] << " x " << prop.maxGridSize[2] << std::endl;
+        std::cout << std::format("Max block dimensions:[{},{},{}]",prop.maxThreadsDim[0],prop.maxThreadsDim[1],prop.maxThreadsDim[2])<< std::endl;
+        std::cout << std::format("Max grid size:[{},{},{}]",prop.maxGridSize[0],prop.maxGridSize[1],prop.maxGridSize[2])<< std::endl;
         std::cout << "***********************************************************" << std::endl;
     }
     ~CUDAContext() override {

@@ -171,8 +171,12 @@ void dispatch_dtype(DataType type, Func&& f) {
         case DataType::INT16:    f(std::type_identity<int16_t>{}); break;
         case DataType::INT32:    f(std::type_identity<int32_t>{}); break;
         case DataType::INT64:    f(std::type_identity<int64_t>{}); break;
-        case DataType::FLOAT16:  f(std::type_identity<float16>{}); break;
-        case DataType::BFLOAT16: f(std::type_identity<bfloat16>{}); break;
+        case DataType::FLOAT16:  
+            f(std::type_identity<float16>{});
+            break;
+        case DataType::BFLOAT16: 
+            f(std::type_identity<bfloat16>{}); 
+            break;
         case DataType::FLOAT32:  f(std::type_identity<float>{}); break;
         case DataType::FLOAT64:  f(std::type_identity<double>{}); break;
         default:
