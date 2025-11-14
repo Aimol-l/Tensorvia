@@ -2,6 +2,7 @@
 #include "factory.h"
 #include "tensor.h"
 #include <utility>
+#include <print>
 #include <algorithm>
 
 Tensor::Tensor(){
@@ -20,6 +21,7 @@ Tensor::Tensor(){
 #endif
     this->m_meta.shape = {};
     this->m_meta.dtype = DataType::FLOAT32;
+    this->m_meta.calculate_strides();
     this->m_impl = nullptr;
 }
 Tensor::Tensor(std::vector<int64_t> shape,DataType dtype = DataType::FLOAT32){
@@ -39,6 +41,7 @@ Tensor::Tensor(std::vector<int64_t> shape,DataType dtype = DataType::FLOAT32){
 #endif
     this->m_meta.shape = shape;
     this->m_meta.dtype = dtype;
+    this->m_meta.calculate_strides();
     this->m_meta.numel = calc_numel(shape);
     this->m_impl = create_tensor_impl(shape,this->m_meta.dtype, this->m_meta.device);
 }
@@ -61,6 +64,7 @@ Tensor::Tensor(std::initializer_list<int64_t> shape,DataType dtype = DataType::F
 #endif
     this->m_meta.dtype = dtype;
     this->m_meta.shape = shape_;
+    this->m_meta.calculate_strides();
     this->m_meta.numel = calc_numel(shape_);
     m_impl = create_tensor_impl(shape_,this->m_meta.dtype, this->m_meta.device);
 }
@@ -83,6 +87,7 @@ Tensor::Tensor(void *ptr, std::initializer_list<int64_t> shape, DataType dtype, 
 #endif
     this->m_meta.dtype = DataType::FLOAT32;
     this->m_meta.shape = shape_;
+    this->m_meta.calculate_strides();
     this->m_meta.numel = calc_numel(shape_);
     m_impl = create_tensor_impl(ptr,shape_,this->m_meta.dtype, this->m_meta.device);
 }
@@ -103,6 +108,7 @@ Tensor::Tensor(void* ptr, std::vector<int64_t> shape,DataType dtype,Device devic
 #endif
     this->m_meta.dtype = dtype;
     this->m_meta.shape = shape;
+    this->m_meta.calculate_strides();
     this->m_meta.numel = calc_numel(shape);
     m_impl = create_tensor_impl(ptr,shape,this->m_meta.dtype, this->m_meta.device);
 }
@@ -112,6 +118,7 @@ Tensor::Tensor(std::vector<int64_t> shape, DataType dtype, Device device){
     this->m_meta.device = device;
     this->m_meta.dtype = dtype;
     this->m_meta.shape = shape;
+    this->m_meta.calculate_strides();
     this->m_meta.numel = calc_numel(shape);
     this->m_impl = create_tensor_impl(shape, dtype, device);
 }
@@ -120,6 +127,7 @@ Tensor::Tensor(std::initializer_list<int64_t> shape, DataType dtype, Device devi
     this->m_meta.device = device;
     this->m_meta.dtype = dtype;
     this->m_meta.shape = shape;
+    this->m_meta.calculate_strides();
     this->m_meta.numel = calc_numel(shape);
     std::vector<int64_t> shape_(shape);
     this->m_impl = create_tensor_impl(shape_, dtype, device);
@@ -160,6 +168,7 @@ Tensor::Tensor(std::vector<T> &vec, std::initializer_list<int64_t> shape){
         this->m_meta.dtype = DataType::FLOAT16;
     }
     this->m_meta.shape = shape;
+    this->m_meta.calculate_strides();
     this->m_meta.numel = calc_numel(shape);
     m_impl = create_tensor_impl(vec.data(),this->m_meta.shape,this->m_meta.dtype, this->m_meta.device);
 }
@@ -199,14 +208,94 @@ Tensor::Tensor(std::vector<T>& vec, std::vector<int64_t> shape) {
         this->m_meta.dtype = DataType::FLOAT16;
     }
     this->m_meta.shape = shape;
+    this->m_meta.calculate_strides();
     this->m_meta.numel = calc_numel(shape);
     m_impl = create_tensor_impl(vec.data(),this->m_meta.shape,this->m_meta.dtype, this->m_meta.device);
 }
+Tensor Tensor::t(){
+    std::vector<int64_t> new_shape = {m_meta.shape[1], m_meta.shape[0]};
+    std::vector<int64_t> new_strides = {m_meta.strides[1], m_meta.strides[0]};
+    return _make_view(new_shape, new_strides,0);
+}
+Tensor Tensor::permute(std::initializer_list<int64_t> dims) const {
+    std::vector<int64_t> dims_vec(dims);
+    return this->permute(dims_vec);
+}
+Tensor Tensor::slice(const std::vector<std::pair<int64_t, int64_t>>& ranges) const {
+    size_t ndim = m_meta.shape.size();
+    if (ranges.size() > ndim) {
+        throw std::invalid_argument("Too many slice ranges");
+    }
 
+    std::vector<int64_t> new_shape = m_meta.shape;
+    std::vector<int64_t> new_strides = m_meta.strides; // 👈 strides 不变！
+    size_t new_offset = m_meta.offset;
+    std::println("ori_shape={},ori_strides={},ori_offset={}",new_shape, new_strides, new_offset);
+    // new_offset = CWH+WH+H+x
+    for (size_t i = 0; i < ranges.size(); ++i) {
+        int64_t dim_size = m_meta.shape[i];
+        auto [start_raw, end_raw] = ranges[i];
+        // 标准化负索引
+        int64_t start = start_raw < 0 ? start_raw + dim_size : start_raw;
+        int64_t end   = end_raw   < 0 ? end_raw   + dim_size : end_raw;
+        // Clamp to valid range (like Python)
+        start = std::clamp(start, INT64_C(0), dim_size);
+        end   = std::clamp(end,   start,       dim_size);
+        new_shape[i] = end - start;
+        new_offset += static_cast<size_t>(start) * m_meta.strides[i]; // 👈 关键：加 offset
+    }
+    std::println("new_shape={},new_strides={},new_offset={}",new_shape, new_strides, new_offset);
+    return _make_view(new_shape, new_strides, new_offset);
+}
+Tensor Tensor::permute(const std::vector<int64_t>& dims) const {
+    // 1. 检查维度数量是否匹配
+    if (dims.size() != m_meta.shape.size()) {
+        throw std::invalid_argument(
+            "permute: number of dims (" + std::to_string(dims.size()) +
+            ") doesn't match tensor dim (" + std::to_string(m_meta.shape.size()) + ")"
+        );
+    }
+
+    // 2. 检查是否有重复或越界
+    std::vector<bool> seen(dims.size(), false);
+    for (int64_t dim : dims) {
+        int64_t ndim = static_cast<int64_t>(m_meta.shape.size());
+        int64_t normalized = dim >= 0 ? dim : dim + ndim; // 支持负索引
+        if (normalized < 0 || normalized >= ndim) {
+            throw std::invalid_argument("Dimension out of range");
+        }
+        if (seen[normalized]) {
+            throw std::invalid_argument("Duplicate dimension in permute");
+        }
+        seen[normalized] = true;
+    }
+
+    // 3. 构建新的 shape 和 strides
+    std::vector<int64_t> new_shape;
+    std::vector<int64_t> new_strides;
+    new_shape.reserve(dims.size());
+    new_strides.reserve(dims.size());
+
+    for (int64_t dim : dims) {
+        int64_t normalized = dim >= 0 ? dim : dim + static_cast<int64_t>(m_meta.shape.size());
+        new_shape.push_back(m_meta.shape[normalized]);
+        new_strides.push_back(m_meta.strides[normalized]);
+    }
+
+    // 4. 创建视图（共享 Storage）
+    return _make_view(new_shape, new_strides,0);
+}
 Tensor Tensor::clone() const{
     Tensor temp(this->m_meta.shape,this->m_meta.dtype,this->m_meta.device);
-    if (this->m_impl && temp.m_impl)    
-        this->m_impl->copy_to(temp.m_impl->data()); // 同设备复制
+    // 如果是连续内存，可以直接复制
+    if(this->is_contiguous()){
+        this->m_impl->copy_to(temp.m_impl->data());
+        return temp;
+    }
+    // 如果不是连续内存，需要跨步复制
+    auto new_impl = m_impl->clone_as_contiguous(m_meta);
+    temp.m_impl = std::move(new_impl);
+
     return temp;
 }
 
@@ -216,11 +305,103 @@ void* Tensor::data(){
 const void* Tensor::data() const{
     return m_impl->data();
 }
+Tensor Tensor::contiguous()const{
+    if(this->is_contiguous()) return *this;
+    Tensor contig_tensor(m_meta.shape, m_meta.dtype, m_meta.device);
+    auto new_impl = m_impl->clone_as_contiguous(m_meta);
+    contig_tensor.m_impl = std::move(new_impl);
+    return contig_tensor;
+}
+
+bool Tensor::is_contiguous() const {
+    if (m_meta.shape.empty()) {
+        return true; // 标量或空张量视为连续
+    }
+    // 计算期望的 row-major strides（C 风格）
+    std::vector<int64_t> expected_strides(m_meta.shape.size());
+    expected_strides.back() = 1;
+    for (int64_t i = static_cast<int64_t>(m_meta.shape.size()) - 2; i >= 0; --i) {
+        expected_strides[i] = expected_strides[i + 1] * m_meta.shape[i + 1];
+    }
+    return m_meta.strides == expected_strides;
+}
+
+void Tensor::to_contiguous(){
+    if(this->is_contiguous()) return;
+    auto new_impl = m_impl->clone_as_contiguous(m_meta);
+    this->m_impl = std::move(new_impl);
+}
+
+Tensor Tensor::view(std::initializer_list<int64_t> new_shape_list){
+    std::vector<int64_t> new_shape(new_shape_list);
+    return this->view(new_shape);
+}
+Tensor Tensor::view(std::vector<int64_t> new_shape){
+    // 1. 检查是否连续（PyTorch/NumPy 类似）
+    if (!this->is_contiguous()) {
+        throw std::invalid_argument(
+            "view: tensor is not contiguous. Call .contiguous() first."
+        );
+    }
+    // 2. 处理 -1（自动推导维度）
+    int64_t infer_dim = -1;
+    int64_t new_numel = 1;
+    for (size_t i = 0; i < new_shape.size(); ++i) {
+        if (new_shape[i] == -1) {
+            if (infer_dim != -1) {
+                throw std::invalid_argument("Only one dimension can be -1");
+            }
+            infer_dim = static_cast<int64_t>(i);
+            continue;
+        }
+        if (new_shape[i] < 0) {
+            throw std::invalid_argument("Negative dimension size not allowed (except -1)");
+        }
+        new_numel *= new_shape[i];
+    }
+    // 3. 推导 -1 的值
+    if (infer_dim != -1) {
+        if (new_numel == 0 || this->numel() % new_numel != 0) {
+            throw std::invalid_argument(
+                "view: invalid inferred size for -1 (numel mismatch)"
+            );
+        }
+        new_shape[infer_dim] = static_cast<int64_t>(this->numel() / new_numel);
+        new_numel = this->numel();
+    }
+    // 4. 检查元素总数是否匹配
+    if (new_numel != static_cast<int64_t>(this->numel())) {
+        throw std::invalid_argument(
+            "view: new shape numel does not match original numel"
+        );
+    }
+    std::vector<int64_t> new_strides(new_shape.size());
+    if (!new_shape.empty()) {
+        new_strides.back() = 1;
+        for (int64_t i = static_cast<int64_t>(new_shape.size()) - 2; i >= 0; --i) {
+            new_strides[i] = new_strides[i + 1] * new_shape[i + 1];
+        }
+    }
+    return this->_make_view(new_shape, new_strides,0);
+}
+
+Tensor Tensor::_make_view(std::vector<int64_t> shape,std::vector<int64_t> strides,size_t offset) const {
+    Metadata meta;
+    meta.numel = calc_numel(shape);
+    meta.dtype = this->m_meta.dtype;
+    meta.device = this->m_meta.device;
+    meta.offset = offset;
+    meta.shape = std::move(shape);
+    meta.strides = std::move(strides);
+    return Tensor(this->m_impl, std::move(meta));
+}
+
 // 拷贝构造
 Tensor::Tensor(const Tensor& other){
     this->m_meta.device = other.device();
     this->m_meta.dtype =  other.dtype();
     this->m_meta.shape =  other.shape();
+    this->m_meta.calculate_strides();
     this->m_meta.numel =  calc_numel(other.shape());
     this->m_impl =  other.m_impl ? other.m_impl->clone() : nullptr;
 }
@@ -233,7 +414,11 @@ Tensor::Tensor(Tensor &&other) noexcept{
     // 拷贝赋值运算符
 Tensor& Tensor::operator=(const Tensor& other) {
     if (this != &other) {
-        this->m_meta = std::move(other.m_meta);
+        this->m_meta.device = other.device();
+        this->m_meta.dtype =  other.dtype();
+        this->m_meta.shape =  other.shape();
+        this->m_meta.calculate_strides();
+        this->m_meta.numel =  calc_numel(other.shape());
         this->m_impl = other.m_impl ? other.m_impl->clone() : nullptr;
     }
     return *this;
@@ -251,31 +436,30 @@ Device Tensor::device()const{return this->m_meta.device;}
 
 std::vector<int64_t> Tensor::shape() const{return this->m_meta.shape;}
 void Tensor::reshape(std::vector<int64_t> &newshape){
-    int old_total = std::accumulate(this->m_meta.shape.begin(), this->m_meta.shape.end(), 1, std::multiplies<int>());
-    int new_total = std::accumulate(newshape.begin(), newshape.end(), 1, std::multiplies<int>());
+    int old_total = calc_numel(this->m_meta.shape);
+    int new_total = calc_numel(newshape);
     if(old_total != new_total){
         std::string info = std::format("new elements count must be equal to old elements count. {} != {}",old_total,new_total);
         throw std::runtime_error(info);
     }
     this->m_meta.shape.clear();
     this->m_meta.shape.assign(newshape.begin(), newshape.end());
-    m_impl->reshape(newshape);
+    this->m_meta.calculate_strides();
 }
 void Tensor::reshape(std::initializer_list<int64_t> newshape){
-    int old_total = std::accumulate(this->m_meta.shape.begin(), this->m_meta.shape.end(), 1, std::multiplies<int>());
-    int new_total = std::accumulate(newshape.begin(), newshape.end(), 1, std::multiplies<int>());
+    int old_total = calc_numel(this->m_meta.shape);
+    int new_total = calc_numel(newshape);
     if(old_total != new_total){
         throw std::runtime_error("new elements count must be equal to old elements count");
     }
     this->m_meta.shape.clear();
     this->m_meta.shape.assign(newshape.begin(), newshape.end());
-    m_impl->reshape(newshape);
+    this->m_meta.calculate_strides();
 }
 size_t Tensor::dims()const{
     return this->m_meta.shape.size();
 }
-int64_t Tensor::shape(int i)
-{
+int64_t Tensor::shape(int i){
     if(i<0) return this->m_meta.shape[this->m_meta.shape.size()+i];
     return this->m_meta.shape[i];
 }
@@ -330,9 +514,6 @@ Tensor Tensor::empty_like(Tensor& tensor) const{
 
 std::shared_ptr<TensorImpl> Tensor::get_impl() const{
     return m_impl;
-}
-Tensor Tensor::slice(const std::vector<std::pair<int, int>> &ranges) const{
-    return ops::Slice(*this,ranges);
 }
 
 Tensor Tensor::operator+(const Tensor& other) const{
@@ -418,9 +599,9 @@ Tensor Tensor::Random(std::vector<int64_t> shape, float min, float max, DataType
 
 
 template <typename T>
-T Tensor::at(std::initializer_list<int64_t> idxs)
-{
-    if(this->device() != Device::CPU) throw std::runtime_error("Tensor device must be CPU");
+T Tensor::at(std::initializer_list<int64_t> idxs){
+    if(this->device() != Device::CPU) 
+        throw std::runtime_error("Tensor device must be CPU");
     if(idxs.size() != this->m_meta.shape.size()) throw std::runtime_error("Tensor index size must be equal to tensor shape size");
     std::vector<int64_t> idxs_(idxs);
     for(int i =0;i<idxs_.size();i++){
@@ -429,11 +610,10 @@ T Tensor::at(std::initializer_list<int64_t> idxs)
     }
     // 计算线性索引（使用 strides）
     size_t index = 0;
-    size_t stride = 1;
-    for(int i = this->m_meta.shape.size() - 1; i >= 0; --i){
-        index += idxs_[i] * stride;
-        stride *= this->m_meta.shape[i];
+    for (int i = 0; i < idxs_.size(); i++) {
+        index += idxs_[i] * this->m_meta.strides[i];
     }
+
     switch (this->m_meta.dtype) {
         case DataType::INT8:    return static_cast<T>(static_cast<int8_t*>(this->data())[index]);
         case DataType::INT16:   return static_cast<T>(static_cast<int16_t*>(this->data())[index]);
@@ -458,11 +638,9 @@ T Tensor::operator[](std::initializer_list<int64_t> idxs){
             throw std::runtime_error("index out of range");
     }
     // 计算线性索引（使用 strides）
-    size_t index = 0;
-    size_t stride = 1;
-    for(int i = this->m_meta.shape.size() - 1; i >= 0; --i){
-        index += idxs_[i] * stride;
-        stride *= this->m_meta.shape[i];
+    size_t index = this->m_meta.offset;
+    for (int i = 0; i < idxs_.size(); i++) {
+        index += idxs_[i] * this->m_meta.strides[i];
     }
     switch (this->m_meta.dtype) {
         case DataType::INT8:    return static_cast<T>(static_cast<int8_t*>(this->data())[index]);
@@ -490,6 +668,7 @@ Tensor& Tensor::squeeze(int dim){
     }
     // 将shape中是1的维度去除，数据存储不修改
     if (this->m_meta.shape[dim] == 1)  this->m_meta.shape.erase(this->m_meta.shape.begin()+dim);
+    this->m_meta.calculate_strides();
     return *this;
 }
 Tensor& Tensor::unsqueeze(size_t dim){

@@ -88,35 +88,10 @@ inline void _println(const Tensor& a) {
 }
 
 void PrintlnImpl<Device::CPU>::execute(const Tensor& a) {
-    switch (a.dtype()) {
-        case DataType::INT8:
-            _println<int8_t>(a);
-            break;
-        case DataType::INT16:
-            _println<int16_t>(a);
-            break;
-        case DataType::INT32:
-            _println<int32_t>(a);
-            break;
-        case DataType::INT64:
-            _println<int64_t>(a);
-            break;
-        case DataType::FLOAT16:
-            _println<float16>(a);
-            break;
-        case DataType::FLOAT32:
-            _println<float32>(a);
-            break;
-        case DataType::FLOAT64:
-            _println<float64>(a);
-            break;
-        case DataType::BFLOAT16:
-            _println<bfloat16>(a);
-            break;
-        default:
-            std::cerr << "Unsupported dtype in println\n";
-            break;
-    }
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        _println<T>(a);
+    });
 }
 
 template struct PrintlnImpl<Device::CPU>;

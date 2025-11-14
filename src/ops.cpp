@@ -55,7 +55,7 @@ namespace ops {
         if(a.device() == Device::CPU){
             PrintlnImpl<Device::CPU>::execute(a);
         }else{
-            Tensor temp = a.clone();
+            Tensor temp = a.clone(); // clone()默认会contiguous
             temp.to_host();
             PrintlnImpl<Device::CPU>::execute(temp);
         }
@@ -69,6 +69,7 @@ namespace ops {
             PrintlnImpl<Device::CPU>::execute(a);
         } else {
             a.to_host(); // 修改 a 是安全的，因为它是一个临时对象
+            a.to_contiguous();
             PrintlnImpl<Device::CPU>::execute(a);
         }
         std::cout<<std::format("Tensor dtype: {} | Tensor device: {}",dtype_to_string(a.dtype()), device_to_string(dev))<<std::endl;
@@ -146,7 +147,7 @@ namespace ops {
         #endif
     }
     
-    Tensor Slice(const Tensor& t, const std::vector<std::pair<int, int>>& ranges){
+    Tensor Slice(const Tensor& t, const std::vector<std::pair<int64_t, int64_t>>& ranges){
         // 合法性判断
         if(ranges.empty())  
             throw std::runtime_error("Slice ranges cannot be empty");
@@ -154,7 +155,7 @@ namespace ops {
         if(ranges.size() != t.shape().size())   
             throw std::runtime_error("Slice ranges size must be equal to tensor shape size");
         // 每个整数对要合法: 左边必须小于等于右边,左边需要>=0,右边需要小于max_
-        for(int i = 0; i < ranges.size(); i++){
+        for(int64_t i = 0; i < ranges.size(); i++){
             if(ranges[i].first > ranges[i].second)
                 throw std::runtime_error("first must be less than second");
             if(ranges[i].first < 0 || ranges[i].first > ranges[i].second) 

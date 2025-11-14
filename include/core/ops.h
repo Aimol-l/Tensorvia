@@ -27,7 +27,7 @@ namespace ops{
     OPS_API Tensor Fill(const std::vector<int64_t>& shape, DataType dtype, float value);
     OPS_API Tensor Random(const std::vector<int64_t>& shape, DataType dtype,float min,float max);
     
-    OPS_API Tensor Slice(const Tensor& t, const std::vector<std::pair<int, int>>& ranges);
+    OPS_API Tensor Slice(const Tensor& t, const std::vector<std::pair<int64_t, int64_t>>& ranges);
     
     // inplace
     OPS_API void Add(Tensor& a,float b);

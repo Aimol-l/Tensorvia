@@ -7,7 +7,7 @@
 namespace ops {
 
 template <typename T>
-void slice_kernel(Tensor& out, const Tensor& in, const std::vector<std::pair<int, int>>& ranges) {
+void slice_kernel(Tensor& out, const Tensor& in, const std::vector<std::pair<int64_t, int64_t>>& ranges) {
     auto t_shape = in.shape();
     size_t t_dim = t_shape.size();
     auto new_shape = out.shape();
@@ -40,7 +40,7 @@ void slice_kernel(Tensor& out, const Tensor& in, const std::vector<std::pair<int
     }
 }
 
-Tensor SliceImpl<Device::CPU>::execute(const Tensor& t, const std::vector<std::pair<int, int>>& ranges) {
+Tensor SliceImpl<Device::CPU>::execute(const Tensor& t, const std::vector<std::pair<int64_t, int64_t>>& ranges) {
     const auto& t_shape = t.shape();
     const size_t t_dim = t_shape.size();
     const size_t slice_dim = ranges.size();

@@ -9,7 +9,7 @@ namespace ops {
 
     template <>
     struct SliceImpl<Device::CPU> {
-        static Tensor execute(const Tensor& t, const std::vector<std::pair<int, int>>& ranges);
+        static Tensor execute(const Tensor& t, const std::vector<std::pair<int64_t, int64_t>>& ranges);
     };
 
 extern template struct SliceImpl<Device::CPU>;

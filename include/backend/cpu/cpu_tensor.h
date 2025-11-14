@@ -32,7 +32,6 @@ public:
     void copy_to(void* dst) const override;           // 同设备
     std::unique_ptr<TensorImpl> clone() const override;
     std::shared_ptr<ContextImpl> context() const override;
-    void reshape(std::vector<int64_t>& newshape)override;
-    void reshape(std::initializer_list<int64_t> newshape)override;
+    std::unique_ptr<TensorImpl> clone_as_contiguous(const Metadata&) const override;
 
 };

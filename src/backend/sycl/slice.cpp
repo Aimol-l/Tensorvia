@@ -4,7 +4,7 @@
 namespace ops {
 
     template <typename T, int MAX_DIMS = 8>
-    void slice_sycl(Tensor& output, const Tensor& input, const std::vector<std::pair<int, int>>& ranges, sycl::queue& q) {
+    void slice_sycl(Tensor& output, const Tensor& input, const std::vector<std::pair<int64_t, int64_t>>& ranges, sycl::queue& q) {
         const T* in_data = static_cast<const T*>(input.data());
         T* out_data = static_cast<T*>(output.data());
 
@@ -51,7 +51,7 @@ namespace ops {
     }
 
 
-Tensor SliceImpl<Device::SYCL>::execute(const Tensor& t, const std::vector<std::pair<int, int>>& ranges){
+Tensor SliceImpl<Device::SYCL>::execute(const Tensor& t, const std::vector<std::pair<int64_t, int64_t>>& ranges){
         // 计算新的shape
         std::vector<int64_t> new_shape;
         for (size_t i = 0; i < ranges.size(); ++i) {

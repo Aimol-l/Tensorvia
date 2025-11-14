@@ -8,6 +8,23 @@
 #include "core/context.h"
 #include "core/type_traits.h"
 
+struct Metadata {
+    size_t numel = 0;                 // 记录tensor元素个数
+    size_t offset = 0;                // 偏移量
+    Device device;                // 记录tensor数据所在后端设备
+    DataType dtype;               // 记录元素数据类型
+    std::vector<int64_t> shape;   // shape
+    std::vector<int64_t> strides; // 每维步长（单位：元素个数)
+    void calculate_strides() {
+        strides.resize(shape.size());
+        if (shape.empty()) return;
+        strides[shape.size() - 1] = 1;
+        for (int i = shape.size() - 2; i >= 0; --i) {
+            strides[i] = strides[i + 1] * shape[i + 1];
+        }
+    }
+};
+
 class TensorImpl {
 public:
     virtual ~TensorImpl() = default;
@@ -15,25 +32,18 @@ public:
     virtual size_t numel() const = 0;
     virtual void copy_to(void* dst) const = 0;                      // 同设备
     virtual const void* data() const = 0;
-    virtual void reshape(std::vector<int64_t>& newshape)=0;
-    virtual void reshape(std::initializer_list<int64_t> newshape)=0;
     virtual std::unique_ptr<TensorImpl> clone() const = 0;
+    virtual std::unique_ptr<TensorImpl> clone_as_contiguous(const Metadata&) const = 0;
     virtual std::shared_ptr<ContextImpl> context() const = 0;
-};
-struct Metadata {
-    bool contiguous;              // 记录当前tensor是否为连续存储
-    size_t numel;                 // 记录tensor元素个数
-    Device device;                // 记录tensor数据所在后端设备
-    DataType dtype;               // 记录元素数据类型
-    std::vector<int64_t> shape;   // shape
-    std::vector<int64_t> strides; // 每维步长（单位：元素个数）
-    size_t storage_offset = 0;    // 起始偏移（单位：元素个数）
 };
 
 class Tensor {
 private:
     Metadata m_meta;
     std::shared_ptr<TensorImpl> m_impl;
+private:
+    Tensor(std::shared_ptr<TensorImpl> impl,Metadata meta): m_impl(std::move(impl)), m_meta(std::move(meta)) {}
+    Tensor _make_view(std::vector<int64_t> shape,std::vector<int64_t> strides,size_t offset) const;
 public:
     void*data();
     const void* data() const;
@@ -46,10 +56,18 @@ public:
     void to_host();
     void to_device(uint32_t id=0);
 
+    void to_contiguous();
+    Tensor contiguous()const;
+    bool is_contiguous()const;
+
+
     size_t dims()const;
     size_t numel() const {return m_meta.numel;}
     Tensor empty_like(Tensor& tensor) const;
     std::shared_ptr<TensorImpl> get_impl() const;
+
+    Tensor view(std::vector<int64_t> new_shape_list);
+    Tensor view(std::initializer_list<int64_t> new_shape);
 
     // 构造函数
     Tensor();
@@ -69,8 +87,6 @@ public:
     Tensor& operator=(const Tensor& other); // 拷贝赋值运算符
     Tensor& operator=(Tensor&& other) noexcept;  // 移动赋值运算符
 
-    // 切片
-
     Tensor operator+(const Tensor& other) const;
     Tensor operator-(const Tensor& other) const;
     Tensor operator*(const Tensor& other) const;
@@ -87,13 +103,18 @@ public:
     int64_t shape(int i)const;
     std::vector<int64_t> shape()const;
 
-    // reshape,不改变数据排列
+
+    Tensor t();     // 返回视图
+    Tensor permute(const std::vector<int64_t>& dims)const; // 返回视图
+    Tensor permute(std::initializer_list<int64_t> dims)const; // 返回视图
+    Tensor slice(const std::vector<std::pair<int64_t, int64_t>>& ranges)const; // 返回视图
+
+    // 不改变数据排列
     void reshape(std::vector<int64_t>& newshape);
     void reshape(std::initializer_list<int64_t> newshape);
 
     Tensor& squeeze(int dim = -1); // 清除shape中的1
     Tensor& unsqueeze(size_t dim); // 在shape指定维度dim中插入1
-    Tensor slice(const std::vector<std::pair<int,int>>& ranges) const;
 
     Tensor operator==(const Tensor& other) const;
     Tensor operator==(const float val) const;

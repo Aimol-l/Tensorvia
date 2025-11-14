@@ -44,7 +44,7 @@ __global__ void slice_cuda(
     output_data[linear_idx] = input_data[src_offset];
 }
 
-Tensor SliceImpl<Device::CUDA>::execute(const Tensor& a, const std::vector<std::pair<int, int>>& ranges) {
+Tensor SliceImpl<Device::CUDA>::execute(const Tensor& a, const std::vector<std::pair<int64_t, int64_t>>& ranges) {
     auto a_shape = a.shape();
     size_t a_dim = a_shape.size();
     const size_t slice_dim = ranges.size();

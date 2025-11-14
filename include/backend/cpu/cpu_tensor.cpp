@@ -5,11 +5,6 @@ size_t CPUTensor::numel() const{return m_numel;}
 std::shared_ptr<ContextImpl> CPUTensor::context() const{
     return nullptr;
 }
-void CPUTensor::reshape(std::vector<int64_t> &newshape){
-    m_shape.clear();
-    m_shape.assign(newshape.begin(), newshape.end());
-}
-
 void CPUTensor::init(void *ptr, std::vector<int64_t> shape, DataType dtype){
     m_dtype = dtype;
     m_numel = calc_numel(shape);
@@ -21,10 +16,6 @@ void CPUTensor::init(void *ptr, std::vector<int64_t> shape, DataType dtype){
     if(ptr != nullptr) std::memcpy(raw_ptr,ptr,total_bytes);
     m_data.reset(raw_ptr);
 }
-void CPUTensor::reshape(std::initializer_list<int64_t> newshape){
-    m_shape.clear();
-    m_shape.assign(newshape.begin(), newshape.end());
-}
 CPUTensor::CPUTensor(std::vector<int64_t> shape, DataType dtype){
     this->init(nullptr,shape,dtype);
 }
@@ -34,10 +25,39 @@ CPUTensor::CPUTensor(void *ptr, std::vector<int64_t> shape, DataType dtype){
 
 std::unique_ptr<TensorImpl> CPUTensor::clone() const{
     auto cloned = std::make_unique<CPUTensor>(this->m_shape, this->m_dtype);
-    // 计算字节大小
     size_t bytes = this->m_numel * calc_dtype_size(this->m_dtype);
-    // 拷贝数据
     std::memcpy(cloned->m_data.get(), this->m_data.get(), bytes);
+    return cloned;
+}
+std::unique_ptr<TensorImpl> CPUTensor::clone_as_contiguous(const Metadata& meta) const{
+    auto cloned = std::make_unique<CPUTensor>(meta.shape, this->m_dtype);
+    size_t dtype_size = calc_dtype_size(this->m_dtype);
+    size_t total_elements = meta.numel;
+    if (total_elements == 0) return cloned;
+    const char* src_base = static_cast<const char*>(this->m_data.get()) 
+                         + meta.offset * dtype_size;
+    char* dst = static_cast<char*>(cloned->m_data.get());
+    // 预计算 divisors for coordinate decomposition
+    std::vector<size_t> divisors(meta.shape.size());
+    if (!meta.shape.empty()) {
+        divisors[0] = total_elements / meta.shape[0];
+        for (size_t i = 1; i < meta.shape.size(); ++i) {
+            divisors[i] = divisors[i - 1] / meta.shape[i];
+        }
+    }
+    for (size_t dst_idx = 0; dst_idx < total_elements; ++dst_idx) {
+        size_t src_elem_offset = 0;
+        size_t temp = dst_idx;
+        for (size_t dim = 0; dim < meta.shape.size(); ++dim) {
+            size_t coord = (dim == 0) ? temp / divisors[0] 
+                                      : (temp % divisors[dim - 1]) / divisors[dim];
+            src_elem_offset += coord * meta.strides[dim];
+            if (dim == 0) temp = temp % divisors[0];
+        }
+        std::memcpy(dst + dst_idx * dtype_size,
+                    src_base + src_elem_offset * dtype_size,
+                    dtype_size);
+    }
     return cloned;
 }
 // cpu --> cpu
