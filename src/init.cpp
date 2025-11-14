@@ -50,6 +50,8 @@ struct CPURegistrar {
         });
     }
 } cpu_registrar;
+#endif
+
 
 #ifdef BACKEND_VULKAN // 需要同时使用cpu和sycl
 #include "backend/vulkan/vulkan_tensor.h"

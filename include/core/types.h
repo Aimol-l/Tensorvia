@@ -3,8 +3,8 @@
 #include <cstdint>
 #include <type_traits>
 
-#ifndef BACKEND_VULKAN
-  #define BACKEND_VULKAN //临时使用
+#ifndef BACKEND_CPU
+  #define BACKEND_CPU //临时使用
 #endif
 
 template<typename T>

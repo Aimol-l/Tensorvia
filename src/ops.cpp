@@ -649,7 +649,7 @@ namespace ops {
             throw std::runtime_error("tensor a is null");
 
         // 暂时不支持虚数，所以最好全都要是非负数
-        if ((a < 0).any(1))
+        if (ops::Any((a < 0),1))
             throw std::runtime_error("tensor must be non-negative");
 
         // 后端实现分发
@@ -718,7 +718,7 @@ namespace ops {
             throw std::runtime_error("tensor a is null");
         
         // log 的 定义域必须大于0
-        if ((a < 0).any(1))
+        if (ops::Any((a < 0),1))
             throw std::runtime_error("log: tensor must be non-negative");
             
         // 后端实现分发
