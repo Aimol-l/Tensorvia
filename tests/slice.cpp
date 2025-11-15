@@ -5,12 +5,15 @@
 
 int main() {
 
-    Tensor a = Tensor::Random({7,7},-10,10,DataType::FLOAT32);
+    Tensor a = Tensor::Random({2048,2592},-10,10,DataType::FLOAT32);
 
     ops::println(a);
     
-    auto b = a.slice({{1,5},{2,7}}).clone();
+    auto b = a.slice({{1,5},{2,7}}); // 非连续的
+    auto c = a.slice({{1,5},{2,7}}).clone(); // 经过克隆，是连续的
+
     ops::println(b);
+    ops::println(c);
 
     return 0;
 }

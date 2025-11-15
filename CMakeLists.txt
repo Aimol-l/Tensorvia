@@ -104,6 +104,7 @@ if(BACKEND_CUDA)
     file(GLOB_RECURSE CUDA_OPS_SOURCES 
         "${PROJECT_SOURCE_DIR}/src/backend/cuda/*.cu"
         "${PROJECT_SOURCE_DIR}/include/backend/cuda/*.cpp"
+        "${PROJECT_SOURCE_DIR}/include/backend/cuda/*.cu"
     )
     list(APPEND SRC_FILES ${CUDA_OPS_SOURCES})
 endif()

@@ -43,7 +43,7 @@ Tensor::Tensor(std::vector<int64_t> shape,DataType dtype = DataType::FLOAT32){
     this->m_meta.dtype = dtype;
     this->m_meta.calculate_strides();
     this->m_meta.numel = calc_numel(shape);
-    this->m_impl = create_tensor_impl(shape,this->m_meta.dtype, this->m_meta.device);
+    this->m_impl = create_tensor_impl(this->m_meta.numel,this->m_meta.dtype, this->m_meta.device);
 }
 Tensor::Tensor(std::initializer_list<int64_t> shape,DataType dtype = DataType::FLOAT32){
     if(shape.size() == 0) throw std::runtime_error("Tensor shape cannot be empty");
@@ -66,7 +66,7 @@ Tensor::Tensor(std::initializer_list<int64_t> shape,DataType dtype = DataType::F
     this->m_meta.shape = shape_;
     this->m_meta.calculate_strides();
     this->m_meta.numel = calc_numel(shape_);
-    m_impl = create_tensor_impl(shape_,this->m_meta.dtype, this->m_meta.device);
+    m_impl = create_tensor_impl(this->m_meta.numel,this->m_meta.dtype, this->m_meta.device);
 }
 Tensor::Tensor(void *ptr, std::initializer_list<int64_t> shape, DataType dtype, Device device){
     if(shape.size() == 0) throw std::runtime_error("Tensor shape cannot be empty");
@@ -89,7 +89,7 @@ Tensor::Tensor(void *ptr, std::initializer_list<int64_t> shape, DataType dtype, 
     this->m_meta.shape = shape_;
     this->m_meta.calculate_strides();
     this->m_meta.numel = calc_numel(shape_);
-    m_impl = create_tensor_impl(ptr,shape_,this->m_meta.dtype, this->m_meta.device);
+    m_impl = create_tensor_impl(ptr,this->m_meta.numel,this->m_meta.dtype, this->m_meta.device);
 }
 Tensor::Tensor(void* ptr, std::vector<int64_t> shape,DataType dtype,Device device) {
     if(shape.size() == 0) throw std::runtime_error("Tensor shape cannot be empty");
@@ -110,7 +110,7 @@ Tensor::Tensor(void* ptr, std::vector<int64_t> shape,DataType dtype,Device devic
     this->m_meta.shape = shape;
     this->m_meta.calculate_strides();
     this->m_meta.numel = calc_numel(shape);
-    m_impl = create_tensor_impl(ptr,shape,this->m_meta.dtype, this->m_meta.device);
+    m_impl = create_tensor_impl(ptr,this->m_meta.numel,this->m_meta.dtype, this->m_meta.device);
 }
 
 Tensor::Tensor(std::vector<int64_t> shape, DataType dtype, Device device){
@@ -120,7 +120,7 @@ Tensor::Tensor(std::vector<int64_t> shape, DataType dtype, Device device){
     this->m_meta.shape = shape;
     this->m_meta.calculate_strides();
     this->m_meta.numel = calc_numel(shape);
-    this->m_impl = create_tensor_impl(shape, dtype, device);
+    this->m_impl = create_tensor_impl(this->m_meta.numel, dtype, device);
 }
 Tensor::Tensor(std::initializer_list<int64_t> shape, DataType dtype, Device device){
     if(shape.size() == 0) throw std::runtime_error("Tensor shape cannot be empty");
@@ -129,8 +129,7 @@ Tensor::Tensor(std::initializer_list<int64_t> shape, DataType dtype, Device devi
     this->m_meta.shape = shape;
     this->m_meta.calculate_strides();
     this->m_meta.numel = calc_numel(shape);
-    std::vector<int64_t> shape_(shape);
-    this->m_impl = create_tensor_impl(shape_, dtype, device);
+    this->m_impl = create_tensor_impl(this->m_meta.numel, dtype, device);
 }
 template <typename T>
 Tensor::Tensor(std::vector<T> &vec, std::initializer_list<int64_t> shape){
@@ -170,7 +169,7 @@ Tensor::Tensor(std::vector<T> &vec, std::initializer_list<int64_t> shape){
     this->m_meta.shape = shape;
     this->m_meta.calculate_strides();
     this->m_meta.numel = calc_numel(shape);
-    m_impl = create_tensor_impl(vec.data(),this->m_meta.shape,this->m_meta.dtype, this->m_meta.device);
+    m_impl = create_tensor_impl(vec.data(),this->m_meta.numel,this->m_meta.dtype, this->m_meta.device);
 }
 
 template<typename T>
@@ -210,7 +209,7 @@ Tensor::Tensor(std::vector<T>& vec, std::vector<int64_t> shape) {
     this->m_meta.shape = shape;
     this->m_meta.calculate_strides();
     this->m_meta.numel = calc_numel(shape);
-    m_impl = create_tensor_impl(vec.data(),this->m_meta.shape,this->m_meta.dtype, this->m_meta.device);
+    m_impl = create_tensor_impl(vec.data(),this->m_meta.numel,this->m_meta.dtype, this->m_meta.device);
 }
 Tensor Tensor::t(){
     std::vector<int64_t> new_shape = {m_meta.shape[1], m_meta.shape[0]};
@@ -230,7 +229,6 @@ Tensor Tensor::slice(const std::vector<std::pair<int64_t, int64_t>>& ranges) con
     std::vector<int64_t> new_shape = m_meta.shape;
     std::vector<int64_t> new_strides = m_meta.strides; // 👈 strides 不变！
     size_t new_offset = m_meta.offset;
-    std::println("ori_shape={},ori_strides={},ori_offset={}",new_shape, new_strides, new_offset);
     // new_offset = CWH+WH+H+x
     for (size_t i = 0; i < ranges.size(); ++i) {
         int64_t dim_size = m_meta.shape[i];
@@ -244,7 +242,6 @@ Tensor Tensor::slice(const std::vector<std::pair<int64_t, int64_t>>& ranges) con
         new_shape[i] = end - start;
         new_offset += static_cast<size_t>(start) * m_meta.strides[i]; // 👈 关键：加 offset
     }
-    std::println("new_shape={},new_strides={},new_offset={}",new_shape, new_strides, new_offset);
     return _make_view(new_shape, new_strides, new_offset);
 }
 Tensor Tensor::permute(const std::vector<int64_t>& dims) const {
@@ -255,7 +252,6 @@ Tensor Tensor::permute(const std::vector<int64_t>& dims) const {
             ") doesn't match tensor dim (" + std::to_string(m_meta.shape.size()) + ")"
         );
     }
-
     // 2. 检查是否有重复或越界
     std::vector<bool> seen(dims.size(), false);
     for (int64_t dim : dims) {
@@ -269,19 +265,16 @@ Tensor Tensor::permute(const std::vector<int64_t>& dims) const {
         }
         seen[normalized] = true;
     }
-
     // 3. 构建新的 shape 和 strides
     std::vector<int64_t> new_shape;
     std::vector<int64_t> new_strides;
     new_shape.reserve(dims.size());
     new_strides.reserve(dims.size());
-
     for (int64_t dim : dims) {
         int64_t normalized = dim >= 0 ? dim : dim + static_cast<int64_t>(m_meta.shape.size());
         new_shape.push_back(m_meta.shape[normalized]);
         new_strides.push_back(m_meta.strides[normalized]);
     }
-
     // 4. 创建视图（共享 Storage）
     return _make_view(new_shape, new_strides,0);
 }
@@ -385,7 +378,7 @@ Tensor Tensor::view(std::vector<int64_t> new_shape){
     return this->_make_view(new_shape, new_strides,0);
 }
 
-Tensor Tensor::_make_view(std::vector<int64_t> shape,std::vector<int64_t> strides,size_t offset) const {
+Tensor Tensor::_make_view(std::vector<int64_t> shape,std::vector<int64_t> strides,int64_t offset) const {
     Metadata meta;
     meta.numel = calc_numel(shape);
     meta.dtype = this->m_meta.dtype;
@@ -476,7 +469,7 @@ Tensor Tensor::to_type(DataType dst){
 // cuda|sycl|vulkan -> cpu
 void Tensor::to_host(){
     if(this->m_meta.device == Device::CPU) return;
-    auto cpu_impl =  create_tensor_impl(this->m_meta.shape, this->m_meta.dtype, Device::CPU);
+    auto cpu_impl =  create_tensor_impl(this->m_meta.numel, this->m_meta.dtype, Device::CPU);
     copy_device_to_host(m_impl,cpu_impl,this->m_meta.dtype); // 
     m_impl = cpu_impl;
     this->m_meta.device = Device::CPU;
@@ -489,19 +482,19 @@ void Tensor::to_device(uint32_t id){
     return ;
 #endif
 #ifdef BACKEND_SYCL
-    auto device_impl = create_tensor_impl(this->m_meta.shape, this->m_meta.dtype, Device::SYCL);
+    auto device_impl = create_tensor_impl(this->m_meta.numel, this->m_meta.dtype, Device::SYCL);
     copy_host_to_device(m_impl,device_impl,this->m_meta.dtype);
     m_impl = std::move(device_impl);
     this->m_meta.device = Device::SYCL;
 #endif
 #ifdef BACKEND_CUDA
-    auto device_impl = create_tensor_impl(this->m_meta.shape, this->m_meta.dtype, Device::CUDA);
+    auto device_impl = create_tensor_impl(this->m_meta.numel, this->m_meta.dtype, Device::CUDA);
     copy_host_to_device(m_impl,device_impl,this->m_meta.dtype);
     m_impl = std::move(device_impl);
     this->m_meta.device = Device::CUDA;
 #endif
 #ifdef BACKEND_VULKAN
-    auto device_impl = create_tensor_impl(this->m_meta.shape, this->m_meta.dtype, Device::VULKAN);
+    auto device_impl = create_tensor_impl(this->m_meta.numel, this->m_meta.dtype, Device::VULKAN);
     copy_host_to_device(m_impl,device_impl,this->m_meta.dtype);
     m_impl = std::move(device_impl);
     this->m_meta.device = Device::VULKAN;
@@ -609,11 +602,10 @@ T Tensor::at(std::initializer_list<int64_t> idxs){
             throw std::runtime_error("index out of range");
     }
     // 计算线性索引（使用 strides）
-    size_t index = 0;
+    size_t index = this->m_meta.offset;
     for (int i = 0; i < idxs_.size(); i++) {
         index += idxs_[i] * this->m_meta.strides[i];
     }
-
     switch (this->m_meta.dtype) {
         case DataType::INT8:    return static_cast<T>(static_cast<int8_t*>(this->data())[index]);
         case DataType::INT16:   return static_cast<T>(static_cast<int16_t*>(this->data())[index]);

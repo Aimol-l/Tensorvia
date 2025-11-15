@@ -3,9 +3,9 @@
 #include <cstdint>
 #include <type_traits>
 
-#ifndef BACKEND_CPU
-  #define BACKEND_CPU //临时使用
-#endif
+// #ifndef BACKEND_CUDA
+//   #define BACKEND_CUDA //临时使用
+// #endif
 
 template<typename T>
 struct compute_type_helper { using type = T; };

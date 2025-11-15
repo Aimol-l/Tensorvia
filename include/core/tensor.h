@@ -10,7 +10,7 @@
 
 struct Metadata {
     size_t numel = 0;                 // 记录tensor元素个数
-    size_t offset = 0;                // 偏移量
+    int64_t offset = 0;                // 偏移量
     Device device;                // 记录tensor数据所在后端设备
     DataType dtype;               // 记录元素数据类型
     std::vector<int64_t> shape;   // shape
@@ -43,7 +43,7 @@ private:
     std::shared_ptr<TensorImpl> m_impl;
 private:
     Tensor(std::shared_ptr<TensorImpl> impl,Metadata meta): m_impl(std::move(impl)), m_meta(std::move(meta)) {}
-    Tensor _make_view(std::vector<int64_t> shape,std::vector<int64_t> strides,size_t offset) const;
+    Tensor _make_view(std::vector<int64_t> shape,std::vector<int64_t> strides,int64_t offset) const;
 public:
     void*data();
     const void* data() const;

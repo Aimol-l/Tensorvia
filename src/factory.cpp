@@ -19,30 +19,25 @@ void register_tensor_impl(Device device, TensorImplFactory factory) {
     }
     factories[device] = std::move(factory);
 }
-std::shared_ptr<TensorImpl> create_tensor_impl(std::vector<int64_t> shape, DataType dtype, Device device) {
+std::shared_ptr<TensorImpl> create_tensor_impl(size_t numel, DataType dtype, Device device) {
     auto it = factories.find(device);
-
-    // shape必须存在元素,且都大于0
-    if (shape.empty()) throw std::invalid_argument("shape must not be empty");
-    for (auto i : shape) {
-        if (i <= 0) throw std::invalid_argument("shape must be positive");
+    if(numel <=0 ){
+        throw std::invalid_argument("numel must be bigger then 0");
     }
     if (it == factories.end()) {
         throw std::runtime_error(std::format("No tensor implementation registered for this device: {}",device_to_string(device)));
     }
-    return it->second(nullptr,shape, dtype);
+    return it->second(nullptr,numel, dtype);
 }
-std::shared_ptr<TensorImpl> create_tensor_impl(void*ptr,std::vector<int64_t> shape, DataType dtype, Device device) {
+std::shared_ptr<TensorImpl> create_tensor_impl(void*ptr,size_t numel, DataType dtype, Device device) {
     if (ptr == nullptr) 
         throw std::runtime_error("create_tensor_impl: ptr is null");
     auto it = factories.find(device);
-    if (shape.empty()) 
-        throw std::invalid_argument("shape must not be empty");
-    for (auto i : shape) {
-        if (i <= 0) throw std::invalid_argument("shape must be positive");
+    if(numel <=0 ){
+        throw std::invalid_argument("numel must be bigger then 0");
     }
     if (it == factories.end()) {
         throw std::runtime_error(std::format("No tensor implementation registered for this device:{}",device_to_string(device)));
     }
-    return it->second(ptr,shape, dtype);
+    return it->second(ptr,numel, dtype);
 }

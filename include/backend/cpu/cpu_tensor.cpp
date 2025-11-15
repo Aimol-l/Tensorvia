@@ -5,10 +5,9 @@ size_t CPUTensor::numel() const{return m_numel;}
 std::shared_ptr<ContextImpl> CPUTensor::context() const{
     return nullptr;
 }
-void CPUTensor::init(void *ptr, std::vector<int64_t> shape, DataType dtype){
+void CPUTensor::init(void *ptr,size_t numel, DataType dtype){
     m_dtype = dtype;
-    m_numel = calc_numel(shape);
-    m_shape = shape;
+    m_numel = numel;
     size_t total_bytes = m_numel * calc_dtype_size(m_dtype);
     void* raw_ptr = std::malloc(total_bytes);
     if (!raw_ptr) 
@@ -16,21 +15,22 @@ void CPUTensor::init(void *ptr, std::vector<int64_t> shape, DataType dtype){
     if(ptr != nullptr) std::memcpy(raw_ptr,ptr,total_bytes);
     m_data.reset(raw_ptr);
 }
-CPUTensor::CPUTensor(std::vector<int64_t> shape, DataType dtype){
-    this->init(nullptr,shape,dtype);
+CPUTensor::CPUTensor(size_t numel, DataType dtype){
+    this->init(nullptr,numel,dtype);
 }
-CPUTensor::CPUTensor(void *ptr, std::vector<int64_t> shape, DataType dtype){
-    this->init(ptr,shape,dtype);
+CPUTensor::CPUTensor(void *ptr,size_t numel, DataType dtype){
+    this->init(ptr,numel,dtype);
 }
 
 std::unique_ptr<TensorImpl> CPUTensor::clone() const{
-    auto cloned = std::make_unique<CPUTensor>(this->m_shape, this->m_dtype);
+    auto cloned = std::make_unique<CPUTensor>(this->m_numel, this->m_dtype);
     size_t bytes = this->m_numel * calc_dtype_size(this->m_dtype);
     std::memcpy(cloned->m_data.get(), this->m_data.get(), bytes);
     return cloned;
 }
 std::unique_ptr<TensorImpl> CPUTensor::clone_as_contiguous(const Metadata& meta) const{
-    auto cloned = std::make_unique<CPUTensor>(meta.shape, this->m_dtype);
+    auto cloned = std::make_unique<CPUTensor>(meta.numel, this->m_dtype);
+
     size_t dtype_size = calc_dtype_size(this->m_dtype);
     size_t total_elements = meta.numel;
     if (total_elements == 0) return cloned;

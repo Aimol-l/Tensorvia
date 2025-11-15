@@ -51,28 +51,33 @@ namespace ops {
     OPS_API void println(Tensor & a){
         if(a.data() == nullptr|| a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
-        Device dev = a.device();
+        
         if(a.device() == Device::CPU){
-            PrintlnImpl<Device::CPU>::execute(a);
+            if(a.is_contiguous()){
+                PrintlnImpl<Device::CPU>::execute(a);
+            }else{
+                Tensor temp = a.clone(); // clone()默认会contiguous
+                PrintlnImpl<Device::CPU>::execute(temp);
+            }
         }else{
             Tensor temp = a.clone(); // clone()默认会contiguous
             temp.to_host();
             PrintlnImpl<Device::CPU>::execute(temp);
         }
-        std::cout<<std::format("Tensor dtype: {} | Tensor device: {}",dtype_to_string(a.dtype()), device_to_string(dev))<<std::endl;
+        std::cout<<std::format("Tensor dtype: {} | Tensor device: {}",dtype_to_string(a.dtype()), device_to_string(a.device()))<<std::endl;
     }
     OPS_API void println(Tensor && a) {
         if(a.data() == nullptr|| a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
-        Device dev = a.device();
+        a.to_contiguous(); // 不修改后端设备
+        Device device = a.device();
         if (a.device() == Device::CPU) {
             PrintlnImpl<Device::CPU>::execute(a);
         } else {
             a.to_host(); // 修改 a 是安全的，因为它是一个临时对象
-            a.to_contiguous();
             PrintlnImpl<Device::CPU>::execute(a);
         }
-        std::cout<<std::format("Tensor dtype: {} | Tensor device: {}",dtype_to_string(a.dtype()), device_to_string(dev))<<std::endl;
+        std::cout<<std::format("Tensor dtype: {} | Tensor device: {}",dtype_to_string(a.dtype()), device_to_string(device))<<std::endl;
     }
     Tensor Ones(const std::vector<int64_t>& shape, DataType dtype){
         // 合法性判断
