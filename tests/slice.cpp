@@ -9,8 +9,8 @@ int main() {
 
     ops::println(a);
     
-    auto b = a.slice({{1,5},{2,7}}); // 非连续的
-    auto c = a.slice({{1,5},{2,7}}).clone(); // 经过克隆，是连续的
+    auto b = a.slice({{100,1000},{230,1024}}); // 非连续的
+    auto c = a.slice({{100,1000},{230,1024}}).clone(); // 经过克隆，是连续的
 
     ops::println(b);
     ops::println(c);

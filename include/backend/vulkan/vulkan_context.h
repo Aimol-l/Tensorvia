@@ -23,6 +23,11 @@ private:
     vk::PipelineCache m_pipeline_cache_handle;
     std::unordered_map<size_t, vk::Pipeline> m_pipeline_cache;
 
+    // 添加同步对象
+    std::vector<vk::Fence> m_inflight_fences;
+    std::mutex m_pipeline_cache_mutex;
+
+
     bool m_enableValidationLayers = true;
     VkDebugUtilsMessengerEXT m_debugMessenger;
     PFN_vkDestroyDebugUtilsMessengerEXT pfnDestroyDebugUtilsMessengerEXT = nullptr;
@@ -42,7 +47,10 @@ public:
         this->setupDebugMessenger();
         this->choosePhysicalDevice(); // 按优先级选择设备：独显 > 集显 > 其他
         this->createLogicalDevice();
-
+        this->createCommandPool();  // 创建命令池
+        this->createDescriptorPool();   // 创建描述符池
+        this->createPipelineCache();    // 创建计算管线
+        this->createSyncObjects();      // 创建同步对象
         
         // 打印选中的设备信息
         auto props = m_phydevice.getProperties();
@@ -205,5 +213,72 @@ private:
             throw std::runtime_error(std::string("Failed to create logical device: ") + e.what());
         }
         this->m_compute_queue = m_device.getQueue(m_queuefamily, 0);
+    }
+
+
+    void createCommandPool() {
+        vk::CommandPoolCreateInfo poolInfo;
+        poolInfo.setQueueFamilyIndex(m_queuefamily)
+                .setFlags(vk::CommandPoolCreateFlagBits::eResetCommandBuffer | vk::CommandPoolCreateFlagBits::eTransient);
+        
+        try {
+            m_command_pool = m_device.createCommandPool(poolInfo);
+        } catch (const vk::SystemError& e) {
+            throw std::runtime_error(std::string("Failed to create command pool: ") + e.what());
+        }
+    }
+    void createDescriptorPool() {
+        // 描述符池大小配置 - 根据你的需求调整
+        std::vector<vk::DescriptorPoolSize> poolSizes = {
+            {vk::DescriptorType::eStorageBuffer, 1000},      // 存储缓冲区
+            {vk::DescriptorType::eUniformBuffer, 100},       // 统一缓冲区  
+            {vk::DescriptorType::eCombinedImageSampler, 100}, // 图像采样器
+            {vk::DescriptorType::eStorageImage, 100}         // 存储图像
+        };
+
+        vk::DescriptorPoolCreateInfo poolInfo;
+        poolInfo.setMaxSets(1000)  // 最大描述符集数量
+                .setPoolSizes(poolSizes)
+                .setFlags(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet);
+
+        try {
+            m_descriptor_pool = m_device.createDescriptorPool(poolInfo);
+        } catch (const vk::SystemError& e) {
+            throw std::runtime_error(std::string("Failed to create descriptor pool: ") + e.what());
+        }
+    }
+
+    void createPipelineCache() {
+        vk::PipelineCacheCreateInfo cacheInfo;
+        try {
+            m_pipeline_cache_handle = m_device.createPipelineCache(cacheInfo);
+        } catch (const vk::SystemError& e) {
+            throw std::runtime_error(std::string("Failed to create pipeline cache: ") + e.what());
+        }
+    }
+
+    void createSyncObjects() {
+        // 预创建一些栅栏
+        m_inflight_fences.reserve(10);
+    }
+
+    vk::Fence createFence() {
+        vk::FenceCreateInfo fenceInfo;
+        fenceInfo.setFlags(vk::FenceCreateFlagBits::eSignaled); // 初始为触发状态
+        
+        try {
+            vk::Fence fence = m_device.createFence(fenceInfo);
+            m_inflight_fences.push_back(fence);
+            return fence;
+        } catch (const vk::SystemError& e) {
+            throw std::runtime_error(std::string("Failed to create fence: ") + e.what());
+        }
+    }
+
+    void cleanupSyncObjects() {
+        for (auto& fence : m_inflight_fences) {
+            m_device.destroyFence(fence);
+        }
+        m_inflight_fences.clear();
     }
 };
