@@ -59,8 +59,11 @@ struct CPURegistrar {
 struct VulkanRegistrar {
     std::shared_ptr<VulkanContext> ctx =  std::make_shared<VulkanContext>();
     VulkanRegistrar() {
+        // 注册算子
+
+        // 注册vulkan后端
         register_tensor_impl(Device::SYCL, [&](void* ptr,int64_t numel, DataType dtype) {
-            return std::make_shared<VulkanContext>(ptr,numel, dtype,ctx);
+            return std::make_shared<VulkanTensor>(ptr,numel, dtype,ctx);
         });
     }
 } vulkan_registrar;
