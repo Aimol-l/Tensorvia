@@ -30,12 +30,7 @@ private:
     // matmul --> pipeline_layout
     // relu --> pipeline_layout
     // ...
-    std::unordered_map<std::string, vk::PipelineLayout> m_pipeline_layouts; //
-
-    // matmul --> pipeline_layout
-    // relu --> pipeline_layout
-    // ...
-    std::unordered_map<std::string, vk::DescriptorSetLayout> m_descriptor_set_layouts; //还能共享，为了方便，还是先独享
+    std::unordered_map<std::string, vk::PipelineLayout> m_pipeline_layouts;
 
 
     bool m_enableValidationLayers = true;
@@ -109,7 +104,7 @@ public:
             this->m_pipelines[spvFile] = result.value;
             this->m_device.destroyShaderModule(shaderModule); // ✅ 管线已持有内部副本，可安全销毁
         }
-        
+
     }
 private:
     void createInstance(){
@@ -404,6 +399,7 @@ private:
             binding0.descriptorType = vk::DescriptorType::eStorageBuffer;
             binding0.descriptorCount = 1;
             binding0.stageFlags = vk::ShaderStageFlagBits::eCompute;
+            bindings.push_back(binding0);
         }
         vk::DescriptorSetLayoutCreateInfo layoutInfo{};
         layoutInfo.setBindings(bindings);
