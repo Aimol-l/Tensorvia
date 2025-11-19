@@ -59,6 +59,7 @@ __global__ void add_cuda(const T* a_ptr,const R* b_ptr,T* out_ptr, size_t size) 
     if(i<size)  
         out_ptr[i] = a_ptr[i] + b_ptr[i];
 }
+
 Tensor AddImpl<Device::CUDA>::execute(const Tensor& a,const Tensor& b){
     size_t numel = a.numel();
     constexpr size_t threads = 256;

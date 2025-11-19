@@ -45,6 +45,58 @@
         std::cout << "Execution time: " << duration.count() << "ms" << std::endl; \
     } while (0)
 //**********************************************************
+enum class OpType {
+    Fill,
+    Slice,
+    Matmul,
+    Add,Sub,Dot,Div,
+    Abs,
+    Sin,Cos,Tan,Exp,Relu,Silu,Tanh,Sqrt,Sidmoid,Pow,Log,Softmax,
+    Clamp,Sum,Min,Max,Mean,Concat,
+    Transpose,Equal,NotEqual,Greater,Less,GreaterEqual,LessEqual,
+    All,Any,Nonzero,Argmax,Argmin
+};
+inline const char* op_to_string(OpType op) {
+    switch (op) {
+        case OpType::Fill:      return "fill";
+        case OpType::Slice:    return "slice";
+        case OpType::Matmul:   return "matmul";
+        case OpType::Add:       return "add";
+        case OpType::Sub:       return "sub";
+        case OpType::Dot:       return "dot";
+        case OpType::Div:       return "div";
+        case OpType::Abs:       return "abs";
+        case OpType::Sin:       return "sin";
+        case OpType::Cos:       return "cos";
+        case OpType::Tan:       return "tan";
+        case OpType::Exp:       return "exp";
+        case OpType::Relu:      return "relu";
+        case OpType::Silu:      return "silu";
+        case OpType::Tanh:      return "tanh";
+        case OpType::Sidmoid:   return "sidmoid";
+        case OpType::Pow:       return "pow";
+        case OpType::Log:       return "log";
+        case OpType::Clamp:     return "clamp";
+        case OpType::Sum:       return "sum";
+        case OpType::Min:       return "min";
+        case OpType::Max:       return "max";
+        case OpType::Mean:      return "mean";
+        case OpType::Concat:    return "concat";
+        case OpType::Transpose: return "transpose";
+        case OpType::Equal:     return "equal";
+        case OpType::NotEqual:  return "not_equal";
+        case OpType::Greater:    return "greater";
+        case OpType::Less:       return "less";
+        case OpType::GreaterEqual: return "greater_equal";
+        case OpType::LessEqual:  return "less_equal";
+        case OpType::All:       return "all";
+        case OpType::Any:       return "any";
+        case OpType::Nonzero:   return "nonzero";
+        case OpType::Argmax:    return "argmax";
+        case OpType::Argmin:    return "argmin";
+        default: throw std::invalid_argument("Unknown OpType");
+    }
+}
 enum class Device {
     CPU,
     CUDA,
@@ -73,14 +125,14 @@ constexpr std::string_view device_to_string(Device d) {
 }
 constexpr std::string_view dtype_to_string(DataType t) {
     switch (t) {
-        case DataType::INT8:     return "INT8";
-        case DataType::INT16:    return "INT16";
-        case DataType::INT32:    return "INT32";
-        case DataType::INT64:    return "INT64";
-        case DataType::FLOAT16:  return "FLOAT16";
-        case DataType::FLOAT32:  return "FLOAT32";
-        case DataType::FLOAT64:  return "FLOAT64";
-        case DataType::BFLOAT16: return "BFLOAT16";
+        case DataType::INT8:     return "int8";
+        case DataType::INT16:    return "int16";
+        case DataType::INT32:    return "int32";
+        case DataType::INT64:    return "int64";
+        case DataType::FLOAT16:  return "float16";
+        case DataType::FLOAT32:  return "float32";
+        case DataType::FLOAT64:  return "float64";
+        case DataType::BFLOAT16: return "bfloat16";
         default:                 return "UNKNOWN";
     }
 }
