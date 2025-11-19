@@ -54,8 +54,8 @@ std::unique_ptr<TensorImpl> CUDATensor::clone_as_contiguous(const Metadata& meta
 
 
 //  cuda设备内存 -> cuda设备内存
-void CUDATensor::copy_to(void* dst) const {
-    if(dst == nullptr)
+void CUDATensor::copy_to(TensorImpl& dst) const {
+    if(dst.data() == nullptr)
         throw std::runtime_error("[ERROR] CUDATensor::copy_to: dst is nullptr");
 
     if(!m_data.get())
@@ -63,5 +63,5 @@ void CUDATensor::copy_to(void* dst) const {
     
     size_t size_bytes = m_numel * calc_dtype_size(m_dtype);
 
-    cudaMemcpy(dst, m_data.get(), size_bytes, cudaMemcpyDeviceToDevice);
+    cudaMemcpy(dst.data(), m_data.get(), size_bytes, cudaMemcpyDeviceToDevice);
 }

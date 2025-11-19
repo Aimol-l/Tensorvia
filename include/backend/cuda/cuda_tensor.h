@@ -47,7 +47,7 @@ public:
     size_t numel() const override{return m_numel;}
     const void* data() const override{ return m_data.get();}
 
-    void copy_to(void* dst) const override;
+    void copy_to(TensorImpl& dst) const override;
     std::unique_ptr<TensorImpl> clone() const override;
     std::shared_ptr<ContextImpl> context() const override;
     std::unique_ptr<TensorImpl> clone_as_contiguous(const Metadata&) const override;

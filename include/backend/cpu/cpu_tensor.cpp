@@ -61,9 +61,9 @@ std::unique_ptr<TensorImpl> CPUTensor::clone_as_contiguous(const Metadata& meta)
     return cloned;
 }
 // cpu --> cpu
-void CPUTensor::copy_to(void* dst) const{
-    if (!dst) throw std::runtime_error("Destination pointer is null");
+void CPUTensor::copy_to(TensorImpl& dst) const{
+    if (!dst.data()) throw std::runtime_error("Destination pointer is null");
     if (!m_data) throw std::runtime_error("Source data is null");
     size_t bytes = m_numel * calc_dtype_size(m_dtype);
-    std::memcpy(dst, m_data.get(), bytes);
+    std::memcpy(dst.data(), m_data.get(), bytes);
 }

@@ -51,6 +51,14 @@ public:
     VulkanContext();
     ~VulkanContext() {};
 
+    vk::Device getDevice()const{
+        return m_device;
+    }
+    vk::PhysicalDevice getPhysicalDevice() const { 
+        return m_phydevice; 
+    }
+    vk::CommandPool commandPool() const { return m_command_pool; }
+    vk::Queue computeQueue() const { return m_compute_queue; }
     // 注册算子和背后对应的计算管线。
     // 创建管线需要使用管线布局，管线布局负责描述使用什么类型的shader(vert/frag/compute),确定使用多少输入数据(binding)
     void registerOp(OpType ops, int tensor_count, int params_size);

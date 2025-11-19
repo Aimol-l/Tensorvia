@@ -51,17 +51,17 @@ std::unique_ptr<TensorImpl> SYCLTensor::clone() const
  * SYCL 设备内存 → 另一块 SYCL 设备内存
  * @param dst 目标设备指针（必须为 SYCL 分配的 USM 设备内存）
  */
-void SYCLTensor::copy_to(void* dst) const {
-    if (!dst) throw std::invalid_argument("Destination pointer is null");
+void SYCLTensor::copy_to(TensorImpl& dst) const {
+    if (!dst.data()) throw std::invalid_argument("Destination pointer is null");
     if (!m_data.get()) throw std::runtime_error("Source tensor data is null");
     const size_t bytes = m_numel * calc_dtype_size(m_dtype);
     auto& queue = m_context->get_queue();
-    auto dst_ptr_type = sycl::get_pointer_type(dst, queue.get_context());
+    auto dst_ptr_type = sycl::get_pointer_type(dst.data(), queue.get_context());
     // 检查目标指针类型
     if (dst_ptr_type != sycl::usm::alloc::device) {
         throw std::runtime_error("Destination pointer is not SYCL device memory");
     }
-    queue.memcpy(dst, m_data.get(), bytes).wait();
+    queue.memcpy(dst.data(), m_data.get(), bytes).wait();
 }
 std::shared_ptr<ContextImpl> SYCLTensor::context() const{
     return m_context;

@@ -334,7 +334,7 @@ void VulkanContext::submitCompute(
     const void* push_constants,
     size_t push_size)
 {
-    // 1. 查表
+    // 1. 查表,拿到当前算子的计算管线，管线布局，描述符布局
     auto pipeline_it = m_pipelines.find(op_name);
     auto layout_it   = m_pipeline_layouts.find(op_name);
     auto dsl_it      = m_descriptor_set_layouts.find(op_name);
