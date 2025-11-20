@@ -44,7 +44,7 @@ public:
     void* data() override;
     size_t numel() const override;
     const void* data() const override;
-    void copy_to(TensorImpl& dst) const override;           // 同设备
+    void copy_to(std::shared_ptr<TensorImpl> dst) const override;           // 同设备
     std::unique_ptr<TensorImpl> clone() const override;
     std::shared_ptr<ContextImpl> context() const override;
     void reshape(std::vector<int64_t>& newshape)override;

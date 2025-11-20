@@ -30,7 +30,7 @@ public:
     virtual ~TensorImpl() = default;
     virtual void* data() = 0; 
     virtual size_t numel() const = 0;
-    virtual void copy_to(TensorImpl& dst) const = 0;
+    virtual void copy_to(std::shared_ptr<TensorImpl> dst) const = 0;
     virtual const void* data() const = 0;
     virtual std::unique_ptr<TensorImpl> clone() const = 0;
     virtual std::unique_ptr<TensorImpl> clone_as_contiguous(const Metadata&) const = 0;

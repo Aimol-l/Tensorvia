@@ -28,6 +28,13 @@ struct compute_type_helper { using type = T; };
   using float64 = double;
 #endif
 
+#ifdef BACKEND_VULKAN
+  #include <stdfloat>
+  using float16 = std::float16_t;
+  using bfloat16 = std::bfloat16_t;
+  using float32 = float;
+  using float64 = double;
+#endif
 
 #ifdef BACKEND_SYCL // 默认指用icpx 编译
   #include <sycl/sycl.hpp>
@@ -55,13 +62,7 @@ struct compute_type_helper { using type = T; };
 
 #endif
 
-#ifdef BACKEND_VULKAN
-  #include <stdfloat>
-  using float16 = std::float16_t;
-  using bfloat16 = std::bfloat16_t;
-  using float32 = std::float32_t;
-  using float64 = std::float64_t;
-#endif
+
 
 #ifndef RESTRICT
     #if defined(_MSC_VER)

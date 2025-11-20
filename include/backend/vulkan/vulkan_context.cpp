@@ -22,17 +22,16 @@ VulkanContext::VulkanContext(){
 }
 
 void VulkanContext::registerOp(OpType ops,int tensor_count,int params_size){
-    static constexpr DataType REQUIREDTYPE[] = {
+    static const std::vector<DataType> REQUIREDTYPE = {
         DataType::INT8, DataType::INT16, DataType::INT32, DataType::INT64,
-        DataType::FLOAT16, DataType::FLOAT32, DataType::FLOAT64,
-        DataType::BFLOAT16
+        DataType::FLOAT16, DataType::FLOAT32, DataType::FLOAT64,DataType::BFLOAT16
     };
     std::string op = op_to_string(ops);
     // 创建 pipelineLayout
     this->createPipelineLayout(op,tensor_count,params_size);
     // 加载一个算子的8个不同类型的shader
     for(auto& type:REQUIREDTYPE){
-        std::string spvFile = std::format("{}_{}.spv",op,type);
+        std::string spvFile = std::format("{}_{}.spv",op,dtype_to_string(type));
         std::ifstream file(spvFile.c_str());
         // 判断算子文件是否存在
         if(!file.good()){

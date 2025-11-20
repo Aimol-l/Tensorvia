@@ -22,12 +22,12 @@ private:
     vk::DescriptorPool m_descriptor_pool;
     std::vector<vk::Fence> m_inflight_fences;
 
-    // matmul_i8/i16/i32/i64/fp16/bfp16/fp32/fp64 --> pipeline
     // relu_i8/i16/i32/i64/fp16/bfp16/fp32/fp64 --> pipeline
+    // matmul_i8/i16/i32/i64/fp16/bfp16/fp32/fp64 --> pipeline
     std::unordered_map<std::string, vk::Pipeline> m_pipelines; 
 
-    // matmul --> pipeline_layout
     // relu --> pipeline_layout
+    // matmul --> pipeline_layout
     std::unordered_map<std::string, vk::PipelineLayout> m_pipeline_layouts;
     std::unordered_map<std::string, vk::DescriptorSetLayout> m_descriptor_set_layouts;
 

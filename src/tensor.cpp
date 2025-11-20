@@ -282,7 +282,7 @@ Tensor Tensor::clone() const{
     Tensor temp(this->m_meta.shape,this->m_meta.dtype,this->m_meta.device);
     // 如果是连续内存，可以直接复制
     if(this->is_contiguous()){
-        this->m_impl->copy_to(temp.m_impl->data());
+        this->m_impl->copy_to(temp.m_impl);
         return temp;
     }
     // 如果不是连续内存，需要跨步复制

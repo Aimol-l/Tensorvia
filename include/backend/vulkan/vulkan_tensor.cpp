@@ -140,9 +140,9 @@ VKTensor::VKTensor(void* ptr, size_t numel, DataType dtype, std::shared_ptr<Vulk
     device.freeMemory(stagingMemory);
 }
 
-void VKTensor::copy_to(TensorImpl &dst) const{
-    auto* vk_dst = dynamic_cast<VKTensor*>(&dst);
-
+void VKTensor::copy_to(std::shared_ptr<TensorImpl> dst) const{
+    // auto* vk_dst = dynamic_cast<VKTensor*>(&dst);
+    auto vk_dst = std::dynamic_pointer_cast<VKTensor>(dst);
     if (m_numel != vk_dst->m_numel || m_dtype != vk_dst->m_dtype) {
         throw std::invalid_argument("Tensor size or dtype mismatch in copy_to!");
     }

@@ -45,10 +45,9 @@ if(BACKEND_SYCL)
 endif()
 
 if(BACKEND_VULKAN)
-    set(CMAKE_C_COMPILER "/usr/bin/clang")
-    set(CMAKE_CXX_COMPILER "/usr/bin/clang++")
+    # set(CMAKE_C_COMPILER "/usr/bin/clang")
+    # set(CMAKE_CXX_COMPILER "/usr/bin/clang++")
     add_definitions(-DBACKEND_VULKAN)
-    find_package(Vulkan REQUIRED)
 endif()
 
 project(
@@ -80,10 +79,10 @@ if(BACKEND_SYCL)
     include_directories(${CMAKE_SOURCE_DIR}/include/backend/sycl)
 endif()
 if(BACKEND_VULKAN)
+    find_package(Vulkan REQUIRED)
     find_package(OpenMP REQUIRED)
     include_directories(${CMAKE_SOURCE_DIR}/include/backend/cpu)
     include_directories(${CMAKE_SOURCE_DIR}/include/backend/vulkan)
-    target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${Vulkan_INCLUDE_DIRS})
 
 endif()
 # ------------------------- .cpp,cu,cxx源文件收集 -------------------------
@@ -138,6 +137,7 @@ if(BACKEND_SYCL)
 endif()
 
 if(BACKEND_VULKAN)
+    target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${Vulkan_INCLUDE_DIRS})
     target_link_libraries(${CMAKE_PROJECT_NAME} PUBLIC ${Vulkan_LIBRARIES})
 endif()
 

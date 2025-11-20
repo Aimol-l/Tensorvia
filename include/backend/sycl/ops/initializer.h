@@ -44,7 +44,7 @@ struct FillImpl<Device::SYCL> {
 
 template <>
 struct RandomImpl<Device::SYCL> {
-    static Tensor execute(const std::vector<int64_t>& shape, DataType dtype, double min, double max);
+    static Tensor execute(const std::vector<int64_t>& shape, DataType dtype, float min, float max);
 };
 
 extern template struct ZerosImpl<Device::SYCL>;

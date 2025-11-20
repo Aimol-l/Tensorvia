@@ -86,7 +86,7 @@ Tensor OnesImpl<Device::SYCL>::execute(const std::vector<int64_t>& shape, DataTy
     }
 
 
-Tensor RandomImpl<Device::SYCL>::execute(const std::vector<int64_t>& shape, DataType dtype,double min,double max){
+Tensor RandomImpl<Device::SYCL>::execute(const std::vector<int64_t>& shape, DataType dtype,float min,float max){
         Tensor temp(shape, dtype, Device::SYCL);
         size_t numel = temp.numel();
         auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(temp.get_impl()->context());

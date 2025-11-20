@@ -1,0 +1,15 @@
+#pragma once
+#include "core/context.h"
+#include "core/types.h"
+#include "core/tensor.h"
+
+
+template <Device D> struct RepackImpl;
+
+template <>
+struct RepackImpl<Device::VULKAN> {
+    static void execute(const Metadata& meta,void* input,void* output);
+};
+
+// 显式实例化声明
+extern template struct RepackImpl<Device::VULKAN>;

@@ -54,20 +54,21 @@ struct CPURegistrar {
 
 
 #ifdef BACKEND_VULKAN // 需要同时使用cmatmulpu和sycl
+
 #include "backend/vulkan/vulkan_tensor.h"
 #include "backend/vulkan/vulkan_context.h"
 struct VulkanRegistrar {
     std::shared_ptr<VulkanContext> ctx =  std::make_shared<VulkanContext>();
     VulkanRegistrar() {
         // 注册算子
-        ctx->registerOp(OpType::Matmul,3,sizeof(B,M,N,K));
+        // ctx->registerOp(OpType::Matmul,3,sizeof(B,M,N,K));
         ctx->registerOp(OpType::Relu,1,0);
-        ctx->registerOp(OpType::Transpose,2,sizeof(M,N));
+        // ctx->registerOp(OpType::Transpose,2,sizeof(M,N));
         // .....
         
         // 注册vulkan后端
         register_tensor_impl(Device::SYCL, [&](void* ptr,int64_t numel, DataType dtype) {
-            return std::make_shared<VulkanTensor>(ptr,numel, dtype,ctx);
+            return std::make_shared<VKTensor>(ptr,numel, dtype,ctx);
         });
     }
 } vulkan_registrar;
