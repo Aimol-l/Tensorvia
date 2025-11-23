@@ -12,55 +12,123 @@ VulkanContext::VulkanContext(){
 
     // 打印设备信息
     auto props = m_phydevice.getProperties();
+    auto memProps = m_phydevice.getMemoryProperties();
     std::println("*************************Vulkan Device Info******************");
-    std::println("Selected Vulkan Device:{}",props.deviceName);
-    std::println("Global memory size: {}MB",props.limits.maxMemoryAllocationCount/(1024 * 1024));
-    std::println("Max Compute Work Group Size: [{}]",props.limits.maxComputeWorkGroupSize);
-    std::println("Max Compute Work Item Size: [{}]",props.limits.maxComputeWorkGroupCount);
-    std::println("Max Compute Work Invocations Size: [{}]",props.limits.maxComputeWorkGroupInvocations);
-    std::println("***********************************************************");
+    std::println("Selected Vulkan Device:{}",std::string_view(props.deviceName));
+    for (uint32_t i = 0; i < memProps.memoryHeapCount; ++i) {
+        auto heap = memProps.memoryHeaps[i];
+        bool isDeviceLocal = (heap.flags & vk::MemoryHeapFlagBits::eDeviceLocal) != vk::MemoryHeapFlags{};
+        std::println("Memory Heap[{}]: {} MB ({})",
+            i,
+            heap.size / (1024 * 1024),
+            isDeviceLocal ? "DeviceLocal (VRAM)" : "HostVisible (System RAM)"
+        );
+    }
+    // std::println("Global memory size: {}MB",props.limits.maxMemoryAllocationCount/(1024 * 1024));
+    std::println("Max Compute Work Group Size: {}",props.limits.maxComputeWorkGroupSize);
+    std::println("Max Compute Work Item Size: {}",props.limits.maxComputeWorkGroupCount);
+    std::println("Max Compute Work Invocations Size: {}",props.limits.maxComputeWorkGroupInvocations);
+    std::println("*************************************************************");
 }
 
+// relu_float32   -->  pipeline 
+// relu_float32   -->  pipeline_layout
+// relu           -->  descriptor_set_layout
 void VulkanContext::registerOp(OpType ops,int tensor_count,int params_size){
+    // static const std::vector<DataType> REQUIREDTYPE = {
+    //     DataType::INT8, DataType::INT16, DataType::INT32, DataType::INT64,
+    //     DataType::FLOAT32, DataType::FLOAT64
+    // };
     static const std::vector<DataType> REQUIREDTYPE = {
-        DataType::INT8, DataType::INT16, DataType::INT32, DataType::INT64,
-        DataType::FLOAT16, DataType::FLOAT32, DataType::FLOAT64,DataType::BFLOAT16
+        DataType::FLOAT32
     };
-    std::string op = op_to_string(ops);
-    // 创建 pipelineLayout
-    this->createPipelineLayout(op,tensor_count,params_size);
+    std::string ori_op = op_to_string(ops);
     // 加载一个算子的8个不同类型的shader
     for(auto& type:REQUIREDTYPE){
-        std::string spvFile = std::format("{}_{}.spv",op,dtype_to_string(type));
+        std::string spvFile = std::format("./spv/{}_{}.spv",ori_op,dtype_to_string(type));
+        std::println("{}",spvFile);
         std::ifstream file(spvFile.c_str());
         // 判断算子文件是否存在
         if(!file.good()){
             throw std::runtime_error(std::format("{} not found",spvFile));
         }
-        // 1. 加载shader
+        // 加载shader
         auto spvCode = readSpvFile(spvFile);
         vk::ShaderModuleCreateInfo createInfo;
         createInfo.setCode(spvCode);
         vk::ShaderModule shaderModule = m_device.createShaderModule(createInfo);
-        // 2. 配置shader stage
+        // 配置shader stage
         vk::PipelineShaderStageCreateInfo stageInfo;
         stageInfo.setStage(vk::ShaderStageFlagBits::eCompute);
         stageInfo.setModule(shaderModule);
         stageInfo.setPName("main");
-        // 3. 创建计算管线
+
+        // 创建管线布局
+        std::string type_op = std::format("{}_{}",ori_op,dtype_to_string(type));
+
+        this->createDescriptorSetLayout(ori_op,tensor_count,params_size);
+        this->createPipelineLayout(type_op,ori_op,tensor_count,params_size);
+
+        // 创建计算管线
         vk::ComputePipelineCreateInfo pipelineInfo{};
         pipelineInfo.stage = stageInfo;
-        pipelineInfo.layout = this->m_pipeline_layouts[op];
+        pipelineInfo.layout = this->m_pipeline_layouts[type_op];
         auto result = this->m_device.createComputePipeline(nullptr, pipelineInfo);
         if (result.result != vk::Result::eSuccess) {
             this->m_device.destroyShaderModule(shaderModule);
             throw std::runtime_error("Failed to create compute pipeline!");
         }
-        this->m_pipelines[spvFile] = result.value;
+        this->m_pipelines[type_op] = result.value;
         this->m_device.destroyShaderModule(shaderModule);
     }
 }
+void VulkanContext::createDescriptorSetLayout(std::string ori_op, int tensor_count, int params_size) {
+    if (m_pipeline_layouts.find(ori_op) != m_pipeline_layouts.end()) return;
+    std::vector<vk::DescriptorSetLayoutBinding> bindings;
+    bindings.reserve(tensor_count);
+    for (int i = 0; i < tensor_count; ++i) {
+        vk::DescriptorSetLayoutBinding b{};
+        b.binding = i;
+        b.descriptorType = vk::DescriptorType::eStorageBuffer;
+        b.descriptorCount = 1;
+        b.stageFlags = vk::ShaderStageFlagBits::eCompute;
+        bindings.push_back(b);
+    }
+    vk::DescriptorSetLayout descriptorSetLayout;
+    try {
+        vk::DescriptorSetLayoutCreateInfo layoutInfo{};
+        layoutInfo.setBindings(bindings);
+        descriptorSetLayout = m_device.createDescriptorSetLayout(layoutInfo);
+    } catch (const vk::SystemError& e) {
+        throw std::runtime_error(std::string("createDescriptorSetLayout failed: ") + e.what());
+    }
+    this->m_descriptor_set_layouts[ori_op] = descriptorSetLayout;
+}
+void VulkanContext::createPipelineLayout(std::string type_op,std::string ori_op, int tensor_count, int params_size) {
+    auto descriptorSetLayout = this->m_descriptor_set_layouts[ori_op];
+    // --- 保证容器命名并在作用域内存活 ---
+    std::vector<vk::DescriptorSetLayout> setLayouts{ descriptorSetLayout };
+    std::vector<vk::PushConstantRange> pushRanges;
+    if (params_size > 0) {
+        vk::PushConstantRange range{};
+        range.stageFlags = vk::ShaderStageFlagBits::eCompute;
+        range.offset = 0;
+        range.size = static_cast<uint32_t>(params_size);
+        pushRanges.push_back(range);
+    }
+    vk::PipelineLayoutCreateInfo pipelineLayoutInfo{};
+    pipelineLayoutInfo.setSetLayouts(setLayouts);
+    if (!pushRanges.empty()) pipelineLayoutInfo.setPushConstantRanges(pushRanges);
 
+    vk::PipelineLayout pipelineLayout;
+    try {
+        pipelineLayout = m_device.createPipelineLayout(pipelineLayoutInfo);
+    } catch (const vk::SystemError& e) {
+        m_device.destroyDescriptorSetLayout(descriptorSetLayout);
+        throw std::runtime_error(std::string("createPipelineLayout failed: ") + e.what());
+    }
+    m_pipeline_layouts[type_op] = pipelineLayout;
+}
 void VulkanContext::createInstance(){
     if (m_enableValidationLayers && !this->checkLayerSupport()) {
         throw std::runtime_error("validation layers requested, but not available!");
@@ -100,10 +168,14 @@ bool VulkanContext::checkLayerSupport() {
 }
 
 bool VulkanContext::checkExtensionSupport() {
-    auto availableExten = vk::enumerateInstanceExtensionProperties();
+   auto availableDeviceExten = m_phydevice.enumerateDeviceExtensionProperties();
+    
+    // for (const auto& prop : availableDeviceExten) {
+    //     std::println("  {}", std::string_view(prop.extensionName));
+    // }
     for (const char* extName : m_deviceExtensions) {
         bool found = false;
-        for (const auto& prop : availableExten) {
+        for (const auto& prop : availableDeviceExten) {
             if (strcmp(extName, prop.extensionName) == 0) {
                 found = true;
                 break;
@@ -275,112 +347,86 @@ std::vector<uint32_t> VulkanContext::readSpvFile(const std::string& filename) {
     return buffer;
 }
 
-void VulkanContext::createPipelineLayout(std::string op,int tensor_count,int params_size) {
-    // 如果已经创建过就直接返回（避免重复创建）
-    if (m_pipeline_layouts.find(op) != m_pipeline_layouts.end()) return;
 
-    std::vector<vk::DescriptorSetLayoutBinding> bindings;
-    // 创建 descriptor set layout（用于张量输入/输出）
-    for(int i = 0;i<tensor_count;i++){
-        vk::DescriptorSetLayoutBinding binding0{};
-        binding0.binding = i;
-        binding0.descriptorType = vk::DescriptorType::eStorageBuffer;
-        binding0.descriptorCount = 1;
-        binding0.stageFlags = vk::ShaderStageFlagBits::eCompute;
-        bindings.push_back(binding0);
+void VulkanContext::printPipeLines(){
+    for(auto[key,val]:m_pipelines){
+        std::println("compute line: {}",key);
     }
-    vk::DescriptorSetLayoutCreateInfo layoutInfo{};
-    layoutInfo.setBindings(bindings);
-    vk::DescriptorSetLayout descriptorSetLayout;
-    try {
-        descriptorSetLayout = m_device.createDescriptorSetLayout(layoutInfo);
-    } catch (const vk::SystemError& e) {
-        throw std::runtime_error(std::string("createDescriptorSetLayout failed: ") + e.what());
+    for(auto[key,val]:m_pipeline_layouts){
+        std::println("compute line layout: {}",key);
     }
-    // 保存 descriptor set layout 以便后续 allocate 使用与销毁管理
-    this->m_descriptor_set_layouts[op] = descriptorSetLayout;
-
-    // 创建 pipeline layout
-    vk::PipelineLayoutCreateInfo pipelineLayoutInfo{};
-    pipelineLayoutInfo.setSetLayouts(descriptorSetLayout);
-    // 如果需要 push constants:
-    if(params_size != 0){
-        vk::PushConstantRange pushConstantRange{};
-        pushConstantRange.stageFlags = vk::ShaderStageFlagBits::eCompute;
-        pushConstantRange.offset = 0;
-        pushConstantRange.size = params_size;
-        pipelineLayoutInfo.setPushConstantRanges(pushConstantRange);
-    }else {
-        pipelineLayoutInfo.setPushConstantRangeCount(0)
-                          .setPPushConstantRanges(nullptr);
+    for(auto[key,val]:m_descriptor_set_layouts){
+        std::println("m_descriptor_set_layouts: {}",key);
     }
-    pipelineLayoutInfo.setSetLayoutCount(1)
-                    .setPSetLayouts(&descriptorSetLayout);
-    vk::PipelineLayout pipelineLayout;
-    try {
-        pipelineLayout = m_device.createPipelineLayout(pipelineLayoutInfo);
-    } catch (const vk::SystemError& e) {
-        // 失败时销毁先前创建的 descriptorSetLayout 并抛出
-        m_device.destroyDescriptorSetLayout(descriptorSetLayout);
-        throw std::runtime_error(std::string("createPipelineLayout failed: ") + e.what());
-    }
-    this->m_pipeline_layouts[op] = pipelineLayout;
 }
+
+// relu,float32,buffers,gx,gy,gz,...
 void VulkanContext::submitCompute(
-    const std::string& op_name,
+    OpType op,
+    DataType dtype,
     const std::vector<vk::Buffer>& buffers,
     uint32_t gx, uint32_t gy, uint32_t gz,
     const void* push_constants,
     size_t push_size)
 {
-    // 1. 查表,拿到当前算子的计算管线，管线布局，描述符布局
-    auto pipeline_it = m_pipelines.find(op_name);
-    auto layout_it   = m_pipeline_layouts.find(op_name);
-    auto dsl_it      = m_descriptor_set_layouts.find(op_name);
-    if (pipeline_it == m_pipelines.end() ||
-        layout_it == m_pipeline_layouts.end() ||
-        dsl_it == m_descriptor_set_layouts.end()) {
-        throw std::runtime_error("Operator not registered: " + op_name);
+    auto ori_op = op_to_string(op);
+    auto type_op = make_pipeline_key(op, dtype); // 正确的 key
+
+    if (!m_pipelines.contains(type_op)) {
+        throw std::runtime_error(std::format("can not find pipeline:{}", type_op));
     }
+    if (!m_pipeline_layouts.contains(type_op)) {
+        throw std::runtime_error(std::format("can not find pipeline layout:{}", type_op));
+    }
+    if (!m_descriptor_set_layouts.contains(ori_op)) {
+        throw std::runtime_error(std::format("can not find descriptor_set_layouts:{}", ori_op));
+    }
+    vk::Pipeline pipeline = m_pipelines[type_op];      // <- 使用正确的 key
+    vk::PipelineLayout layout = m_pipeline_layouts[type_op];
+    vk::DescriptorSetLayout dsl = m_descriptor_set_layouts[ori_op];
 
-    vk::Pipeline pipeline = pipeline_it->second;
-    vk::PipelineLayout layout = layout_it->second;
-    vk::DescriptorSetLayout dsl = dsl_it->second;
-
-    // 2. 👉 重置 descriptor pool（关键！释放上一次所有 descriptor sets）
-    m_device.resetDescriptorPool(m_descriptor_pool);
-
-    // 3. 分配 descriptor set
+    // 分配 descriptor set - 使用命名容器，避免临时问题
+    std::array<vk::DescriptorSetLayout, 1> setLayouts = { dsl };
     vk::DescriptorSetAllocateInfo allocInfo{};
     allocInfo.setDescriptorPool(m_descriptor_pool)
              .setDescriptorSetCount(1)
-             .setSetLayouts(dsl);
-    vk::DescriptorSet ds = m_device.allocateDescriptorSets(allocInfo)[0];
+             .setSetLayouts(setLayouts);
+    auto allocated = m_device.allocateDescriptorSets(allocInfo);
+    vk::DescriptorSet ds = allocated[0];
 
-    // 4. 写入 buffers (binding = index)
+    // ----------- 关键：准备持久化的 buffer infos 容器 -----------
+    std::vector<vk::DescriptorBufferInfo> bufferInfos;
+    bufferInfos.reserve(buffers.size());
+    for (size_t i = 0; i < buffers.size(); ++i) {
+        if (buffers[i] == VK_NULL_HANDLE) {
+            throw std::runtime_error(std::format("submitCompute: buffers[{}] is VK_NULL_HANDLE", i));
+        }
+        bufferInfos.emplace_back(buffers[i], 0, VK_WHOLE_SIZE);
+    }
+
+    // 写 descriptors 时引用 bufferInfos 中的元素地址，确保 bufferInfos 在 updateDescriptorSets 调用前存活
     std::vector<vk::WriteDescriptorSet> writes;
     writes.reserve(buffers.size());
-    for (size_t i = 0; i < buffers.size(); ++i) {
-        vk::DescriptorBufferInfo bufferInfo{ buffers[i], 0, VK_WHOLE_SIZE };
+    for (size_t i = 0; i < bufferInfos.size(); ++i) {
         writes.emplace_back(
-            ds,
-            static_cast<uint32_t>(i), // binding
-            0,
-            1,
-            vk::DescriptorType::eStorageBuffer,
-            nullptr,
-            &bufferInfo
+            ds,                                  // dstSet
+            static_cast<uint32_t>(i),            // dstBinding
+            0,                                   // dstArrayElement
+            1,                                   // descriptorCount
+            vk::DescriptorType::eStorageBuffer,  // descriptorType
+            nullptr,                             // pImageInfo
+            &bufferInfos[i],                     // pBufferInfo (指向 bufferInfos 中的元素)
+            nullptr                              // pTexelBufferView
         );
     }
-    m_device.updateDescriptorSets(writes, nullptr);
 
-    // 5. 分配 command buffer
+    m_device.updateDescriptorSets(writes, nullptr);
+    // 分配 command buffer
     vk::CommandBufferAllocateInfo cmdAllocInfo{};
     cmdAllocInfo.setCommandPool(m_command_pool)
                 .setLevel(vk::CommandBufferLevel::ePrimary)
                 .setCommandBufferCount(1);
     vk::CommandBuffer cmd = m_device.allocateCommandBuffers(cmdAllocInfo)[0];
-
     // 6. Record
     vk::CommandBufferBeginInfo beginInfo{};
     beginInfo.setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
@@ -392,17 +438,14 @@ void VulkanContext::submitCompute(
     }
     cmd.dispatch(gx, gy, gz);
     cmd.end();
-
-    // 7. Submit & wait
+   // 提交并等待
     vk::SubmitInfo submitInfo{};
     submitInfo.setCommandBuffers(cmd);
-
     vk::Fence fence = m_device.createFence({});
     m_compute_queue.submit(submitInfo, fence);
-    m_device.waitForFences(fence, VK_TRUE, UINT64_MAX);
+    vk::Result res = m_device.waitForFences(fence, VK_TRUE, UINT64_MAX);
 
-    // 8. Cleanup
+    // 清理
     m_device.destroyFence(fence);
     m_device.freeCommandBuffers(m_command_pool, 1, &cmd);
-    // descriptor set 会被 resetDescriptorPool 自动回收，无需手动释放
 }

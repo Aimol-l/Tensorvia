@@ -7,6 +7,16 @@ namespace ops {
     auto src_impl =  std::dynamic_pointer_cast<VKTensor>(a.get_impl());
     auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
     
+    int64_t numel = a.numel(); 
+    
+    ctx_impl->submitCompute(
+        OpType::Relu, 
+        a.dtype(),
+        {src_impl->buffer()},
+        (a.numel() + 255) / 256, 1, 1,
+        &numel,
+        sizeof(int64_t)
+    );
 }
 Tensor ReluImpl<Device::VULKAN>::execute(const Tensor& a){
     auto src_impl =  std::dynamic_pointer_cast<VKTensor>(a.get_impl());

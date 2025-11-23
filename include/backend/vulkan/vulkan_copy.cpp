@@ -3,8 +3,7 @@
 #include "vulkan_tensor.h"
 #include "cpu_tensor.h"
 // vulkan --> cpu
-void copy_device_to_host(std::shared_ptr<TensorImpl> src, std::shared_ptr<TensorImpl> dst,DataType dtype) {
-    // 确保 src 是 VKTensor，dst 是 CPUTensor
+void copy_device_to_host(std::shared_ptr<TensorImpl> src, std::shared_ptr<TensorImpl> dst, DataType dtype) {
     auto* vk_src = dynamic_cast<VKTensor*>(src.get());
     auto* cpu_dst = dynamic_cast<CPUTensor*>(dst.get());
     if (!vk_src || !cpu_dst) {
@@ -13,13 +12,11 @@ void copy_device_to_host(std::shared_ptr<TensorImpl> src, std::shared_ptr<Tensor
 
     size_t size_bytes = src->numel() * calc_dtype_size(dtype);
     auto context = std::dynamic_pointer_cast<VulkanContext>(vk_src->context());
-    if (!context) {
-        throw std::runtime_error("Invalid VulkanContext");
-    }
+    if (!context) throw std::runtime_error("Invalid VulkanContext");
 
     vk::Device device = context->getDevice();
 
-    // 1. 创建 staging buffer (host-visible)
+    // 1. staging buffer
     vk::BufferCreateInfo stagingInfo{};
     stagingInfo.setSize(size_bytes)
                .setUsage(vk::BufferUsageFlagBits::eTransferDst)
@@ -27,20 +24,20 @@ void copy_device_to_host(std::shared_ptr<TensorImpl> src, std::shared_ptr<Tensor
     vk::Buffer stagingBuffer = device.createBuffer(stagingInfo);
 
     vk::MemoryRequirements memReqs = device.getBufferMemoryRequirements(stagingBuffer);
-    vk::PhysicalDeviceMemoryProperties memProps = context->getPhysicalDevice().getMemoryProperties();
+    auto memProps = context->getPhysicalDevice().getMemoryProperties();
 
     uint32_t memoryType = UINT32_MAX;
     for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
-        if ((memReqs.memoryTypeBits & (1 << i)) &&
-            (memProps.memoryTypes[i].propertyFlags & vk::MemoryPropertyFlagBits::eHostVisible) &&
-            (memProps.memoryTypes[i].propertyFlags & vk::MemoryPropertyFlagBits::eHostCoherent)) {
+        if ((memReqs.memoryTypeBits & (1u << i)) &&
+            (memProps.memoryTypes[i].propertyFlags & (vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent))
+                == (vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent)) {
             memoryType = i;
             break;
         }
     }
     if (memoryType == UINT32_MAX) {
         device.destroyBuffer(stagingBuffer);
-        throw std::runtime_error("Failed to find host-visible memory for staging buffer");
+        throw std::runtime_error("Failed to find host-visible+coherent memory for staging buffer");
     }
 
     vk::MemoryAllocateInfo allocInfo{};
@@ -49,7 +46,7 @@ void copy_device_to_host(std::shared_ptr<TensorImpl> src, std::shared_ptr<Tensor
     vk::DeviceMemory stagingMemory = device.allocateMemory(allocInfo);
     device.bindBufferMemory(stagingBuffer, stagingMemory, 0);
 
-    // 2. Record copy: device buffer -> staging buffer
+    // 2. record copy (device -> staging)
     vk::CommandBufferAllocateInfo cmdAlloc{};
     cmdAlloc.setCommandPool(context->commandPool())
            .setLevel(vk::CommandBufferLevel::ePrimary)
@@ -60,32 +57,45 @@ void copy_device_to_host(std::shared_ptr<TensorImpl> src, std::shared_ptr<Tensor
     beginInfo.setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
     cmdBuf.begin(beginInfo);
     vk::BufferCopy copyRegion{};
-    copyRegion.setSize(size_bytes);
+    copyRegion.setSrcOffset(0).setDstOffset(0).setSize(size_bytes);
     cmdBuf.copyBuffer(vk_src->buffer(), stagingBuffer, copyRegion);
     cmdBuf.end();
 
-    // 3. Submit and wait
+    // 3. submit & wait
     vk::SubmitInfo submitInfo{};
     submitInfo.setCommandBuffers(cmdBuf);
-    vk::FenceCreateInfo fenceInfo{};
-    vk::Fence fence = device.createFence(fenceInfo);
+    vk::Fence fence = device.createFence({});
     context->computeQueue().submit(submitInfo, fence);
-    device.waitForFences(fence, VK_TRUE, UINT64_MAX);
+    vk::Result res = device.waitForFences(fence, VK_TRUE, UINT64_MAX);
+    if (res != vk::Result::eSuccess) {
+        device.destroyFence(fence);
+        device.freeCommandBuffers(context->commandPool(), 1, &cmdBuf); // 正确释放
+        device.destroyBuffer(stagingBuffer);
+        device.freeMemory(stagingMemory);
+        throw std::runtime_error("copy_device_to_host: waitForFences failed");
+    }
 
-    // 4. Map staging buffer and copy to CPU tensor
+    // 4. map & copy
     void* mapped = device.mapMemory(stagingMemory, 0, size_bytes);
+    if (!mapped) {
+        device.destroyFence(fence);
+        device.freeCommandBuffers(context->commandPool(), 1, &cmdBuf);
+        device.destroyBuffer(stagingBuffer);
+        device.freeMemory(stagingMemory);
+        throw std::runtime_error("copy_device_to_host: mapMemory returned null");
+    }
     std::memcpy(cpu_dst->data(), mapped, size_bytes);
     device.unmapMemory(stagingMemory);
 
-    // 5. Cleanup
+    // 5. cleanup
     device.destroyFence(fence);
-    device.freeCommandBuffers(context->commandPool(), cmdBuf);
+    device.freeCommandBuffers(context->commandPool(), 1, &cmdBuf); // 正确释放
     device.destroyBuffer(stagingBuffer);
     device.freeMemory(stagingMemory);
 }
-// cpu --> vulkan
-void copy_host_to_device(std::shared_ptr<TensorImpl> src, std::shared_ptr<TensorImpl> dst,DataType dtype) {
 
+// cpu --> vulkan
+void copy_host_to_device(std::shared_ptr<TensorImpl> src, std::shared_ptr<TensorImpl> dst, DataType dtype) {
     auto* cpu_src = dynamic_cast<CPUTensor*>(src.get());
     auto* vk_dst = dynamic_cast<VKTensor*>(dst.get());
     if (!cpu_src || !vk_dst) {
@@ -94,13 +104,11 @@ void copy_host_to_device(std::shared_ptr<TensorImpl> src, std::shared_ptr<Tensor
 
     size_t size_bytes = src->numel() * calc_dtype_size(dtype);
     auto context = std::dynamic_pointer_cast<VulkanContext>(vk_dst->context());
-    if (!context) {
-        throw std::runtime_error("Invalid VulkanContext");
-    }
+    if (!context) throw std::runtime_error("Invalid VulkanContext");
 
     vk::Device device = context->getDevice();
 
-    // 1. Create staging buffer
+    // 1. staging buffer
     vk::BufferCreateInfo stagingInfo{};
     stagingInfo.setSize(size_bytes)
                .setUsage(vk::BufferUsageFlagBits::eTransferSrc)
@@ -108,20 +116,20 @@ void copy_host_to_device(std::shared_ptr<TensorImpl> src, std::shared_ptr<Tensor
     vk::Buffer stagingBuffer = device.createBuffer(stagingInfo);
 
     vk::MemoryRequirements memReqs = device.getBufferMemoryRequirements(stagingBuffer);
-    vk::PhysicalDeviceMemoryProperties memProps = context->getPhysicalDevice().getMemoryProperties();
+    auto memProps = context->getPhysicalDevice().getMemoryProperties();
 
     uint32_t memoryType = UINT32_MAX;
     for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
-        if ((memReqs.memoryTypeBits & (1 << i)) &&
-            (memProps.memoryTypes[i].propertyFlags & vk::MemoryPropertyFlagBits::eHostVisible) &&
-            (memProps.memoryTypes[i].propertyFlags & vk::MemoryPropertyFlagBits::eHostCoherent)) {
+        if ((memReqs.memoryTypeBits & (1u << i)) &&
+            (memProps.memoryTypes[i].propertyFlags & (vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent))
+                == (vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent)) {
             memoryType = i;
             break;
         }
     }
     if (memoryType == UINT32_MAX) {
         device.destroyBuffer(stagingBuffer);
-        throw std::runtime_error("Failed to find host-visible memory for staging buffer");
+        throw std::runtime_error("Failed to find host-visible+coherent memory for staging buffer");
     }
 
     vk::MemoryAllocateInfo allocInfo{};
@@ -130,12 +138,17 @@ void copy_host_to_device(std::shared_ptr<TensorImpl> src, std::shared_ptr<Tensor
     vk::DeviceMemory stagingMemory = device.allocateMemory(allocInfo);
     device.bindBufferMemory(stagingBuffer, stagingMemory, 0);
 
-    // 2. Copy CPU data to staging buffer
+    // 2. map & write
     void* mapped = device.mapMemory(stagingMemory, 0, size_bytes);
+    if (!mapped) {
+        device.destroyBuffer(stagingBuffer);
+        device.freeMemory(stagingMemory);
+        throw std::runtime_error("copy_host_to_device: mapMemory returned null");
+    }
     std::memcpy(mapped, cpu_src->data(), size_bytes);
     device.unmapMemory(stagingMemory);
 
-    // 3. Record copy: staging -> device buffer
+    // 3. record copy (staging -> device)
     vk::CommandBufferAllocateInfo cmdAlloc{};
     cmdAlloc.setCommandPool(context->commandPool())
            .setLevel(vk::CommandBufferLevel::ePrimary)
@@ -146,20 +159,27 @@ void copy_host_to_device(std::shared_ptr<TensorImpl> src, std::shared_ptr<Tensor
     beginInfo.setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
     cmdBuf.begin(beginInfo);
     vk::BufferCopy copyRegion{};
-    copyRegion.setSize(size_bytes);
+    copyRegion.setSrcOffset(0).setDstOffset(0).setSize(size_bytes);
     cmdBuf.copyBuffer(stagingBuffer, vk_dst->buffer(), copyRegion);
     cmdBuf.end();
 
-    // 4. Submit and wait
+    // 4. submit & wait
     vk::SubmitInfo submitInfo{};
     submitInfo.setCommandBuffers(cmdBuf);
     vk::Fence fence = device.createFence({});
     context->computeQueue().submit(submitInfo, fence);
-    device.waitForFences(fence, VK_TRUE, UINT64_MAX);
+    vk::Result res = device.waitForFences(fence, VK_TRUE, UINT64_MAX);
+    if (res != vk::Result::eSuccess) {
+        device.destroyFence(fence);
+        device.freeCommandBuffers(context->commandPool(), 1, &cmdBuf);
+        device.destroyBuffer(stagingBuffer);
+        device.freeMemory(stagingMemory);
+        throw std::runtime_error("copy_host_to_device: waitForFences failed");
+    }
 
-    // 5. Cleanup
+    // 5. cleanup
     device.destroyFence(fence);
-    device.freeCommandBuffers(context->commandPool(), cmdBuf);
+    device.freeCommandBuffers(context->commandPool(), 1, &cmdBuf);
     device.destroyBuffer(stagingBuffer);
     device.freeMemory(stagingMemory);
 }

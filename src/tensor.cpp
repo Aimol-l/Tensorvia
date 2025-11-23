@@ -93,6 +93,7 @@ Tensor::Tensor(void *ptr, std::initializer_list<int64_t> shape, DataType dtype, 
 }
 Tensor::Tensor(void* ptr, std::vector<int64_t> shape,DataType dtype,Device device) {
     if(shape.size() == 0) throw std::runtime_error("Tensor shape cannot be empty");
+    if(ptr == nullptr) throw std::runtime_error("ptr can not nullptr");
     // 使用默认数据类型 float32 ,使用编译选择的设备
 #ifdef BACKEND_CPU
     this->m_meta.device = Device::CPU;
@@ -288,7 +289,6 @@ Tensor Tensor::clone() const{
     // 如果不是连续内存，需要跨步复制
     auto new_impl = m_impl->clone_as_contiguous(m_meta);
     temp.m_impl = std::move(new_impl);
-
     return temp;
 }
 

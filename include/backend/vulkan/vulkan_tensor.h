@@ -7,6 +7,7 @@
 #include "core/tensor.h"
 #include "core/types.h"
 #include "core/context.h"
+#include "vulkan_constant.h"
 #include "vulkan_context.h" 
 
 class VKTensor : public TensorImpl {
@@ -20,10 +21,15 @@ public:
     ~VKTensor();
     VKTensor(size_t numel, DataType dtype, std::shared_ptr<VulkanContext> context);
     VKTensor(void* ptr, size_t numel, DataType dtype, std::shared_ptr<VulkanContext> context);
-    void* data();
-    vk::Buffer buffer() const { return m_buffer; }
+
+    void init(void* ptr,size_t numel, DataType dtype,std::shared_ptr<VulkanContext> context);
+
+    void* data();                // 不要具体使用这个指针！！！！ 
+    const void* data() const;    // 不要具体使用这个指针！！！！
+    vk::Buffer buffer() const { return m_buffer; }      // 用这个！
+
+
     size_t numel() const override{return m_numel;}
-    const void* data() const;
     void copy_to(std::shared_ptr<TensorImpl> dst) const override;
     std::unique_ptr<TensorImpl> clone() const override;
     std::shared_ptr<ContextImpl> context() const override;

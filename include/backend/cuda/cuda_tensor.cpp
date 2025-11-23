@@ -30,13 +30,13 @@ void CUDATensor::init(void* ptr, size_t numel, DataType dtype, std::shared_ptr<C
 }
 
 CUDATensor::CUDATensor(size_t numel, DataType dtype, std::shared_ptr<CUDAContext> context):
-    m_data(nullptr,FreeDeleter(dtype)){
+m_data(nullptr,FreeDeleter(dtype)){
     this->init(nullptr, numel, dtype, context);
 }
 
 CUDATensor::CUDATensor(void* ptr, size_t numel, DataType dtype, std::shared_ptr<CUDAContext> context):
-    m_data(nullptr,FreeDeleter(dtype)){
-    this->init(nullptr, numel, dtype, context);
+m_data(nullptr,FreeDeleter(dtype)){
+    this->init(ptr, numel, dtype, context);
 }
 
 std::unique_ptr<TensorImpl> CUDATensor::clone() const {

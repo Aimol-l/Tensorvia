@@ -39,6 +39,7 @@ Tensor MeanImpl<Device::VULKAN>::execute(const Tensor& a,int axis){
 float MinImpl<Device::VULKAN>::execute(const Tensor& a){
     auto src_impl = std::dynamic_pointer_cast<VKTensor>(a.get_impl());
     auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
+    return 0;
 }
 Tensor MinImpl<Device::VULKAN>::execute(const Tensor& a,int axis){
     auto src_impl = std::dynamic_pointer_cast<VKTensor>(a.get_impl());
@@ -54,6 +55,7 @@ Tensor MinImpl<Device::VULKAN>::execute(const Tensor& a,int axis){
 float MaxImpl<Device::VULKAN>::execute(const Tensor& a){
     auto src_impl = std::dynamic_pointer_cast<VKTensor>(a.get_impl());
     auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
+    return 0;
 }
 Tensor MaxImpl<Device::VULKAN>::execute(const Tensor& a,int axis){
     auto src_impl = std::dynamic_pointer_cast<VKTensor>(a.get_impl());

@@ -2,7 +2,7 @@
 
 // CUDA kernel: 将任意布局张量拷贝为连续
 __global__ void repack_kernel(
-    const char* src, char* dst,
+    const char* __restrict__ src, char* __restrict__ dst,
     size_t numel,
     const int64_t* shape, const int64_t* strides,
     size_t ndim,

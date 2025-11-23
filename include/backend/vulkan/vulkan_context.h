@@ -22,14 +22,17 @@ private:
     vk::DescriptorPool m_descriptor_pool;
     std::vector<vk::Fence> m_inflight_fences;
 
-    // relu_i8/i16/i32/i64/fp16/bfp16/fp32/fp64 --> pipeline
-    // matmul_i8/i16/i32/i64/fp16/bfp16/fp32/fp64 --> pipeline
-    std::unordered_map<std::string, vk::Pipeline> m_pipelines; 
+    // relu_int32   -->  pipeline 
+    //❌不可复用,shader 不同（因为 dtype 不同）→ 必须重新创建
+    std::unordered_map<std::string, vk::Pipeline> m_pipelines;  
 
-    // relu --> pipeline_layout
-    // matmul --> pipeline_layout
-    std::unordered_map<std::string, vk::PipelineLayout> m_pipeline_layouts;
-    std::unordered_map<std::string, vk::DescriptorSetLayout> m_descriptor_set_layouts;
+    // relu_int32  -->  pipeline_layout
+    // ⚠️可能可复用,如果 push constant 不变，可以复用
+    std::unordered_map<std::string, vk::PipelineLayout> m_pipeline_layouts; 
+
+    // relu   -->  descriptor_set_layout
+    // ✔️可复用,只是资源结构，不包含 dtype 信息
+    std::unordered_map<std::string, vk::DescriptorSetLayout> m_descriptor_set_layouts; 
 
     bool m_enableValidationLayers = true;
     VkDebugUtilsMessengerEXT m_debugMessenger;
@@ -37,19 +40,18 @@ private:
     const std::vector<const char*> m_validationLayers = {"VK_LAYER_KHRONOS_validation"};
     const std::vector<const char*> m_deviceExtensions = {
         "VK_KHR_shader_float16_int8",
-        "VK_KHR_shader_int64",
         "VK_KHR_shader_bfloat16",
         "VK_KHR_8bit_storage",
         "VK_KHR_16bit_storage",
         "VK_KHR_shader_subgroup_extended_types"
     };
-    std::string makePipelineKey(OpType op, DataType dt) {
-        // eg: "matmul_int32"
-        return std::format("{}_{}", op_to_string(op), dtype_to_string(dt));
-    }
+
 public:
     VulkanContext();
     ~VulkanContext() {};
+    void* ctx_raw_ptr() override{
+        throw std::runtime_error("no ctx_raw_ptr!");
+    }
 
     vk::Device getDevice()const{
         return m_device;
@@ -59,19 +61,21 @@ public:
     }
     vk::CommandPool commandPool() const { return m_command_pool; }
     vk::Queue computeQueue() const { return m_compute_queue; }
+
     // 注册算子和背后对应的计算管线。
     // 创建管线需要使用管线布局，管线布局负责描述使用什么类型的shader(vert/frag/compute),确定使用多少输入数据(binding)
     void registerOp(OpType ops, int tensor_count, int params_size);
 
     // 高层接口：用户只需传 buffer
     void submitCompute(
-        const std::string& op_name,
+        OpType op,
+        DataType dtype,
         const std::vector<vk::Buffer>& buffers,
         uint32_t gx, uint32_t gy, uint32_t gz,
-        const void* push_constants = nullptr,
-        size_t push_size = 0
+        const void* push_constants,
+        size_t push_size
     );
-
+    void printPipeLines();
 private:
     void createInstance();
     void setupDebugMessenger();
@@ -84,6 +88,8 @@ private:
     bool checkExtensionSupport();
 
     std::vector<uint32_t> readSpvFile(const std::string& filename);
-    void createPipelineLayout(std::string op,int tensor_count,int params_size);
+
+    void createDescriptorSetLayout(std::string op,int tensor_count,int params_size);
+    void createPipelineLayout(std::string type_op,std::string ori_op,int tensor_count,int params_size);
 
 };

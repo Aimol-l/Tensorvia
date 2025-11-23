@@ -114,6 +114,7 @@ enum class DataType{
     FLOAT32,
     FLOAT64
 };
+
 constexpr std::string_view device_to_string(Device d) {
     switch (d) {
         case Device::CPU:    return "CPU";
@@ -135,6 +136,9 @@ constexpr std::string_view dtype_to_string(DataType t) {
         case DataType::BFLOAT16: return "bfloat16";
         default:                 return "UNKNOWN";
     }
+}
+inline std::string make_pipeline_key(OpType op, DataType dt) {
+    return std::format("{}_{}", op_to_string(op), dtype_to_string(dt));
 }
 inline size_t calc_dtype_size(DataType dtype) {
     switch (dtype) {

@@ -49,9 +49,8 @@
 //*************************************************
 namespace ops {
     OPS_API void println(Tensor & a){
-        if(a.data() == nullptr|| a.numel() == 0) 
+        if(a.numel() == 0 || a.data() == nullptr) 
             throw std::runtime_error("tensor a is null");
-        
         if(a.device() == Device::CPU){
             if(a.is_contiguous()){
                 PrintlnImpl<Device::CPU>::execute(a);
@@ -67,7 +66,8 @@ namespace ops {
         std::cout<<std::format("Tensor dtype: {} | Tensor device: {}",dtype_to_string(a.dtype()), device_to_string(a.device()))<<std::endl;
     }
     OPS_API void println(Tensor && a) {
-        if(a.data() == nullptr|| a.numel() == 0) 
+        LOG_INFO("println");
+        if(a.numel() == 0 || a.data() == nullptr) 
             throw std::runtime_error("tensor a is null");
         a.to_contiguous(); // 不修改后端设备
         Device device = a.device();

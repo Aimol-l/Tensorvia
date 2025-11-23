@@ -1,3 +1,4 @@
+#include "ops.h"
 #include "backend/vulkan/ops/arithmetic.h"
 
 namespace ops {
@@ -26,6 +27,12 @@ Tensor AddImpl<Device::VULKAN>::execute(const Tensor& a, const Tensor& b) {
     Tensor result(a.shape(), res_type, Device::VULKAN);
     return result;
 }
+void AddImpl<Device::VULKAN>::execute(const Tensor& a, const Tensor& b,Tensor& dst){
+    auto src_impl =  std::dynamic_pointer_cast<VKTensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
+}
+
+
 Tensor AddImpl<Device::VULKAN>::execute(const Tensor& a, float b){
     Tensor t = ops::Fill(a.shape(),a.dtype(),b);
     return ops::Add(a, t);
