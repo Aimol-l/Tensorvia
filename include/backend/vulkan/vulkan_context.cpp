@@ -35,11 +35,13 @@ VulkanContext::VulkanContext(){
 // relu_float32   -->  pipeline_layout
 // relu           -->  descriptor_set_layout
 void VulkanContext::registerOp(OpType ops,int tensor_count,int params_size){
-    // static const std::vector<DataType> REQUIREDTYPE = {
-    //     DataType::INT8, DataType::INT16, DataType::INT32, DataType::INT64,
-    //     DataType::FLOAT32, DataType::FLOAT64
-    // };
     static const std::vector<DataType> REQUIREDTYPE = {
+        DataType::INT8,
+        DataType::INT16,
+        DataType::INT32,
+        DataType::INT64,
+        DataType::FLOAT16,
+        DataType::BFLOAT16,
         DataType::FLOAT32
     };
     std::string ori_op = op_to_string(ops);
@@ -279,33 +281,42 @@ void VulkanContext::createLogicalDevice() {
     if (m_queuefamily == UINT32_MAX) {
         throw std::runtime_error("Queue family index not set! Call choosePhysicalDevice first.");
     }
-    if(!this->checkExtensionSupport()){
-        throw std::runtime_error("vulkan exetension error");
+    if (!this->checkExtensionSupport()) {
+        throw std::runtime_error("Vulkan extension error");
     }
+
     float queuePriority = 1.0f;
-    vk::DeviceQueueCreateInfo queueCreateInfo({},m_queuefamily,1, &queuePriority);
+    vk::DeviceQueueCreateInfo queueCreateInfo({}, m_queuefamily, 1, &queuePriority);
 
-    vk::PhysicalDeviceVulkan12Features vulkan12Features = {};
-    vulkan12Features.shaderInt8 = VK_TRUE;
-    vulkan12Features.shaderFloat16 = VK_TRUE;
+    // === Vulkan 1.1 特性（必须）===
+    vk::PhysicalDeviceVulkan11Features vk11{};
+    vk11.storageBuffer16BitAccess = VK_TRUE;
+    vk11.storagePushConstant16 = VK_TRUE;
 
-    vk::PhysicalDeviceFeatures deviceFeatures = {};
+    // === Vulkan 1.2 特性（可选）===
+    vk::PhysicalDeviceVulkan12Features vk12{};
+    vk12.shaderFloat16 = VK_TRUE; // 可选，但推荐
+    vk12.storageBuffer8BitAccess = VK_TRUE;
+
+    // === 普通物理设备特性 ===
+    vk::PhysicalDeviceFeatures deviceFeatures{};
     deviceFeatures.shaderInt64 = VK_TRUE;
+    deviceFeatures.shaderInt16 = VK_TRUE;
 
-    vk::DeviceCreateInfo deviceCreateInfo = {};
-    deviceCreateInfo.setQueueCreateInfos(queueCreateInfo)
-                .setEnabledExtensionCount(static_cast<uint32_t>(m_deviceExtensions.size()))
-                .setPpEnabledExtensionNames(m_deviceExtensions.data())
-                .setPEnabledFeatures(&deviceFeatures);
+    // 链接 pNext
+    vk11.pNext = &vk12;
 
-    deviceCreateInfo.setPNext(&vulkan12Features);
+    vk::DeviceCreateInfo createInfo{};
+    createInfo
+        .setQueueCreateInfos(queueCreateInfo)
+        .setPEnabledFeatures(&deviceFeatures)
+        .setPNext(&vk11)
+        .setEnabledExtensionCount(static_cast<uint32_t>(m_deviceExtensions.size()))
+        .setPpEnabledExtensionNames(m_deviceExtensions.data());
 
-    try {
-        this->m_device = m_phydevice.createDevice(deviceCreateInfo);
-    } catch (const vk::SystemError& e) {
-        throw std::runtime_error(std::string("Failed to create logical device: ") + e.what());
-    }
-    this->m_compute_queue = m_device.getQueue(m_queuefamily, 0);
+    m_device = m_phydevice.createDevice(createInfo);
+
+    m_compute_queue = m_device.getQueue(m_queuefamily, 0);
 }
 
 void VulkanContext::createCommandPool() {

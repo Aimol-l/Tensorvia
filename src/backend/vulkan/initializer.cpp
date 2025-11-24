@@ -28,21 +28,18 @@ Tensor FillImpl<Device::VULKAN>::execute(const std::vector<int64_t>& shape, Data
         throw std::runtime_error("VulkanContext is null!");
     }
 
-    dispatch_dtype(dtype,[&](auto type_id){
-        using T = typename decltype(type_id)::type;
-        ValueParams<T> params{
-            .value = T(value),
-            .numel = static_cast<int64_t>(temp.numel())
-        };
-        ctx_impl->submitCompute(
-            OpType::Fill, 
-            temp.dtype(),
-            {src_impl->buffer()},
-            (temp.numel() + 255) / 256, 1, 1,
-            &params, 
-            sizeof(params)
-        );
-    });
+    ValueParams<float> params{
+        .value = value,
+        .numel = static_cast<int64_t>(temp.numel())
+    };
+    ctx_impl->submitCompute(
+        OpType::Fill, 
+        temp.dtype(),
+        {src_impl->buffer()},
+        (temp.numel() + 255) / 256, 1, 1,
+        &params, 
+        sizeof(params)
+    );
     return  temp;
 }
 
