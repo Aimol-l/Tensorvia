@@ -1,0 +1,19 @@
+#version 460
+
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
+
+layout(push_constant) uniform Params{
+    float16_t value;   // OK
+    int64_t numel;     // OK
+} params;
+
+layout(std430, binding = 0) buffer Output{
+    float16_t data[];  // OK
+};
+
+void main(){
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= params.numel) return;
+    data[idx] = params.value;
+}
