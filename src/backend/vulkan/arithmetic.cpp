@@ -6,6 +6,18 @@ namespace ops {
 void AddImpl<Device::VULKAN>::execute(Tensor& a,float b){
     auto src_impl =  std::dynamic_pointer_cast<VKTensor>(a.get_impl());
     auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
+    ValueParams<float> params{
+        .value = b,
+        .numel = static_cast<int64_t>(a.numel())
+    };
+    ctx_impl->submitCompute(
+        OpType::Add, 
+        a.dtype(),
+        {src_impl->buffer()},
+        (a.numel() + 255) / 256, 1, 1,
+        &params, 
+        sizeof(params)
+    );
 }
 // uninplace
 Tensor AddImpl<Device::VULKAN>::execute(const Tensor& a, const Tensor& b) {

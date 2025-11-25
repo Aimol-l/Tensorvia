@@ -29,7 +29,7 @@ Tensor ZerosImpl<Device::VULKAN>::execute(const std::vector<int64_t>& shape, Dat
 }
 
 Tensor OnesImpl<Device::VULKAN>::execute(const std::vector<int64_t>& shape, DataType dtype){
-   Tensor temp(shape, dtype, Device::VULKAN);
+    Tensor temp(shape, dtype, Device::VULKAN);
     auto src_impl =  std::dynamic_pointer_cast<VKTensor>(temp.get_impl());
     if (!src_impl) {
         throw std::runtime_error("Failed to cast to VKTensor");

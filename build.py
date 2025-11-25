@@ -9,7 +9,7 @@ GLSLANG = "glslangValidator"
 SHADER_ROOT = Path("./shader")
 SPV_ROOT = Path("./spv")
 
-def compile_all():
+def compile_spv():
     # 创建输出目录
     SPV_ROOT.mkdir(parents=True, exist_ok=True)
 
@@ -29,7 +29,6 @@ def compile_all():
             GLSLANG,
             "-V",  # 编译为 SPIR-V
             "--target-env", "vulkan1.4",
-            "--client","vulkan100",
             str(shader),
             "-o", str(out_path)
         ]
@@ -44,5 +43,30 @@ def compile_all():
 
     print("✨ All shaders compiled.")
 
+def compile_src(device = "CPU"):
+    cmd = [
+       "cmake",
+       "-B","build",
+       "-DBACKEND_{}=ON".format("VULKAN"),
+       "-DBUILD_TEST=ON"
+    ]
+    try:
+        subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError as e:
+        print(e)
+
+    cmd = [
+        "cmake",
+        "--build",
+        "build",
+        "-j6",
+    ]
+    try:
+        subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError as e:
+        print(e)
+
 if __name__ == "__main__":
-    compile_all()
+
+    compile_src("VULKAN")
+    compile_spv()

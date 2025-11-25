@@ -50,6 +50,7 @@ enum class OpType {
     Slice,
     Matmul,
     Add,Sub,Dot,Div,
+    AddVec,SubVec,DotVec,DivVec,
     Abs,
     Sin,Cos,Tan,Exp,Relu,Silu,Tanh,Sqrt,Sidmoid,Pow,Log,Softmax,
     Clamp,Sum,Min,Max,Mean,Concat,
@@ -58,6 +59,10 @@ enum class OpType {
 };
 inline const char* op_to_string(OpType op) {
     switch (op) {
+        case OpType::AddVec:    return "addvec";
+        case OpType::SubVec:    return "subvec";
+        case OpType::DotVec:    return "dotvec";
+        case OpType::DivVec:    return "divvec";
         case OpType::Fill:      return "fill";
         case OpType::Random:      return "random";
         case OpType::Slice:    return "slice";
