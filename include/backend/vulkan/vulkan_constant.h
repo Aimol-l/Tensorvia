@@ -11,6 +11,7 @@
 // for: typecast
 // int64_t numel;
 
+
 // for: add,sub,dot,div,pow,log,fill
 // for: any,all
 template<class T>
@@ -26,6 +27,15 @@ requires(
 )
 struct ValueParams{
     T value;
+    int64_t numel;
+};
+
+
+// for:random
+struct RandomParams{
+    float min;
+    float max;
+    uint32_t seed;
     int64_t numel;
 };
 
@@ -54,7 +64,6 @@ struct SoftmaxParams{
 //     int32_t axis_size;
 //     int32_t inner_size;
 // };
-
 
 // for: transpose_2d
 struct Trans2DParams{

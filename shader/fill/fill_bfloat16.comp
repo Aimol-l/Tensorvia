@@ -1,8 +1,9 @@
-#version 450
+#version 460
 
-// #extension GL_EXT_shader_bfloat16 : require
-#extension GL_EXT_shader_explicit_arithmetic_types : require
-#extension GL_EXT_shader_explicit_arithmetic_types_float16 : require  // bfloat16_t 通常依赖此扩展
+// 需要启动bfloat16扩展 和 int64扩展
+#extension GL_EXT_bfloat16 : enable
+#extension GL_EXT_shader_explicit_arithmetic_types : enable
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : enable
 
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
@@ -18,5 +19,6 @@ layout(std430, binding = 0) buffer Output {
 void main() {
     uint idx = gl_GlobalInvocationID.x;
     if (int64_t(idx) >= params.numel) return;
-    data[idx] = bfloat16_t(params.value); // 显式转换
+
+    data[idx] = bfloat16_t(params.value);
 }

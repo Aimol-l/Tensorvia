@@ -29,6 +29,7 @@ def compile_all():
             GLSLANG,
             "-V",  # 编译为 SPIR-V
             "--target-env", "vulkan1.4",
+            "--client","vulkan100",
             str(shader),
             "-o", str(out_path)
         ]

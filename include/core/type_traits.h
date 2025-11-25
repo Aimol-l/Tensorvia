@@ -35,7 +35,6 @@
 #define LOG_WARN(msg)  LOG_BASE("WARN",  COLOR_YELLOW, msg)
 #define LOG_ERROR(msg) LOG_BASE("ERROR", COLOR_RED,    msg)
 
-
 #define RUNNING_TIME(expr) \
     do { \
         auto start = std::chrono::steady_clock::now(); \
@@ -44,9 +43,10 @@
         std::chrono::duration<double, std::milli> duration = end - start; \
         std::cout << "Execution time: " << duration.count() << "ms" << std::endl; \
     } while (0)
+
 //**********************************************************
 enum class OpType {
-    Fill,
+    Fill,Random,
     Slice,
     Matmul,
     Add,Sub,Dot,Div,
@@ -59,6 +59,7 @@ enum class OpType {
 inline const char* op_to_string(OpType op) {
     switch (op) {
         case OpType::Fill:      return "fill";
+        case OpType::Random:      return "random";
         case OpType::Slice:    return "slice";
         case OpType::Matmul:   return "matmul";
         case OpType::Add:       return "add";

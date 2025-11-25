@@ -37,18 +37,19 @@ VulkanContext::VulkanContext(){
 void VulkanContext::registerOp(OpType ops,int tensor_count,int params_size){
     static const std::vector<DataType> REQUIREDTYPE = {
         DataType::INT8,
-        DataType::INT16,
-        DataType::INT32,
-        DataType::INT64,
-        DataType::FLOAT16,
-        DataType::BFLOAT16,
-        DataType::FLOAT32
+        // DataType::INT16,
+        // DataType::INT32,
+        // DataType::INT64,
+        // DataType::FLOAT16,
+        // DataType::BFLOAT16,
+        DataType::FLOAT32,
+        DataType::FLOAT64
     };
     std::string ori_op = op_to_string(ops);
     // 加载一个算子的8个不同类型的shader
     for(auto& type:REQUIREDTYPE){
         std::string spvFile = std::format("./spv/{}_{}.spv",ori_op,dtype_to_string(type));
-        std::println("{}",spvFile);
+        std::print("[{}] ",spvFile);
         std::ifstream file(spvFile.c_str());
         // 判断算子文件是否存在
         if(!file.good()){
@@ -83,6 +84,7 @@ void VulkanContext::registerOp(OpType ops,int tensor_count,int params_size){
         this->m_pipelines[type_op] = result.value;
         this->m_device.destroyShaderModule(shaderModule);
     }
+    std::println("");
 }
 void VulkanContext::createDescriptorSetLayout(std::string ori_op, int tensor_count, int params_size) {
     if (m_pipeline_layouts.find(ori_op) != m_pipeline_layouts.end()) return;
@@ -288,36 +290,47 @@ void VulkanContext::createLogicalDevice() {
     float queuePriority = 1.0f;
     vk::DeviceQueueCreateInfo queueCreateInfo({}, m_queuefamily, 1, &queuePriority);
 
-    // === Vulkan 1.1 特性（必须）===
+    // 默认开启：  int32,float32
+    // 需要主动开启：int8,int16,int64,float16,bfloat16,float64
+
+    // --- Vulkan 1.1 特性 ---
     vk::PhysicalDeviceVulkan11Features vk11{};
     vk11.storageBuffer16BitAccess = VK_TRUE;
     vk11.storagePushConstant16 = VK_TRUE;
 
-    // === Vulkan 1.2 特性（可选）===
+    // --- Vulkan 1.2 特性 ---
     vk::PhysicalDeviceVulkan12Features vk12{};
-    vk12.shaderFloat16 = VK_TRUE; // 可选，但推荐
+    vk12.shaderInt8 = VK_TRUE;
+    vk12.shaderFloat16 = VK_TRUE;
     vk12.storageBuffer8BitAccess = VK_TRUE;
 
-    // === 普通物理设备特性 ===
+    // --- bfloat16 特性（关键！必须最前面） ---
+    vk::PhysicalDeviceShaderBfloat16FeaturesKHR bf16{};
+    bf16.shaderBFloat16Type = VK_TRUE;
+
+    // --- core feature ---
     vk::PhysicalDeviceFeatures deviceFeatures{};
     deviceFeatures.shaderInt64 = VK_TRUE;
     deviceFeatures.shaderInt16 = VK_TRUE;
+    deviceFeatures.shaderFloat64 = VK_TRUE;
 
-    // 链接 pNext
-    vk11.pNext = &vk12;
+
+    // --- 构造 pNext 链 ---
+    bf16.pNext = &vk11; // bfloat16 → vk11
+    vk11.pNext = &vk12; // vk11 → vk12
 
     vk::DeviceCreateInfo createInfo{};
     createInfo
         .setQueueCreateInfos(queueCreateInfo)
         .setPEnabledFeatures(&deviceFeatures)
-        .setPNext(&vk11)
+        .setPNext(&bf16)  // 最前面必须是 bfloat16
         .setEnabledExtensionCount(static_cast<uint32_t>(m_deviceExtensions.size()))
         .setPpEnabledExtensionNames(m_deviceExtensions.data());
 
     m_device = m_phydevice.createDevice(createInfo);
-
     m_compute_queue = m_device.getQueue(m_queuefamily, 0);
 }
+
 
 void VulkanContext::createCommandPool() {
     vk::CommandPoolCreateInfo poolInfo;

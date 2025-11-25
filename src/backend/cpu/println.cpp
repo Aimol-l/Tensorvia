@@ -20,7 +20,10 @@ inline void _println(const Tensor& a) {
         return;
     }
     const T* data = static_cast<const T*>(a.data());
-    constexpr size_t max_elements_per_dim = 7;
+
+    constexpr size_t elements = 4;
+    constexpr size_t max_elements_per_dim = 9;
+
     size_t total_dims = shape.size();
     std::vector<size_t> strides(total_dims, 1);
     for (int i = total_dims - 2; i >= 0; --i) {
@@ -29,7 +32,7 @@ inline void _println(const Tensor& a) {
     auto print_recursive = [&](auto&& self, size_t dim, size_t offset, std::string indent) -> void {
         size_t dim_size = shape[dim];
         bool omit = dim_size > max_elements_per_dim;
-        size_t show = omit ? 3 : dim_size;
+        size_t show = omit ? elements : dim_size;
         if (dim == total_dims - 1) {
             std::cout << std::format("{}[", indent);
             for (size_t i = 0; i < show; ++i) {
@@ -45,7 +48,7 @@ inline void _println(const Tensor& a) {
             }
             if (omit) {
                 std::cout << ", ..., ";
-                for (size_t i = dim_size - 3; i < dim_size; ++i) {
+                for (size_t i = dim_size - elements; i < dim_size; ++i) {
                     if constexpr (Float16Type<T> || BFloat16Type<T>) {
                         std::cout << std::format("{:.3f}", float(data[offset + i]));
                     } else if constexpr (std::is_integral_v<T>) {
@@ -66,7 +69,7 @@ inline void _println(const Tensor& a) {
             }
             if (omit) {
                 std::cout << std::format("{}  .....\n", indent);
-                for (size_t i = dim_size - 3; i < dim_size; ++i) {
+                for (size_t i = dim_size - elements; i < dim_size; ++i) {
                     self(self, dim + 1, offset + i * strides[dim], indent + "  ");
                     if (i != dim_size - 1)
                         std::cout << ",\n";

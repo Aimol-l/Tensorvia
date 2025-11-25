@@ -1,0 +1,44 @@
+#version 450
+
+#extension GL_EXT_shader_16bit_storage : enable
+#extension GL_EXT_shader_explicit_arithmetic_types_float16 : enable
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+layout(local_size_x = 512, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform Params {
+    float min_v;
+    float max_v;
+    uint  seed;      // ← 改成 uint32 更符合 xorshift32
+    int64_t numel;
+} params;
+
+layout(std430, binding = 0) buffer Output {
+    float data[];
+};
+
+//============================================================
+// XORSHIFT32: 返回 [0, 1) 的 float
+float xorshift32(inout uint state) {
+    state ^= state << 13;
+    state ^= state >> 17;
+    state ^= state << 5;
+    // 将 uint 映射到 [0, 1)：除以 2^32
+    return float(state) * 2.3283064365386963e-10; // 1.0 / 2^32
+}
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= uint(params.numel)) return;
+
+    uint state = params.seed ^ idx ^ 0x9E3779B9u;
+    // 强化混合（可选，提升初始分布）
+    state ^= (state << 13);
+    state ^= (state >> 17);
+    state ^= (state << 5);
+
+
+    float rand = xorshift32(state);
+    // 映射到 [min_v, max_v)
+    data[idx] = params.min_v + rand * (params.max_v - params.min_v);
+}
