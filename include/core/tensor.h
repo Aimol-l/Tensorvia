@@ -58,7 +58,7 @@ public:
     void to_host();
     void to_device(uint32_t id=0);
 
-    void to_contiguous();
+    Tensor& to_contiguous();
     Tensor contiguous()const;
     bool is_contiguous()const;
 

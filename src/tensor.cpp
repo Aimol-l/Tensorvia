@@ -319,10 +319,11 @@ bool Tensor::is_contiguous() const {
     return m_meta.strides == expected_strides;
 }
 
-void Tensor::to_contiguous(){
+Tensor& Tensor::to_contiguous(){
     if(this->is_contiguous()) return;
     auto new_impl = m_impl->clone_as_contiguous(m_meta);
     this->m_impl = std::move(new_impl);
+    return *this;
 }
 
 Tensor Tensor::view(std::initializer_list<int64_t> new_shape_list){
