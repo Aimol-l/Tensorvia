@@ -2,6 +2,8 @@
 bin/
 build/
 dist/
+spv/
+
 *.o
 *.so
 *.a
