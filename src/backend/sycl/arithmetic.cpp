@@ -314,7 +314,7 @@ void SubImpl<Device::SYCL>::execute(Tensor& a,float b){
     // uninplace
      Tensor SubImpl<Device::SYCL>::execute(const Tensor& a, const Tensor& b) {
         // 避免自加修改：a + a 返回新 tensor
-        if (&a == &b) ops::Add(a.clone(), b.clone());
+        if (&a == &b) ops::Sub(a.clone(), b.clone());
        // 计算公共类别
         DataType res_type = std::max(a.dtype(),b.dtype()); // 全是int 或 全是 float 
         if(a.dtype() <= DataType::INT64 && b.dtype() > DataType::INT64){
@@ -370,7 +370,7 @@ void SubImpl<Device::SYCL>::execute(Tensor& a,float b){
     // uninplace
      Tensor DotImpl<Device::SYCL>::execute(const Tensor& a, const Tensor& b) {
         // 避免自加修改：a + a 返回新 tensor
-        if (&a == &b) ops::Add(a.clone(), b.clone());
+        if (&a == &b) ops::Dot(a.clone(), b.clone());
        // 计算公共类别
         DataType res_type = std::max(a.dtype(),b.dtype()); // 全是int 或 全是 float 
         if(a.dtype() <= DataType::INT64 && b.dtype() > DataType::INT64){
@@ -426,7 +426,7 @@ void DivImpl<Device::SYCL>::execute(Tensor& a,float b){
      // uninplace
     Tensor DivImpl<Device::SYCL>::execute(const Tensor& a, const Tensor& b) {
         // 避免自加修改：a + a 返回新 tensor
-        if (&a == &b) ops::Add(a.clone(), b.clone());
+        if (&a == &b) ops::Div(a.clone(), b.clone());
        // 计算公共类别
         DataType res_type = std::max(a.dtype(),b.dtype()); // 全是int 或 全是 float 
         if(a.dtype() <= DataType::INT64 && b.dtype() > DataType::INT64){

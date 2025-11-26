@@ -51,7 +51,9 @@ public:
     Tensor clone() const;
     Device device() const;
     DataType dtype() const;
-    Tensor to_type(DataType);
+
+    void to_type(DataType);
+    Tensor to_type_(DataType);
 
     void to_host();
     void to_device(uint32_t id=0);
@@ -64,7 +66,9 @@ public:
     size_t dims()const;
     size_t numel() const {return m_meta.numel;}
     Tensor empty_like(Tensor& tensor) const;
+
     std::shared_ptr<TensorImpl> get_impl() const;
+    void set_impl(std::shared_ptr<TensorImpl> impl,DataType new_dtype);
 
     Tensor view(std::vector<int64_t> new_shape_list);
     Tensor view(std::initializer_list<int64_t> new_shape);

@@ -22,8 +22,10 @@ private:
     vk::DescriptorPool m_descriptor_pool;
     std::vector<vk::Fence> m_inflight_fences;
 
+    mutable std::mutex m_submit_mutex;
+
     // relu_int32   -->  pipeline 
-    //❌不可复用,shader 不同（因为 dtype 不同）→ 必须重新创建
+    //❌不复用,shader 不同（因为 dtype 不同）→ 必须重新创建
     std::unordered_map<std::string, vk::Pipeline> m_pipelines;  
 
     // relu_int32  -->  pipeline_layout

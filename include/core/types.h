@@ -3,9 +3,9 @@
 #include <cstdint>
 #include <type_traits>
 
-// #ifndef BACKEND_VULKAN
-//   #define BACKEND_VULKAN //临时使用
-// #endif
+#ifndef BACKEND_VULKAN
+  #define BACKEND_VULKAN //临时使用
+#endif
 
 template<typename T>
 struct compute_type_helper { using type = T; };

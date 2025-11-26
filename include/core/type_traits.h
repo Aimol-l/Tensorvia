@@ -160,30 +160,7 @@ inline size_t calc_dtype_size(DataType dtype) {
     }
 }
 
-// 定义合法的类型转换规则
-static const std::set<std::pair<DataType, DataType>> valid_casts = {
-    {DataType::INT8,   DataType::FLOAT32}, // 255 -> 255.0f
-    {DataType::INT16,  DataType::FLOAT32}, // 65535 -> 65535.0f
-    {DataType::INT16,  DataType::FLOAT64}, // 65535 -> 65535.0
-    {DataType::INT32,  DataType::FLOAT32}, // 4294967295 -> 4294967295.0f
-    {DataType::INT32,  DataType::FLOAT64}, // 4294967295 -> 4294967295.0
-    {DataType::INT64,  DataType::FLOAT64}, // 18446744073709551615 -> 18446744073709551615.0
-    {DataType::FLOAT32,DataType::INT32},   // 3.1415f -> 3
-    {DataType::FLOAT32,DataType::INT64},   // 3.1415f -> 3
-    {DataType::INT8,   DataType::INT16},   // 255 -> 255
-    {DataType::INT8,   DataType::INT32},   // 255 -> 255
-    {DataType::INT8,   DataType::INT64},   // 255 -> 255
-    {DataType::INT16,  DataType::INT32},   // 65535 -> 65535
-    {DataType::INT32,  DataType::INT64},   // 4294967295 -> 4294967295
-    {DataType::FLOAT16,DataType::FLOAT32}, // 1.0h -> 1.0f
-    {DataType::FLOAT16,DataType::FLOAT64}, // 1.0h -> 1.0
-    {DataType::FLOAT16,DataType::BFLOAT16}, // 1.0h -> 1.0f -> 1.0b
-    {DataType::BFLOAT16,DataType::FLOAT32}, // 1.0b -> 1.0f
-    {DataType::BFLOAT16,DataType::FLOAT64}, // 1.0b -> 1.0
-    {DataType::BFLOAT16,DataType::FLOAT16},  // 3.14b -> 3.14f -> 3.14h
-    {DataType::FLOAT32,DataType::FLOAT64}, // 1.0f -> 1.0
-    {DataType::FLOAT64,DataType::FLOAT32}, // 1.0 -> 1.0f  可能有问题！！
-};
+
 using CppDTypeVariant = std::variant<
     int8_t*, int16_t*, int32_t*, int64_t*,
     float16*, bfloat16*, float*, double*
@@ -245,6 +222,32 @@ void dispatch_dtype(DataType type, Func&& f) {
             throw std::runtime_error("Unsupported dtype");
     }
 }
+
+// 定义合法的类型转换规则
+static const std::set<std::pair<DataType, DataType>> valid_casts = {
+    {DataType::INT8,   DataType::FLOAT32}, // 255 -> 255.0f
+    {DataType::INT16,  DataType::FLOAT32}, // 65535 -> 65535.0f
+    {DataType::INT16,  DataType::FLOAT64}, // 65535 -> 65535.0
+    {DataType::INT32,  DataType::FLOAT32}, // 4294967295 -> 4294967295.0f
+    {DataType::INT32,  DataType::FLOAT64}, // 4294967295 -> 4294967295.0
+    {DataType::INT64,  DataType::FLOAT64}, // 18446744073709551615 -> 18446744073709551615.0
+    {DataType::FLOAT32,DataType::FLOAT16},   // 3.1415f -> 3
+    {DataType::FLOAT32,DataType::INT32},   // 3.1415f -> 3
+    {DataType::FLOAT32,DataType::INT64},   // 3.1415f -> 3
+    {DataType::INT8,   DataType::INT16},   // 255 -> 255
+    {DataType::INT8,   DataType::INT32},   // 255 -> 255
+    {DataType::INT8,   DataType::INT64},   // 255 -> 255
+    {DataType::INT16,  DataType::INT32},   // 65535 -> 65535
+    {DataType::INT32,  DataType::INT64},   // 4294967295 -> 4294967295
+    {DataType::FLOAT16,DataType::FLOAT32}, // 1.0h -> 1.0f
+    {DataType::FLOAT16,DataType::FLOAT64}, // 1.0h -> 1.0
+    {DataType::FLOAT16,DataType::BFLOAT16}, // 1.0h -> 1.0f -> 1.0b
+    {DataType::BFLOAT16,DataType::FLOAT32}, // 1.0b -> 1.0f
+    {DataType::BFLOAT16,DataType::FLOAT64}, // 1.0b -> 1.0
+    {DataType::BFLOAT16,DataType::FLOAT16},  // 3.14b -> 3.14f -> 3.14h
+    {DataType::FLOAT32,DataType::FLOAT64}, // 1.0f -> 1.0
+    {DataType::FLOAT64,DataType::FLOAT32}, // 1.0 -> 1.0f  可能有问题！！
+};
 
 // int8*int8 -> int8; int8*int16 -> int16; int8*int32 -> int32;int8*int64 -> int64; int8*float16 -> float16; int8*bfloat16 -> bfloat16; int8*float32 -> float32; int8*float64 -> float64;
 // int16*int16 -> int16; int16*int32 -> int32; int16*int64 -> int64; int16*float16 -> float16; int16*bfloat16 -> bfloat16; int16*float32 -> float32; int16*float64 -> float64;

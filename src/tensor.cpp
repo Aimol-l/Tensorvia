@@ -462,13 +462,17 @@ int64_t Tensor::shape(int i) const{
 }
 DataType Tensor::dtype() const { return this->m_meta.dtype; }
 
-Tensor Tensor::to_type(DataType dst){
-   return ops::Typecast(*this,dst);
+Tensor Tensor::to_type_(DataType dst){
+   return ops::Typecast(static_cast<const Tensor>(*this),dst);
+}
+void Tensor::to_type(DataType dst){
+    ops::Typecast(*this,dst);
 }
 
 // cuda|sycl|vulkan -> cpu
 void Tensor::to_host(){
-    if(this->m_meta.device == Device::CPU) return;
+    if(this->m_meta.device == Device::CPU) 
+        return;
     auto cpu_impl =  create_tensor_impl(this->m_meta.numel, this->m_meta.dtype, Device::CPU);
     copy_device_to_host(m_impl,cpu_impl,this->m_meta.dtype); // 
     m_impl = cpu_impl;
@@ -505,6 +509,10 @@ Tensor Tensor::empty_like(Tensor& tensor) const{
     return Tensor(tensor.shape(),this->m_meta.dtype,this->m_meta.device);
 }
 
+void Tensor::set_impl(std::shared_ptr<TensorImpl> impl,DataType new_dtype){
+    m_impl = impl;
+    m_meta.dtype = new_dtype;
+}
 std::shared_ptr<TensorImpl> Tensor::get_impl() const{
     return m_impl;
 }

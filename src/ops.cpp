@@ -426,13 +426,14 @@ namespace ops {
     }
     
     void  Add(const Tensor& a,const Tensor& b,Tensor& dst){
-        if(a.device() != b.device()) 
+        if(a.device() != b.device()|| dst.device() != a.device() || dst.device() != b.device()) 
             throw std::runtime_error("Tensor Device mismatch!");
-        if(a.shape().size() != b.shape().size()) 
+        if(a.shape().size() != b.shape().size() || dst.shape().size() != a.shape().size() || dst.shape().size() != b.shape().size()) 
             throw std::runtime_error("Tensor dims mismatch!");
         
         for(int i=0;i<a.shape().size();i++){
-            if(a.shape(i) != b.shape(i)) throw std::runtime_error("Tensor shape mismatch!");
+            if(a.shape(i) != b.shape(i) || dst.shape(i) != b.shape(i) || dst.shape(i) != a.shape(i)) 
+                throw std::runtime_error("Tensor shape mismatch!");
         }
         // 后端实现分发
         if(a.device() == Device::CPU){
@@ -1135,6 +1136,35 @@ namespace ops {
         #endif
         #ifdef BACKEND_VULKAN
             return MeanImpl<Device::VULKAN>::execute(a,axis);
+        #endif
+    }
+    void Typecast(Tensor& a,DataType dst_type){
+        if(a.data() == nullptr|| a.numel() == 0) 
+            throw std::runtime_error("tensor a is null");
+        if (!is_cast_valid(a.dtype(), dst_type))
+            throw std::runtime_error(std::format("Invalid typecast from {} to {}", dtype_to_string(a.dtype()), dtype_to_string(dst_type)));
+        if (a.dtype() == dst_type)
+            return;
+        // 后端实现分发
+        if(a.device() == Device::CPU){
+            TypecastImpl<Device::CPU>::execute(a,dst_type);
+            return;
+        }
+        #ifdef BACKEND_CPU
+            TypecastImpl<Device::CPU>::execute(a,dst_type);
+            return;
+        #endif
+        #ifdef BACKEND_SYCL
+            TypecastImpl<Device::SYCL>::execute(a,dst_type);
+            return;
+        #endif
+        #ifdef BACKEND_CUDA
+            TypecastImpl<Device::CUDA>::execute(a,dst_type);
+            return;
+        #endif
+        #ifdef BACKEND_VULKAN
+            TypecastImpl<Device::VULKAN>::execute(a,dst_type);
+            return;
         #endif
     }
     Tensor Typecast(const Tensor& a,DataType dst_type){

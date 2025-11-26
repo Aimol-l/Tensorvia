@@ -9,6 +9,7 @@ struct TypecastImpl;
 
 template <>
 struct TypecastImpl<Device::CPU> {
+    static void execute(Tensor& a, DataType dst_type);
     static Tensor execute(const Tensor& a, DataType dst_type);
 };
 

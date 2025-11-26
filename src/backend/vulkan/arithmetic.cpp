@@ -33,31 +33,86 @@ Tensor AddImpl<Device::VULKAN>::execute(const Tensor& a, const Tensor& b) {
     const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a,res_type);
     const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b,res_type);
 
-    auto src_impl =  std::dynamic_pointer_cast<VKTensor>(a.get_impl());
-    auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
+    // 到这里能保证A,B类型一致
     size_t size = a.numel();
     Tensor result(a.shape(), res_type, Device::VULKAN);
+    auto A_impl =  std::dynamic_pointer_cast<VKTensor>(A.get_impl());
+    auto B_impl =  std::dynamic_pointer_cast<VKTensor>(B.get_impl());
+    auto Dst_impl =  std::dynamic_pointer_cast<VKTensor>(result.get_impl());
+
+    auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(A_impl->context());
+    
+    int64_t num = a.numel();
+
+    ctx_impl->submitCompute(
+        OpType::AddVec, 
+        A.dtype(),
+        {A_impl->buffer(),B_impl->buffer(),Dst_impl->buffer()},
+        (A.numel() + 255) / 256, 1, 1,
+        &num, 
+        sizeof(num)
+    );
+
     return result;
 }
 void AddImpl<Device::VULKAN>::execute(const Tensor& a, const Tensor& b,Tensor& dst){
-    auto src_impl =  std::dynamic_pointer_cast<VKTensor>(a.get_impl());
-    auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
+    // 避免自加修改：a + a 返回新 tensor
+    if (&a == &b) ops::Add(a.clone(), b.clone());
+    // 计算公共类别
+    DataType res_type = std::max(a.dtype(),b.dtype()); // 全是int 或 全是 float 
+    if(a.dtype() <= DataType::INT64 && b.dtype() > DataType::INT64){
+        res_type = std::max(b.dtype(),DataType::FLOAT32);
+    }else if(a.dtype() > DataType::INT64 && b.dtype() <= DataType::INT64){
+        res_type = std::max(a.dtype(),DataType::FLOAT32);
+    }
+    const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a,res_type);
+    const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b,res_type);
+
+    // 到这里能保证A,B类型一致
+    size_t size = a.numel();
+    auto A_impl =  std::dynamic_pointer_cast<VKTensor>(A.get_impl());
+    auto B_impl =  std::dynamic_pointer_cast<VKTensor>(B.get_impl());
+    auto Dst_impl =  std::dynamic_pointer_cast<VKTensor>(dst.get_impl());
+
+    auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(A_impl->context());
+    
+    int64_t num = a.numel();
+    ctx_impl->submitCompute(
+        OpType::AddVec, 
+        A.dtype(),
+        {A_impl->buffer(),B_impl->buffer(),Dst_impl->buffer()},
+        (A.numel() + 255) / 256, 1, 1,
+        &num, 
+        sizeof(num)
+    );
 }
 
-
 Tensor AddImpl<Device::VULKAN>::execute(const Tensor& a, float b){
-    Tensor t = ops::Fill(a.shape(),a.dtype(),b);
-    return ops::Add(a, t);
+    Tensor t = a.clone();
+    ops::Add(t, b);
+    return t;
 }
 
 void SubImpl<Device::VULKAN>::execute(Tensor& a,float b){
     auto src_impl =  std::dynamic_pointer_cast<VKTensor>(a.get_impl());
     auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
+    ValueParams<float> params{
+        .value = b,
+        .numel = static_cast<int64_t>(a.numel())
+    };
+    ctx_impl->submitCompute(
+        OpType::Sub, 
+        a.dtype(),
+        {src_impl->buffer()},
+        (a.numel() + 255) / 256, 1, 1,
+        &params, 
+        sizeof(params)
+    );
 }
 // uninplace
 Tensor SubImpl<Device::VULKAN>::execute(const Tensor& a, const Tensor& b) {
-    // 避免自加修改：a + a 返回新 tensor
-    if (&a == &b) ops::Add(a.clone(), b.clone());
+   // 避免自加修改：a + a 返回新 tensor
+    if (&a == &b) ops::Sub(a.clone(), b.clone());
     // 计算公共类别
     DataType res_type = std::max(a.dtype(),b.dtype()); // 全是int 或 全是 float 
     if(a.dtype() <= DataType::INT64 && b.dtype() > DataType::INT64){
@@ -68,26 +123,52 @@ Tensor SubImpl<Device::VULKAN>::execute(const Tensor& a, const Tensor& b) {
     const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a,res_type);
     const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b,res_type);
 
-    auto src_impl =  std::dynamic_pointer_cast<VKTensor>(a.get_impl());
-    auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
-
+    // 到这里能保证A,B类型一致
+    size_t size = a.numel();
     Tensor result(a.shape(), res_type, Device::VULKAN);
+    auto A_impl =  std::dynamic_pointer_cast<VKTensor>(A.get_impl());
+    auto B_impl =  std::dynamic_pointer_cast<VKTensor>(B.get_impl());
+    auto Dst_impl =  std::dynamic_pointer_cast<VKTensor>(result.get_impl());
 
-   
+    auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(A_impl->context());
+    
+    int64_t num = a.numel();
+
+    ctx_impl->submitCompute(
+        OpType::SubVec, 
+        A.dtype(),
+        {A_impl->buffer(),B_impl->buffer(),Dst_impl->buffer()},
+        (A.numel() + 255) / 256, 1, 1,
+        &num, 
+        sizeof(num)
+    );
+
     return result;
 }
 Tensor SubImpl<Device::VULKAN>::execute(const Tensor& a, float b){
-    Tensor t = ops::Fill(a.shape(),a.dtype(),b);
-    return ops::Sub(a, t);
+    Tensor t = a.clone();
+    ops::Sub(t, b);
+    return t;
 }
 void DotImpl<Device::VULKAN>::execute(Tensor& a,float b){
     auto src_impl =  std::dynamic_pointer_cast<VKTensor>(a.get_impl());
     auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
-    
+    ValueParams<float> params{
+        .value = b,
+        .numel = static_cast<int64_t>(a.numel())
+    };
+    ctx_impl->submitCompute(
+        OpType::Dot, 
+        a.dtype(),
+        {src_impl->buffer()},
+        (a.numel() + 255) / 256, 1, 1,
+        &params, 
+        sizeof(params)
+    );
 }
 Tensor DotImpl<Device::VULKAN>::execute(const Tensor& a, const Tensor& b) {
     // 避免自加修改：a + a 返回新 tensor
-    if (&a == &b) ops::Add(a.clone(), b.clone());
+    if (&a == &b) ops::Dot(a.clone(), b.clone());
     // 计算公共类别
     DataType res_type = std::max(a.dtype(),b.dtype()); // 全是int 或 全是 float 
     if(a.dtype() <= DataType::INT64 && b.dtype() > DataType::INT64){
@@ -98,12 +179,26 @@ Tensor DotImpl<Device::VULKAN>::execute(const Tensor& a, const Tensor& b) {
     const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a,res_type);
     const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b,res_type);
 
-    auto src_impl =  std::dynamic_pointer_cast<VKTensor>(a.get_impl());
-    auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
-
+    // 到这里能保证A,B类型一致
+    size_t size = a.numel();
     Tensor result(a.shape(), res_type, Device::VULKAN);
+    auto A_impl =  std::dynamic_pointer_cast<VKTensor>(A.get_impl());
+    auto B_impl =  std::dynamic_pointer_cast<VKTensor>(B.get_impl());
+    auto Dst_impl =  std::dynamic_pointer_cast<VKTensor>(result.get_impl());
 
-   
+    auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(A_impl->context());
+    
+    int64_t num = a.numel();
+
+    ctx_impl->submitCompute(
+        OpType::DotVec, 
+        A.dtype(),
+        {A_impl->buffer(),B_impl->buffer(),Dst_impl->buffer()},
+        (A.numel() + 255) / 256, 1, 1,
+        &num, 
+        sizeof(num)
+    );
+
     return result;
 }
 Tensor DotImpl<Device::VULKAN>::execute(const Tensor& a, float b){

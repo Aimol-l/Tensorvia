@@ -93,6 +93,7 @@ namespace ops{
     OPS_API Tensor Max(const Tensor& a,int axis);
     OPS_API Tensor Mean(const Tensor& a,int axis);
 
+    OPS_API void Typecast(Tensor& a,DataType dst_type);
     OPS_API Tensor Typecast(const Tensor& a,DataType dst_type);
     OPS_API Tensor Concat(const std::vector<Tensor> &tensors, int dim);
 

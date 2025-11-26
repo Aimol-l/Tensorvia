@@ -1,7 +1,5 @@
 #include "vulkan_context.h"
 
-
-
 VulkanContext::VulkanContext(){
     this->createInstance();
     this->setupDebugMessenger();
@@ -395,9 +393,9 @@ void VulkanContext::submitCompute(
     const void* push_constants,
     size_t push_size)
 {
+    std::lock_guard<std::mutex> lock(m_submit_mutex);
     auto ori_op = op_to_string(op);
     auto type_op = make_pipeline_key(op, dtype); // 正确的 key
-
     if (!m_pipelines.contains(type_op)) {
         throw std::runtime_error(std::format("can not find pipeline:{}", type_op));
     }
@@ -407,6 +405,7 @@ void VulkanContext::submitCompute(
     if (!m_descriptor_set_layouts.contains(ori_op)) {
         throw std::runtime_error(std::format("can not find descriptor_set_layouts:{}", ori_op));
     }
+
     vk::Pipeline pipeline = m_pipelines[type_op];      // <- 使用正确的 key
     vk::PipelineLayout layout = m_pipeline_layouts[type_op];
     vk::DescriptorSetLayout dsl = m_descriptor_set_layouts[ori_op];
