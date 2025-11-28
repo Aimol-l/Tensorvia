@@ -29,24 +29,18 @@ VulkanContext::VulkanContext(){
     std::println("*************************************************************");
 }
 
+void VulkanContext::registerOp(OpType ops,DataType Dtype,int tensor_count, int params_size){
+    std::vector<DataType> typs = {Dtype};
+    this->registerOp(ops,typs,tensor_count,params_size);
+}
 // relu_float32   -->  pipeline 
 // relu_float32   -->  pipeline_layout
 // relu           -->  descriptor_set_layout
-void VulkanContext::registerOp(OpType ops,int tensor_count,int params_size){
-    static const std::vector<DataType> REQUIREDTYPE = {
-        DataType::INT8,
-        DataType::INT16,
-        DataType::INT32,
-        DataType::INT64,
-        DataType::FLOAT16,
-        DataType::BFLOAT16,
-        DataType::FLOAT32,
-        DataType::FLOAT64
-    };
+void VulkanContext::registerOp(OpType ops,std::vector<DataType>& Dtypes,int tensor_count,int params_size){
     std::string ori_op = op_to_string(ops);
     // 加载一个算子的8个不同类型的shader
     std::vector<std::string> need_types;
-    for(auto& type:REQUIREDTYPE){
+    for(auto& type:Dtypes){
         std::string spvFile = std::format("./spv/{}_{}.spv",ori_op,dtype_to_string(type));
         // std::print("[{}] ",spvFile);
         std::ifstream file(spvFile.c_str());

@@ -334,18 +334,18 @@ Tensor AbsImpl<Device::VULKAN>::execute(const Tensor& a){
     return result;
 }
 
- template struct AddImpl<Device::VULKAN>;
- template struct SubImpl<Device::VULKAN>;
- template struct DotImpl<Device::VULKAN>;
- template struct DivImpl<Device::VULKAN>;
- template struct SinImpl<Device::VULKAN>;
- template struct CosImpl<Device::VULKAN>;
- template struct TanImpl<Device::VULKAN>;
- template struct ExpImpl<Device::VULKAN>;
- template struct SqrtImpl<Device::VULKAN>;
- template struct PowImpl<Device::VULKAN>;
- template struct LogImpl<Device::VULKAN>;
- template struct ClampImpl<Device::VULKAN>;
- template struct AbsImpl<Device::VULKAN>;
+template struct AddImpl<Device::VULKAN>;
+template struct SubImpl<Device::VULKAN>;
+template struct DotImpl<Device::VULKAN>;
+template struct DivImpl<Device::VULKAN>;
+template struct SinImpl<Device::VULKAN>;
+template struct CosImpl<Device::VULKAN>;
+template struct TanImpl<Device::VULKAN>;
+template struct ExpImpl<Device::VULKAN>;
+template struct SqrtImpl<Device::VULKAN>;
+template struct PowImpl<Device::VULKAN>;
+template struct LogImpl<Device::VULKAN>;
+template struct ClampImpl<Device::VULKAN>;
+template struct AbsImpl<Device::VULKAN>;
 
 }

@@ -6,9 +6,7 @@ namespace ops {
  void ReluImpl<Device::VULKAN>::execute(Tensor& a){
     auto src_impl =  std::dynamic_pointer_cast<VKTensor>(a.get_impl());
     auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
-    
     int64_t numel = a.numel(); 
-    
     ctx_impl->submitCompute(
         OpType::Relu, 
         a.dtype(),
@@ -19,21 +17,56 @@ namespace ops {
     );
 }
 Tensor ReluImpl<Device::VULKAN>::execute(const Tensor& a){
-    auto src_impl =  std::dynamic_pointer_cast<VKTensor>(a.get_impl());
+    Tensor result = a.clone();
+    auto src_impl =  std::dynamic_pointer_cast<VKTensor>(result.get_impl());
     auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
-    Tensor result(a.shape(),a.dtype(),a.device());
+
+    int64_t numel = result.numel(); 
+    ctx_impl->submitCompute(
+        OpType::Relu, 
+        result.dtype(),
+        {src_impl->buffer()},
+        (result.numel() + 255) / 256, 1, 1,
+        &numel,
+        sizeof(int64_t)
+    );
+    
     return result;
 }
 
  void SiluImpl<Device::VULKAN>::execute(Tensor& a){
     auto src_impl =  std::dynamic_pointer_cast<VKTensor>(a.get_impl());
     auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
+
+    int64_t numel = a.numel();
+    ctx_impl->submitCompute(
+        OpType::Silu, 
+        a.dtype(),
+        {src_impl->buffer(),src_impl->buffer()},
+        (a.numel() + 255) / 256, 1, 1,
+        &numel,
+        sizeof(int64_t)
+    );
     
 }
 Tensor SiluImpl<Device::VULKAN>::execute(const Tensor& a){
+    Tensor result = a.clone().to_type_(DataType::FLOAT32);
+
     auto src_impl =  std::dynamic_pointer_cast<VKTensor>(a.get_impl());
+    auto dst_impl =  std::dynamic_pointer_cast<VKTensor>(a.get_impl());
     auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
-    Tensor result;
+
+    int64_t numel = result.numel(); 
+
+    ctx_impl->submitCompute(
+        OpType::Relu, 
+        result.dtype(),
+        {src_impl->buffer(),dst_impl->buffer()},
+        (result.numel() + 255) / 256, 1, 1,
+        &numel,
+        sizeof(int64_t)
+    );
+    
     return result;
 }
 

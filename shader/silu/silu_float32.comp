@@ -1,0 +1,24 @@
+#version 460
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform Params {
+    int64_t numel;
+} params;
+layout(std430, binding = 0) buffer InputA {
+    float data[];
+} a;
+
+layout(std430, binding = 1) buffer InputB {
+    float data[];
+} b;
+
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (int64_t(idx) >= params.numel) return;
+    float sig = 1.0 / (1.0 + exp(a.data[idx]));
+
+    b.data[idx] = a.data[idx] * sig;
+}

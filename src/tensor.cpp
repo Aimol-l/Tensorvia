@@ -320,7 +320,7 @@ bool Tensor::is_contiguous() const {
 }
 
 Tensor& Tensor::to_contiguous(){
-    if(this->is_contiguous()) return;
+    if(this->is_contiguous()) return *this;
     auto new_impl = m_impl->clone_as_contiguous(m_meta);
     this->m_impl = std::move(new_impl);
     return *this;

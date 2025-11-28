@@ -1,0 +1,26 @@
+#version 460
+
+#extension GL_EXT_shader_16bit_storage : enable
+#extension GL_EXT_shader_explicit_arithmetic_types : enable
+#extension GL_EXT_shader_explicit_arithmetic_types_float16 : enable
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform Params {
+    int64_t numel;
+} params;
+layout(std430, binding = 0) buffer InputA {
+    float16_t data[];
+} a;
+
+layout(std430, binding = 1) buffer InputB {
+    float16_t data[];
+} b;
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (int64_t(idx) >= params.numel) return;
+    // silu
+    float sig = 1.0 / (1.0 + exp(float(a.data[idx])));
+    b.data[idx] = float16_t(float(a.data[idx]) * sig);
+}

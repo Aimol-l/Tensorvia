@@ -58,22 +58,44 @@ struct CPURegistrar {
 #include "backend/vulkan/vulkan_tensor.h"
 #include "backend/vulkan/vulkan_context.h"
 struct VulkanRegistrar {
+
     std::shared_ptr<VulkanContext> ctx =  std::make_shared<VulkanContext>();
     VulkanRegistrar() {
-        
+        static std::vector<DataType> AllTypes = {
+            DataType::INT8,
+            DataType::INT16,
+            DataType::INT32,
+            DataType::INT64,
+            DataType::FLOAT16,
+            DataType::BFLOAT16,
+            DataType::FLOAT32,
+            DataType::FLOAT64
+        };
+        static std::vector<DataType> FloatTypes = {
+            DataType::FLOAT16,
+            DataType::BFLOAT16,
+            DataType::FLOAT32,
+            DataType::FLOAT64
+        };
+
         // 注册算子
-        ctx->registerOp(OpType::Add,1,sizeof(ValueParams<float32>));
-        ctx->registerOp(OpType::AddVec,3,sizeof(int64_t));
+        ctx->registerOp(OpType::Add,AllTypes,1,sizeof(ValueParams<float32>));
+        ctx->registerOp(OpType::AddVec,AllTypes,3,sizeof(int64_t));
         
-        ctx->registerOp(OpType::Sub,1,sizeof(ValueParams<float32>));
-        ctx->registerOp(OpType::SubVec,3,sizeof(int64_t));
+        ctx->registerOp(OpType::Sub,AllTypes,1,sizeof(ValueParams<float32>));
+        ctx->registerOp(OpType::SubVec,AllTypes,3,sizeof(int64_t));
 
-        ctx->registerOp(OpType::Dot,1,sizeof(ValueParams<float32>));
-        ctx->registerOp(OpType::DotVec,3,sizeof(int64_t));
+        ctx->registerOp(OpType::Dot,AllTypes,1,sizeof(ValueParams<float32>));
+        ctx->registerOp(OpType::DotVec,AllTypes,3,sizeof(int64_t));
 
-        ctx->registerOp(OpType::Relu,1,sizeof(int64_t));
-        ctx->registerOp(OpType::Random,1,sizeof(RandomParams));
-        ctx->registerOp(OpType::Fill,1,sizeof(ValueParams<float32>));
+        ctx->registerOp(OpType::Div,AllTypes,1,sizeof(ValueParams<float32>));
+        ctx->registerOp(OpType::DivVec,AllTypes,3,sizeof(int64_t));
+
+        ctx->registerOp(OpType::Relu,AllTypes,1,sizeof(int64_t));
+        ctx->registerOp(OpType::Silu,FloatTypes,2,sizeof(int64_t));
+
+        ctx->registerOp(OpType::Random,AllTypes,1,sizeof(RandomParams));
+        ctx->registerOp(OpType::Fill,AllTypes,1,sizeof(ValueParams<float32>));
 
         // 注册vulkan后端
         register_tensor_impl(Device::VULKAN, [&](void* ptr,int64_t numel, DataType dtype) {

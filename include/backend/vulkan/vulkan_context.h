@@ -66,7 +66,8 @@ public:
 
     // 注册算子和背后对应的计算管线。
     // 创建管线需要使用管线布局，管线布局负责描述使用什么类型的shader(vert/frag/compute),确定使用多少输入数据(binding)
-    void registerOp(OpType ops, int tensor_count, int params_size);
+    void registerOp(OpType ops,std::vector<DataType>& Dtypes,int tensor_count, int params_size);
+    void registerOp(OpType ops,DataType Dtype,int tensor_count, int params_size);
 
     // 高层接口：用户只需传 buffer
     void submitCompute(

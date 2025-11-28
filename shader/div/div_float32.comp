@@ -1,0 +1,23 @@
+#version 450
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform Params {
+    float value;
+    int64_t numel;
+} params;
+
+layout(std430, binding = 0) buffer Output {
+    float data[];
+};
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (int64_t(idx) >= params.numel) return;
+    if (params.value == 0.0f){
+        data[idx] = uintBitsToFloat(0x7FC00000u);
+    }else{
+        data[idx] /= params.value;
+    }
+}
