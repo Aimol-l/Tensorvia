@@ -66,14 +66,14 @@ struct VulkanRegistrar {
             DataType::INT16,
             DataType::INT32,
             DataType::INT64,
-            DataType::FLOAT16,
-            DataType::BFLOAT16,
+            // DataType::FLOAT16,
+            // DataType::BFLOAT16,
             DataType::FLOAT32,
             DataType::FLOAT64
         };
         static std::vector<DataType> FloatTypes = {
-            DataType::FLOAT16,
-            DataType::BFLOAT16,
+            // DataType::FLOAT16,
+            // DataType::BFLOAT16,
             DataType::FLOAT32,
             DataType::FLOAT64
         };

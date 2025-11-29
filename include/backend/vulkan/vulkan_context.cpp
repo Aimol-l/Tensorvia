@@ -295,12 +295,14 @@ void VulkanContext::createLogicalDevice() {
     // --- Vulkan 1.2 特性 ---
     vk::PhysicalDeviceVulkan12Features vk12{};
     vk12.shaderInt8 = VK_TRUE;
-    vk12.shaderFloat16 = VK_TRUE;
+    // vk12.shaderFloat16 = VK_TRUE;
+    vk12.shaderFloat16 = VK_FALSE;
     vk12.storageBuffer8BitAccess = VK_TRUE;
 
     // --- bfloat16 特性（关键！必须最前面） ---
     vk::PhysicalDeviceShaderBfloat16FeaturesKHR bf16{};
-    bf16.shaderBFloat16Type = VK_TRUE;
+    // bf16.shaderBFloat16Type = VK_TRUE;
+    bf16.shaderBFloat16Type = VK_FALSE;
 
     // --- core feature ---
     vk::PhysicalDeviceFeatures deviceFeatures{};

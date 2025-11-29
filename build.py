@@ -103,7 +103,7 @@ def main():
         type=str,
         choices=SUPPORTED_BACKENDS,
         default="VULKAN",
-        help="Target backend (default: CPU)"
+        help="Target backend (default: VULKAN)"
     )
     parser.add_argument(
         "--lib",

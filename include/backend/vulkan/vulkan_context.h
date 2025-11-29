@@ -42,7 +42,7 @@ private:
     const std::vector<const char*> m_validationLayers = {"VK_LAYER_KHRONOS_validation"};
     const std::vector<const char*> m_deviceExtensions = {
         "VK_KHR_shader_float16_int8",
-        "VK_KHR_shader_bfloat16",
+        // "VK_KHR_shader_bfloat16",
         "VK_KHR_8bit_storage",
         "VK_KHR_16bit_storage",
         "VK_KHR_shader_subgroup_extended_types"
