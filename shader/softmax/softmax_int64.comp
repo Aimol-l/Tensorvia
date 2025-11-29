@@ -1,0 +1,61 @@
+#version 460
+
+#extension GL_EXT_shader_explicit_arithmetic_types : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+// const int8_t  INT8_MAX  = 0x7Fi8;        // 127
+// const int16_t INT16_MAX = 0x7FFFi16;     // 32767
+// const int32_t INT32_MAX = 0x7FFFFFFFi;   // 2147483647 (or just 0x7FFFFFFF)
+// const int64_t INT64_MAX = 0x7FFFFFFFFFFFFFFFi64; // 9223372036854775807
+
+// // 无符号（如需要）
+// const uint8_t  UINT8_MAX  = 0xFFu8;
+// const uint16_t UINT16_MAX = 0xFFFFu16;
+// const uint32_t UINT32_MAX = 0xFFFFFFFFu;
+// const uint64_t UINT64_MAX = 0xFFFFFFFFFFFFFFFFu64;
+
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform Params {
+    int axis_dim;
+    int outer_dim;
+    int inner_dim;
+} params;
+
+layout(std430, binding = 0) buffer InputA {
+    int64_t data[];
+}src;
+
+layout(std430, binding = 0) buffer InputB {
+    double data[];
+}dst;
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if(idx > params.outer_dim * params.inner_dim)
+        return;
+    
+    int outer_idx = idx / params.inner_dim;
+    int inner_idx = idx % params.inner_dim;
+
+    const int base_offset = outer_idx * params.axis_dim * params.inner_dim + inner_idx;
+
+    int64_t max_val = -0x7FFFFFFFFFFFFFFFi64;
+
+    for(int i =0;i<params.axis_dim;i++){
+        int64_t temp = src[base_offset + i * params.inner_dim];
+        max_val = max(temp,max_val);
+    }
+    double sum = 0.0;
+    for(int i =0;i<params.axis_dim;i++){
+        int64_t temp = src[base_offset + i * params.inner_dim];
+        sum = sum + double(exp(float(temp - max_val)));
+    }
+    // 计算！
+    for(int i =0;i<params.axis_dim;i++){
+        int64_t temp = src[base_offset + i * params.inner_dim];
+        double res = double(exp(float(temp - max_val))) / sum;
+        dst.data[base_offset + i * params.inner_dim] = res;
+    }
+}

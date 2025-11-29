@@ -54,7 +54,7 @@ struct MatmulParams{
 
 // for softmax
 struct SoftmaxParams{
-    int32_t axis;
+    int32_t axis_dim;
     int32_t outer_dim;
     int32_t inner_dim;
 };

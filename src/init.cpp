@@ -93,6 +93,10 @@ struct VulkanRegistrar {
 
         ctx->registerOp(OpType::Relu,AllTypes,1,sizeof(int64_t));
         ctx->registerOp(OpType::Silu,FloatTypes,2,sizeof(int64_t));
+        ctx->registerOp(OpType::Tanh,FloatTypes,2,sizeof(int64_t));
+        ctx->registerOp(OpType::Sidmoid,FloatTypes,2,sizeof(int64_t));
+        ctx->registerOp(OpType::Softmax,FloatTypes,2,sizeof(SoftmaxParams));
+
 
         ctx->registerOp(OpType::Random,AllTypes,1,sizeof(RandomParams));
         ctx->registerOp(OpType::Fill,AllTypes,1,sizeof(ValueParams<float32>));
