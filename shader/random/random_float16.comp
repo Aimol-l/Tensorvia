@@ -14,7 +14,7 @@ layout(push_constant) uniform Params {
 } params;
 
 layout(std430, binding = 0) buffer Output {
-    float data[];
+    float16_t data[];
 };
 
 //============================================================
@@ -32,13 +32,8 @@ void main() {
     if (idx >= uint(params.numel)) return;
 
     uint state = params.seed ^ idx ^ 0x9E3779B9u;
-    // 强化混合（可选，提升初始分布）
-    state ^= (state << 13);
-    state ^= (state >> 17);
-    state ^= (state << 5);
-
 
     float rand = xorshift32(state);
-    // 映射到 [min_v, max_v)
-    data[idx] = params.min_v + rand * (params.max_v - params.min_v);
+
+    data[idx] = float16_t(params.min_v + rand * (params.max_v - params.min_v));
 }

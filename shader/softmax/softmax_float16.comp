@@ -22,6 +22,29 @@ layout(std430, binding = 1) buffer InputB {
 
 void main() {
     uint idx = gl_GlobalInvocationID.x;
-    if (int64_t(idx) >= params.numel) return;
-    dst.data[idx] = float16_t(abs(float(src.data[idx])));
+    if(idx >= params.outer_dim * params.inner_dim)
+        return;
+    
+    uint outer_idx = idx / params.inner_dim;
+    uint inner_idx = idx % params.inner_dim;
+
+    const uint base_offset = outer_idx * params.axis_dim * params.inner_dim + inner_idx;
+
+    float max_val = float(src.data[base_offset]);
+
+    for(int i =0;i<params.axis_dim;i++){
+        float temp = float16_t(src.data[base_offset + i * params.inner_dim]);
+        max_val = max(temp,max_val);
+    }
+    float sum = 0.0;
+    for(int i =0;i<params.axis_dim;i++){
+        float temp = float(src.data[base_offset + i * params.inner_dim]);
+        sum = sum + exp(temp - max_val);
+    }
+    // 计算！
+    for(int i =0;i<params.axis_dim;i++){
+        float temp = float(src.data[base_offset + i * params.inner_dim]);
+        float16_t res = float16_t(exp(temp - max_val) / sum);
+        dst.data[base_offset + i * params.inner_dim] = res;
+    }
 }

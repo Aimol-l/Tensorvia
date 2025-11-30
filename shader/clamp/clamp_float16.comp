@@ -7,6 +7,8 @@
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
 layout(push_constant) uniform Params {
+    float min_v;
+    float max_v;
     int64_t numel;
 } params;
 
@@ -21,6 +23,8 @@ layout(std430, binding = 1) buffer InputB {
 void main() {
     uint idx = gl_GlobalInvocationID.x;
     if (int64_t(idx) >= params.numel) return;
-
-    dst.data[idx] = float16_t(abs(float(src.data[idx])));
+    float16_t x = src.data[idx];
+    float16_t lo = float16_t(params.min_v);
+    float16_t hi = float16_t(params.max_v);
+    dst.data[idx] = (x < lo) ? lo : (x > hi ? hi : x);
 }

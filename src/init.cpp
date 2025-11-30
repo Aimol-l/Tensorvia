@@ -66,14 +66,14 @@ struct VulkanRegistrar {
             DataType::INT16,
             DataType::INT32,
             DataType::INT64,
-            // DataType::FLOAT16,
-            // DataType::BFLOAT16,
+            DataType::FLOAT16,
+            DataType::BFLOAT16,
             DataType::FLOAT32,
             DataType::FLOAT64
         };
         static std::vector<DataType> FloatTypes = {
-            // DataType::FLOAT16,
-            // DataType::BFLOAT16,
+            DataType::FLOAT16,
+            DataType::BFLOAT16,
             DataType::FLOAT32,
             DataType::FLOAT64
         };
@@ -90,6 +90,15 @@ struct VulkanRegistrar {
 
         ctx->registerOp(OpType::Div,AllTypes,1,sizeof(ValueParams<float32>));
         ctx->registerOp(OpType::DivVec,AllTypes,3,sizeof(int64_t));
+
+        ctx->registerOp(OpType::Sin,FloatTypes,2,sizeof(int64_t));
+        ctx->registerOp(OpType::Cos,FloatTypes,2,sizeof(int64_t));
+        ctx->registerOp(OpType::Tan,FloatTypes,2,sizeof(int64_t));
+
+        ctx->registerOp(OpType::Abs,AllTypes,2,sizeof(int64_t));
+
+        ctx->registerOp(OpType::Clamp,AllTypes,2,sizeof(ClampParams));
+
 
         ctx->registerOp(OpType::Relu,AllTypes,1,sizeof(int64_t));
         ctx->registerOp(OpType::Silu,FloatTypes,2,sizeof(int64_t));

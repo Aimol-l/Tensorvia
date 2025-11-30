@@ -33,28 +33,28 @@ layout(std430, binding = 0) buffer InputB {
 
 void main() {
     uint idx = gl_GlobalInvocationID.x;
-    if(idx > params.outer_dim * params.inner_dim)
+    if(idx >= params.outer_dim * params.inner_dim)
         return;
     
-    int outer_idx = idx / params.inner_dim;
-    int inner_idx = idx % params.inner_dim;
+    uint outer_idx = idx / params.inner_dim;
+    uint inner_idx = idx % params.inner_dim;
 
-    const int base_offset = outer_idx * params.axis_dim * params.inner_dim + inner_idx;
+    const uint base_offset = outer_idx * params.axis_dim * params.inner_dim + inner_idx;
 
-    int64_t max_val = -0x7FFFFFFFFFFFFFFFi64;
+    int64_t max_val = src.data[base_offset];
 
     for(int i =0;i<params.axis_dim;i++){
-        int64_t temp = src[base_offset + i * params.inner_dim];
+        int64_t temp = src.data[base_offset + i * params.inner_dim];
         max_val = max(temp,max_val);
     }
     double sum = 0.0;
     for(int i =0;i<params.axis_dim;i++){
-        int64_t temp = src[base_offset + i * params.inner_dim];
+        int64_t temp = src.data[base_offset + i * params.inner_dim];
         sum = sum + double(exp(float(temp - max_val)));
     }
     // 计算！
     for(int i =0;i<params.axis_dim;i++){
-        int64_t temp = src[base_offset + i * params.inner_dim];
+        int64_t temp = src.data[base_offset + i * params.inner_dim];
         double res = double(exp(float(temp - max_val))) / sum;
         dst.data[base_offset + i * params.inner_dim] = res;
     }

@@ -12,15 +12,16 @@ layout(push_constant) uniform Params {
 
 layout(std430, binding = 0) buffer InputA {
     float16_t data[];
-}src;
+} a;
 
 layout(std430, binding = 1) buffer InputB {
     float16_t data[];
-}dst;
+} b;
+
 
 void main() {
     uint idx = gl_GlobalInvocationID.x;
     if (int64_t(idx) >= params.numel) return;
 
-    dst.data[idx] = float16_t(abs(float(src.data[idx])));
+    b.data[idx] = float16_t(cos(float(a.data[idx])));
 }

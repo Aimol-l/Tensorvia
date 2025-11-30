@@ -53,7 +53,13 @@ void VulkanContext::registerOp(OpType ops,std::vector<DataType>& Dtypes,int tens
         auto spvCode = readSpvFile(spvFile);
         vk::ShaderModuleCreateInfo createInfo;
         createInfo.setCode(spvCode);
-        vk::ShaderModule shaderModule = m_device.createShaderModule(createInfo);
+        vk::ShaderModule shaderModule;
+        try{
+            shaderModule = m_device.createShaderModule(createInfo);
+        }catch(const std::exception& e){
+            std::cerr << e.what() << '\n';
+            throw e;
+        }
         // 配置shader stage
         vk::PipelineShaderStageCreateInfo stageInfo;
         stageInfo.setStage(vk::ShaderStageFlagBits::eCompute);
@@ -278,50 +284,55 @@ void VulkanContext::createLogicalDevice() {
         throw std::runtime_error("Queue family index not set! Call choosePhysicalDevice first.");
     }
     if (!this->checkExtensionSupport()) {
-        throw std::runtime_error("Vulkan extension error");
+        throw std::runtime_error("Required Vulkan extensions not supported.");
     }
 
+    // 创建队列信息
     float queuePriority = 1.0f;
-    vk::DeviceQueueCreateInfo queueCreateInfo({}, m_queuefamily, 1, &queuePriority);
+    vk::DeviceQueueCreateInfo queueCreateInfo(
+        {}, // flags
+        m_queuefamily,
+        1,
+        &queuePriority
+    );
 
-    // 默认开启：  int32,float32
-    // 需要主动开启：int8,int16,int64,float16,bfloat16,float64
+    // === 启用 Vulkan 1.0 核心特性 ===
+    vk::PhysicalDeviceFeatures coreFeatures{};
+    coreFeatures.shaderInt64 = VK_TRUE;
+    coreFeatures.shaderInt16 = VK_TRUE;
+    coreFeatures.shaderFloat64 = VK_TRUE;
 
-    // --- Vulkan 1.1 特性 ---
-    vk::PhysicalDeviceVulkan11Features vk11{};
-    vk11.storageBuffer16BitAccess = VK_TRUE;
-    vk11.storagePushConstant16 = VK_TRUE;
+    // === 扩展特性结构体（按 Vulkan 规范链接） ===
+    // bfloat16（KHR 扩展）
+    vk::PhysicalDeviceShaderBfloat16FeaturesKHR bf16Features{};
+    bf16Features.shaderBFloat16Type = VK_TRUE;
 
-    // --- Vulkan 1.2 特性 ---
-    vk::PhysicalDeviceVulkan12Features vk12{};
-    vk12.shaderInt8 = VK_TRUE;
-    // vk12.shaderFloat16 = VK_TRUE;
-    vk12.shaderFloat16 = VK_FALSE;
-    vk12.storageBuffer8BitAccess = VK_TRUE;
+    // Vulkan 1.1 特性
+    vk::PhysicalDeviceVulkan11Features vk11Features{};
+    vk11Features.storageBuffer16BitAccess = VK_TRUE;
+    vk11Features.storagePushConstant16 = VK_TRUE;
 
-    // --- bfloat16 特性（关键！必须最前面） ---
-    vk::PhysicalDeviceShaderBfloat16FeaturesKHR bf16{};
-    // bf16.shaderBFloat16Type = VK_TRUE;
-    bf16.shaderBFloat16Type = VK_FALSE;
+    // Vulkan 1.2 特性
+    vk::PhysicalDeviceVulkan12Features vk12Features{};
+    vk12Features.shaderInt8 = VK_TRUE;
+    vk12Features.shaderFloat16 = VK_TRUE;
+    vk12Features.storageBuffer8BitAccess = VK_TRUE;
 
-    // --- core feature ---
-    vk::PhysicalDeviceFeatures deviceFeatures{};
-    deviceFeatures.shaderInt64 = VK_TRUE;
-    deviceFeatures.shaderInt16 = VK_TRUE;
-    deviceFeatures.shaderFloat64 = VK_TRUE;
+    // === 构建合法的 pNext 链（从 Features2 开始）===
+    vk::PhysicalDeviceFeatures2 features2{};
+    features2.features = coreFeatures;
+    features2.pNext = &bf16Features;
 
+    bf16Features.pNext = &vk11Features;
+    vk11Features.pNext = &vk12Features;
+    vk12Features.pNext = nullptr; // 链尾
 
-    // --- 构造 pNext 链 ---
-    bf16.pNext = &vk11; // bfloat16 → vk11
-    vk11.pNext = &vk12; // vk11 → vk12
-
+    // === 创建设备 ===
     vk::DeviceCreateInfo createInfo{};
-    createInfo
-        .setQueueCreateInfos(queueCreateInfo)
-        .setPEnabledFeatures(&deviceFeatures)
-        .setPNext(&bf16)  // 最前面必须是 bfloat16
-        .setEnabledExtensionCount(static_cast<uint32_t>(m_deviceExtensions.size()))
-        .setPpEnabledExtensionNames(m_deviceExtensions.data());
+    createInfo.setQueueCreateInfos(queueCreateInfo)
+              .setEnabledExtensionCount(static_cast<uint32_t>(m_deviceExtensions.size()))
+              .setPpEnabledExtensionNames(m_deviceExtensions.data())
+              .setPNext(&features2);  // ✅ 关键：使用 pNext，不再调用 setPEnabledFeatures()
 
     m_device = m_phydevice.createDevice(createInfo);
     m_compute_queue = m_device.getQueue(m_queuefamily, 0);

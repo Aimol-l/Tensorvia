@@ -80,6 +80,7 @@ inline const char* op_to_string(OpType op) {
         case OpType::Silu:      return "silu";
         case OpType::Tanh:      return "tanh";
         case OpType::Sidmoid:   return "sigmoid";
+        case OpType::Softmax:   return "softmax";
         case OpType::Pow:       return "pow";
         case OpType::Log:       return "log";
         case OpType::Clamp:     return "clamp";
