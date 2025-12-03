@@ -419,6 +419,19 @@ void PowImpl<Device::VULKAN>::execute(Tensor& a,float val){
 void LogImpl<Device::VULKAN>::execute(Tensor& a,float val){
     auto src_impl =  std::dynamic_pointer_cast<VKTensor>(a.get_impl());
     auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
+
+    ValueParams<float> params{
+        .value = val,
+        .numel = int64_t(a.numel())
+    };
+    ctx_impl->submitCompute(
+        OpType::Log,
+        a.dtype(),
+        {src_impl->buffer(),src_impl->buffer()},
+        (a.numel() + 255) / 256, 1, 1,
+        &params,
+        sizeof(params)
+    );
 }
 void ClampImpl<Device::VULKAN>::execute(Tensor& a,float min,float max){
     auto src_impl =  std::dynamic_pointer_cast<VKTensor>(a.get_impl());
@@ -553,9 +566,21 @@ Tensor PowImpl<Device::VULKAN>::execute(const Tensor& a,float val){
     return result;
 }
 Tensor LogImpl<Device::VULKAN>::execute(const Tensor& a,float val){
-    auto src_impl =  std::dynamic_pointer_cast<VKTensor>(a.get_impl());
-    auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
-    Tensor result;
+    Tensor result = a.dtype() < DataType::BFLOAT16 ? a.clone().to_type_(DataType::FLOAT32):a.clone();
+    auto dst_impl =  std::dynamic_pointer_cast<VKTensor>(result.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(dst_impl->context());
+    ValueParams<float> params{
+        .value = val,
+        .numel = int64_t(a.numel())
+    };
+    ctx_impl->submitCompute(
+        OpType::Log, 
+        result.dtype(),
+        {dst_impl->buffer(),dst_impl->buffer()},
+        (result.numel() + 255) / 256, 1, 1,
+        &params,
+        sizeof(params)
+    );
     return result;
 }
 Tensor ClampImpl<Device::VULKAN>::execute(const Tensor& a,float min,float max){

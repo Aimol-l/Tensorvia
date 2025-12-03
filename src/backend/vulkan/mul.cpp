@@ -18,6 +18,7 @@ Tensor MulImpl<Device::VULKAN>::execute(const Tensor& a, const Tensor& b){
     DataType res_type = compute_type(a.dtype(),b.dtype());
     auto src_impl =  std::dynamic_pointer_cast<VKTensor>(a.get_impl());
     auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
+    
     Tensor result(newshape,res_type,Device::VULKAN);
     return result;
 }

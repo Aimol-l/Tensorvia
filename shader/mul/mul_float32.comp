@@ -1,0 +1,82 @@
+#version 460
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+#define TILE 16
+
+// 2D workgroup: (16, 16, 1)
+layout(local_size_x = TILE, local_size_y = TILE, local_size_z = 1) in;
+
+layout(push_constant) uniform Params {
+    uint batch;
+    uint N; // cols
+    uint K; // reduction dimension
+    uint M; // rows
+} params;
+
+layout(std430, binding = 0) buffer InputA {
+    float data[];
+} A; // [batch, M, K]
+
+layout(std430, binding = 1) buffer InputB {
+    float data[];
+} B; // [batch, K, N]
+
+layout(std430, binding = 2) buffer Output {
+    float data[];
+} C; // [batch, M, N]
+
+// Shared memory tiles
+shared float tileA[TILE][TILE + 1]; // +1 to reduce bank conflicts
+shared float tileB[TILE][TILE + 1];
+
+void main() {
+    uint wg_batch = gl_WorkGroupID.z;
+    uint wg_m = gl_WorkGroupID.y;      // block row index
+    uint wg_n = gl_WorkGroupID.x;      // block col index
+
+    uint local_m = gl_LocalInvocationID.y;
+    uint local_n = gl_LocalInvocationID.x;
+
+    // Global output indices
+    uint global_m = wg_m * TILE + local_m;
+    uint global_n = wg_n * TILE + local_n;
+
+    float acc = 0.0;
+
+    uint numTiles = (params.K + TILE - 1) / TILE;
+    for (uint t = 0; t < numTiles; ++t) {
+        // Load A tile: A[wg_batch, global_m, k_start + local_n]
+        uint k_start = t * TILE;
+        uint a_k = k_start + local_n;
+        if (global_m < params.M && a_k < params.K) {
+            uint a_idx = wg_batch * params.M * params.K + global_m * params.K + a_k;
+            tileA[local_m][local_n] = A.data[a_idx];
+        } else {
+            tileA[local_m][local_n] = 0.0;
+        }
+
+        // Load B tile: B[wg_batch, k_start + local_m, global_n]
+        uint b_k = k_start + local_m;
+        if (b_k < params.K && global_n < params.N) {
+            uint b_idx = wg_batch * params.K * params.N + b_k * params.N + global_n;
+            tileB[local_m][local_n] = B.data[b_idx];
+        } else {
+            tileB[local_m][local_n] = 0.0;
+        }
+
+        barrier(); // Synchronize before using shared memory
+
+        // Compute partial dot product
+        for (uint k = 0; k < TILE; ++k) {
+            acc += tileA[local_m][k] * tileB[k][local_n];
+        }
+
+        barrier(); // Ensure no overwrite in next iteration
+    }
+
+    // Write result
+    if (global_m < params.M && global_n < params.N) {
+        uint c_idx = wg_batch * params.M * params.N + global_m * params.N + global_n;
+        C.data[c_idx] = acc;
+    }
+}

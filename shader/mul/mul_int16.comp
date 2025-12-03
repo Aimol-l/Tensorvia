@@ -1,0 +1,89 @@
+#version 460
+
+#extension GL_EXT_shader_16bit_storage : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int16 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+#define TILE 16
+
+// Workgroup size = (TILE, TILE, 1)
+layout(local_size_x = TILE, local_size_y = TILE, local_size_z = 1) in;
+
+layout(push_constant) uniform Params {
+    uint batch;
+    uint N; // cols
+    uint K; // reduction dim
+    uint M; // rows
+} params;
+
+layout(std430, binding = 0) buffer InputA {
+    int16_t data[];
+} A; // [batch, M, K]
+
+layout(std430, binding = 1) buffer InputB {
+    int16_t data[];
+} B; // [batch, K, N]
+
+layout(std430, binding = 2) buffer Output {
+    int16_t data[];
+} C; // [batch, M, N]
+
+// Shared memory tiles
+shared int16_t tileA[TILE][TILE + 1]; // +1 to avoid bank conflicts
+shared int16_t tileB[TILE][TILE + 1];
+
+// 饱和转换
+int16_t saturate_int16(int32_t x) {
+    return (x > 32767) ? int16_t(127) : (x < -32768 ? int16_t(-32768) : int16_t(x));
+}
+
+void main() {
+    uint wg_batch = gl_WorkGroupID.z;        // batch index
+    uint wg_m = gl_WorkGroupID.y;            // block row in output
+    uint wg_n = gl_WorkGroupID.x;            // block col in output
+
+    uint local_m = gl_LocalInvocationID.y;   // thread row in block
+    uint local_n = gl_LocalInvocationID.x;   // thread col in block
+
+    // 输出位置
+    uint global_m = wg_m * TILE + local_m;
+    uint global_n = wg_n * TILE + local_n;
+
+    // 累加器
+    int32_t acc = 0;
+
+    // 分片迭代
+    uint numTiles = (params.K + TILE - 1) / TILE;
+    for (uint tile = 0; tile < numTiles; ++tile) {
+        // --- 加载 A tile: [TILE, TILE] from global A[wg_batch, global_m, k_start : k_start+TILE]
+        uint k_start = tile * TILE;
+        uint a_k = k_start + local_n; // 注意：A 按行主序，每行 K 个
+        if (global_m < params.M && a_k < params.K) {
+            uint a_idx = wg_batch * params.M * params.K + global_m * params.K + a_k;
+            tileA[local_m][local_n] = A.data[a_idx];
+        } else {
+            tileA[local_m][local_n] = 0;
+        }
+        // --- 加载 B tile: [TILE, TILE] from global B[wg_batch, k_start : k_start+TILE, global_n]
+        uint b_k = k_start + local_m;
+        if (b_k < params.K && global_n < params.N) {
+            uint b_idx = wg_batch * params.K * params.N + b_k * params.N + global_n;
+            tileB[local_m][local_n] = B.data[b_idx];
+        } else {
+            tileB[local_m][local_n] = 0;
+        }
+        // 同步 workgroup
+        barrier();
+        // --- 点积计算
+        for (uint k = 0; k < TILE; ++k) {
+            acc += int32_t(tileA[local_m][k]) * int32_t(tileB[k][local_n]);
+        }
+        barrier(); // 必须同步，避免下一轮覆盖 shared data
+    }
+
+    // 写回结果
+    if (global_m < params.M && global_n < params.N) {
+        uint c_idx = wg_batch * params.M * params.N + global_m * params.N + global_n;
+        C.data[c_idx] = saturate_int16(acc);
+    }
+}

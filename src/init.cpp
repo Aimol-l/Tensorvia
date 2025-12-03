@@ -99,7 +99,7 @@ struct VulkanRegistrar {
         ctx->registerOp(OpType::Exp,FloatTypes,2,sizeof(int64_t));
         ctx->registerOp(OpType::Sqrt,FloatTypes,2,sizeof(int64_t));
         ctx->registerOp(OpType::Pow,FloatTypes,2,sizeof(ValueParams<float32>));
-        // ctx->registerOp(OpType::Log,FloatTypes,2,sizeof(ValueParams<float32>));
+        ctx->registerOp(OpType::Log,FloatTypes,2,sizeof(ValueParams<float32>));
 
         ctx->registerOp(OpType::Clamp,AllTypes,2,sizeof(ClampParams));
 

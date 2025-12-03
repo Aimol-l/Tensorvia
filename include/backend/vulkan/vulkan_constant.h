@@ -46,10 +46,10 @@ struct ClampParams{
     int64_t numel;
 };
 struct MatmulParams{
-    int32_t batch;
-    int32_t cols;
-    int32_t k;
-    int32_t rows;
+    uint32_t batch;
+    uint32_t N;
+    uint32_t K;
+    uint32_t M;
 };
 
 // for softmax
