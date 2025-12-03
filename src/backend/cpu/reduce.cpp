@@ -251,7 +251,7 @@ bool any_kernel(const T *ptr, float val, size_t n) {
     }
 }
 
-// ************************************** 特化 **************************************
+// ================================================================
 float SumImpl<Device::CPU>::execute(const Tensor& a) {
     float sum = 0;
     dispatch_dtype(a.dtype(), [&](auto type_id) {
@@ -261,7 +261,33 @@ float SumImpl<Device::CPU>::execute(const Tensor& a) {
     });
     return sum;
 }
-
+float MinImpl<Device::CPU>::execute(const Tensor& a) {
+    float min = 0;
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        const T* a_ptr = static_cast<const T*>(a.data());
+        min = min_kernel<T>(a_ptr,a.numel());
+    });
+    return min;
+}
+float MaxImpl<Device::CPU>::execute(const Tensor& a) {
+    float max = 0;
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        const T* a_ptr = static_cast<const T*>(a.data());
+        max = max_kernel<T>(a_ptr,a.numel());
+    });
+    return max;
+}
+float MeanImpl<Device::CPU>::execute(const Tensor& a) {
+    float mean = 0;
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        mean = mean_kernel<T>(a);
+    });
+    return mean;
+}
+// ================================================================
 Tensor SumImpl<Device::CPU>::execute(const Tensor& a, int axis) {
     std::vector<int64_t> new_shape;
     for (int i = 0; i < a.shape().size(); ++i) {
@@ -285,16 +311,6 @@ Tensor SumImpl<Device::CPU>::execute(const Tensor& a, int axis) {
     });
     return result;
 }
-float MinImpl<Device::CPU>::execute(const Tensor& a) {
-    float min = 0;
-    dispatch_dtype(a.dtype(), [&](auto type_id) {
-        using T = typename decltype(type_id)::type;
-        const T* a_ptr = static_cast<const T*>(a.data());
-        min = min_kernel<T>(a_ptr,a.numel());
-    });
-    return min;
-}
-
 Tensor MinImpl<Device::CPU>::execute(const Tensor& a, int axis) {
     std::vector<int64_t> new_shape;
     for (int i = 0; i < a.shape().size(); ++i) {
@@ -317,16 +333,6 @@ Tensor MinImpl<Device::CPU>::execute(const Tensor& a, int axis) {
     });
     return result;
 }
-float MaxImpl<Device::CPU>::execute(const Tensor& a) {
-    float max = 0;
-    dispatch_dtype(a.dtype(), [&](auto type_id) {
-        using T = typename decltype(type_id)::type;
-        const T* a_ptr = static_cast<const T*>(a.data());
-        max = max_kernel<T>(a_ptr,a.numel());
-    });
-    return max;
-}
-
 Tensor MaxImpl<Device::CPU>::execute(const Tensor& a, int axis) {
     std::vector<int64_t> new_shape;
     for (int i = 0; i < a.shape().size(); ++i) {
@@ -349,14 +355,6 @@ Tensor MaxImpl<Device::CPU>::execute(const Tensor& a, int axis) {
         max_kernel<T>(a_ptr,res_ptr,outer_size, inner_size, axis_size);
     });
     return result;
-}
-float MeanImpl<Device::CPU>::execute(const Tensor& a) {
-    float mean = 0;
-    dispatch_dtype(a.dtype(), [&](auto type_id) {
-        using T = typename decltype(type_id)::type;
-        mean = mean_kernel<T>(a);
-    });
-    return mean;
 }
 Tensor MeanImpl<Device::CPU>::execute(const Tensor& a, int axis) {
     std::vector<int64_t> new_shape;
@@ -381,6 +379,26 @@ Tensor MeanImpl<Device::CPU>::execute(const Tensor& a, int axis) {
     });
     return result;
 }
+// ================================================================
+bool AllImpl<Device::CPU>::execute(const Tensor& a, float value) {
+    bool all;
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        const T* a_ptr = static_cast<const T*>(a.data());
+        all = all_kernel<T>(a_ptr, value, a.numel());
+    });
+    return all;
+}
+bool AnyImpl<Device::CPU>::execute(const Tensor& a, float value) {
+    bool any;
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        const T* a_ptr = static_cast<const T*>(a.data());
+        any = any_kernel<T>(a_ptr, value, a.numel());
+    });
+    return any;
+}
+// ================================================================
 Tensor ArgMaxImpl<Device::CPU>::execute(const Tensor &a, int axis){
     // 移除 a.shape(axis) 所在的轴
     auto a_shape = a.shape();
@@ -428,24 +446,7 @@ Tensor ArgMinImpl<Device::CPU>::execute(const Tensor &a, int axis) {
     });
     return result;
 }
-bool AllImpl<Device::CPU>::execute(const Tensor& a, float value) {
-    bool all;
-    dispatch_dtype(a.dtype(), [&](auto type_id) {
-        using T = typename decltype(type_id)::type;
-        const T* a_ptr = static_cast<const T*>(a.data());
-        all = all_kernel<T>(a_ptr, value, a.numel());
-    });
-    return all;
-}
-bool AnyImpl<Device::CPU>::execute(const Tensor& a, float value) {
-    bool any;
-    dispatch_dtype(a.dtype(), [&](auto type_id) {
-        using T = typename decltype(type_id)::type;
-        const T* a_ptr = static_cast<const T*>(a.data());
-        any = any_kernel<T>(a_ptr, value, a.numel());
-    });
-    return any;
-}
+// ================================================================
 template struct SumImpl<Device::CPU>;
 template struct MaxImpl<Device::CPU>;
 template struct MinImpl<Device::CPU>;
@@ -454,6 +455,4 @@ template struct ArgMaxImpl<Device::CPU>;
 template struct ArgMinImpl<Device::CPU>;
 template struct AllImpl<Device::CPU>;
 template struct AnyImpl<Device::CPU>;
-
-
 }

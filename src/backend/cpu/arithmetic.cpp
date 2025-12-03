@@ -166,13 +166,52 @@ void log_kernel(const T* src_ptr, R* dst_ptr, size_t n, float val) {
 }
 
 // ========================================================================
-
 void AddImpl<Device::CPU>::execute(Tensor& a, float b) {
     dispatch_dtype(a.dtype(), [&](auto type_id) {
         using T = typename decltype(type_id)::type;
         add_kernel<T>(static_cast<T*>(a.data()), b, a.numel());
     });
 }
+void SubImpl<Device::CPU>::execute(Tensor& a, float b) {
+   dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        sub_kernel<T>(static_cast<T*>(a.data()), b, a.numel());
+    });
+}
+void DotImpl<Device::CPU>::execute(Tensor& a, float b) {
+   dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        dot_kernel<T>(static_cast<T*>(a.data()), b, a.numel());
+    });
+}
+void DivImpl<Device::CPU>::execute(Tensor& a, float b) {
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        div_kernel<T>(static_cast<T*>(a.data()), b, a.numel());
+    });
+}
+// ========================================================================
+Tensor AddImpl<Device::CPU>::execute(const Tensor& a, float b) {
+    Tensor t = a.clone();
+    ops::Add(t,b);
+    return t;
+}
+Tensor SubImpl<Device::CPU>::execute(const Tensor& a, float b) {
+    Tensor t = a.clone();
+    ops::Sub(t,b);
+    return t;
+}
+Tensor DotImpl<Device::CPU>::execute(const Tensor& a, float b) {
+    Tensor t = a.clone();
+    ops::Dot(t,b);
+    return t;
+}
+Tensor DivImpl<Device::CPU>::execute(const Tensor& a, float b) {
+    Tensor t = a.clone();
+    ops::Div(t,b);
+    return t;
+}
+// ========================================================================
 Tensor AddImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
     // 避免自加修改：a + a 返回新 tensor
     if (&a == &b) return ops::Add(a.clone(), b.clone());
@@ -204,48 +243,6 @@ Tensor AddImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
     });
     return result;
 }
-void AddImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b,Tensor& dst) {
-    DataType res_type = compute_type(a.dtype(),b.dtype());
-    if(dst.dtype() != res_type){
-        throw std::runtime_error("dst dtype error!");
-    }
-    // 快速路径：相同类型且无需转换
-    if (a.dtype() == b.dtype()) {
-        dispatch_dtype(a.dtype(), [&](auto type_id) {
-            using T = typename decltype(type_id)::type;
-            add_kernel<T>(
-                static_cast<const T*>(a.data()),
-                static_cast<const T*>(b.data()),
-                static_cast<T*>(dst.data()),
-                a.numel()
-            );
-        });
-        return; // ✅ 关键：快速路径后直接返回！
-    }
-    // 慢速路径：类型不同，需要 Typecast
-    const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a, res_type);
-    const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b, res_type);
-    dispatch_dtype(a.dtype(), [&](auto type_id) {
-        using T = typename decltype(type_id)::type;
-        const T* a_ptr = static_cast<const T*>(A.data());
-        const T* b_ptr = static_cast<const T*>(B.data());
-        T* res_ptr = static_cast<T*>(dst.data());
-        add_kernel<T>(a_ptr,b_ptr,res_ptr,a.numel());
-    });
-}
-Tensor AddImpl<Device::CPU>::execute(const Tensor& a, float b) {
-    Tensor t = a.clone();
-    ops::Add(t,b);
-    return t;
-}
-
-void SubImpl<Device::CPU>::execute(Tensor& a, float b) {
-   dispatch_dtype(a.dtype(), [&](auto type_id) {
-        using T = typename decltype(type_id)::type;
-        sub_kernel<T>(static_cast<T*>(a.data()), b, a.numel());
-    });
-}
-
 Tensor SubImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
     // 避免自加修改：a + a 返回新 tensor
     if (&a == &b) return ops::Sub(a.clone(), b.clone());
@@ -276,17 +273,6 @@ Tensor SubImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
         sub_kernel<T>(a_ptr,b_ptr,res_ptr,a.numel());
     });
     return result;
-}
-Tensor SubImpl<Device::CPU>::execute(const Tensor& a, float b) {
-    Tensor t = a.clone();
-    ops::Sub(t,b);
-    return t;
-}
-void DotImpl<Device::CPU>::execute(Tensor& a, float b) {
-   dispatch_dtype(a.dtype(), [&](auto type_id) {
-        using T = typename decltype(type_id)::type;
-        dot_kernel<T>(static_cast<T*>(a.data()), b, a.numel());
-    });
 }
 Tensor DotImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
     // 避免自加修改：a + a 返回新 tensor
@@ -319,17 +305,6 @@ Tensor DotImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
     });
     return result;
 }
-Tensor DotImpl<Device::CPU>::execute(const Tensor& a, float b) {
-    Tensor t = a.clone();
-    ops::Dot(t,b);
-    return t;
-}
-void DivImpl<Device::CPU>::execute(Tensor& a, float b) {
-    dispatch_dtype(a.dtype(), [&](auto type_id) {
-        using T = typename decltype(type_id)::type;
-        div_kernel<T>(static_cast<T*>(a.data()), b, a.numel());
-    });
-}
 Tensor DivImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
     // 避免自加修改：a + a 返回新 tensor
     if (&a == &b) return ops::Div(a.clone(), b.clone());
@@ -361,29 +336,128 @@ Tensor DivImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
     });
     return result;
 }
-Tensor DivImpl<Device::CPU>::execute(const Tensor& a, float b) {
-    Tensor t = a.clone();
-    ops::Div(t,b);
-    return t;
-}
-void AbsImpl<Device::CPU>::execute(Tensor& a) {
+// ========================================================================
+void AddImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b,Tensor& dst) {
+    DataType res_type = compute_type(a.dtype(),b.dtype());
+    if(dst.dtype() != res_type){
+        throw std::runtime_error("dst dtype error!");
+    }
+    // 快速路径：相同类型且无需转换
+    if (a.dtype() == b.dtype()) {
+        dispatch_dtype(a.dtype(), [&](auto type_id) {
+            using T = typename decltype(type_id)::type;
+            add_kernel<T>(
+                static_cast<const T*>(a.data()),
+                static_cast<const T*>(b.data()),
+                static_cast<T*>(dst.data()),
+                a.numel()
+            );
+        });
+        return; // ✅ 关键：快速路径后直接返回！
+    }
+    // 慢速路径：类型不同，需要 Typecast
+    const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a, res_type);
+    const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b, res_type);
     dispatch_dtype(a.dtype(), [&](auto type_id) {
         using T = typename decltype(type_id)::type;
-        T* a_ptr = static_cast<T*>(a.data());
-        abs_kernel<T>(a_ptr,a.numel());
+        const T* a_ptr = static_cast<const T*>(A.data());
+        const T* b_ptr = static_cast<const T*>(B.data());
+        T* res_ptr = static_cast<T*>(dst.data());
+        add_kernel<T>(a_ptr,b_ptr,res_ptr,a.numel());
     });
 }
+void SubImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b,Tensor& dst) {
+    DataType res_type = compute_type(a.dtype(),b.dtype());
+    if(dst.dtype() != res_type){
+        throw std::runtime_error("dst dtype error!");
+    }
+    // 快速路径：相同类型且无需转换
+    if (a.dtype() == b.dtype()) {
+        dispatch_dtype(a.dtype(), [&](auto type_id) {
+            using T = typename decltype(type_id)::type;
+            sub_kernel<T>(
+                static_cast<const T*>(a.data()),
+                static_cast<const T*>(b.data()),
+                static_cast<T*>(dst.data()),
+                a.numel()
+            );
+        });
+        return;
+    }
+    // 慢速路径：类型不同，需要 Typecast
+    const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a, res_type);
+    const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b, res_type);
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        const T* a_ptr = static_cast<const T*>(A.data());
+        const T* b_ptr = static_cast<const T*>(B.data());
+        T* res_ptr = static_cast<T*>(dst.data());
+        sub_kernel<T>(a_ptr,b_ptr,res_ptr,a.numel());
+    });
+}
+void DotImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b,Tensor& dst) {
+    DataType res_type = compute_type(a.dtype(),b.dtype());
+    if(dst.dtype() != res_type){
+        throw std::runtime_error("dst dtype error!");
+    }
+    // 快速路径：相同类型且无需转换
+    if (a.dtype() == b.dtype()) {
+        dispatch_dtype(a.dtype(), [&](auto type_id) {
+            using T = typename decltype(type_id)::type;
+            dot_kernel<T>(
+                static_cast<const T*>(a.data()),
+                static_cast<const T*>(b.data()),
+                static_cast<T*>(dst.data()),
+                a.numel()
+            );
+        });
+        return;
+    }
+    // 慢速路径：类型不同，需要 Typecast
+    const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a, res_type);
+    const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b, res_type);
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        const T* a_ptr = static_cast<const T*>(A.data());
+        const T* b_ptr = static_cast<const T*>(B.data());
+        T* res_ptr = static_cast<T*>(dst.data());
+        dot_kernel<T>(a_ptr,b_ptr,res_ptr,a.numel());
+    });
+}
+void DivImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b,Tensor& dst) {
+    DataType res_type = compute_type(a.dtype(),b.dtype());
+    if(dst.dtype() != res_type){
+        throw std::runtime_error("dst dtype error!");
+    }
+    // 快速路径：相同类型且无需转换
+    if (a.dtype() == b.dtype()) {
+        dispatch_dtype(a.dtype(), [&](auto type_id) {
+            using T = typename decltype(type_id)::type;
+            div_kernel<T>(
+                static_cast<const T*>(a.data()),
+                static_cast<const T*>(b.data()),
+                static_cast<T*>(dst.data()),
+                a.numel()
+            );
+        });
+        return;
+    }
+    // 慢速路径：类型不同，需要 Typecast
+    const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a, res_type);
+    const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b, res_type);
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        const T* a_ptr = static_cast<const T*>(A.data());
+        const T* b_ptr = static_cast<const T*>(B.data());
+        T* res_ptr = static_cast<T*>(dst.data());
+        div_kernel<T>(a_ptr,b_ptr,res_ptr,a.numel());
+    });
+}
+// ========================================================================
 Tensor AbsImpl<Device::CPU>::execute(const Tensor& a) {
     Tensor b = a.clone();
     ops::Abs(b);
     return b;
-}
-void SinImpl<Device::CPU>::execute(Tensor& a) {
-    dispatch_dtype(a.dtype(), [&](auto type_id) {
-        using T = typename decltype(type_id)::type;
-        T* a_ptr = static_cast<T*>(a.data());
-        sin_kernel<T>(a_ptr,a_ptr,a.numel());
-    });
 }
 Tensor SinImpl<Device::CPU>::execute(const Tensor& a) {
     DataType res_type = a.dtype();
@@ -418,13 +492,6 @@ Tensor SinImpl<Device::CPU>::execute(const Tensor& a) {
             std::runtime_error("Unsupported data type");
     }
     return b;
-}
-void CosImpl<Device::CPU>::execute(Tensor& a) {
-    dispatch_dtype(a.dtype(), [&](auto type_id) {
-        using T = typename decltype(type_id)::type;
-        T* a_ptr = static_cast<T*>(a.data());
-        cos_kernel<T>(a_ptr,a_ptr,a.numel());
-    });
 }
 Tensor CosImpl<Device::CPU>::execute(const Tensor& a) {
     DataType res_type = a.dtype();
@@ -461,13 +528,6 @@ Tensor CosImpl<Device::CPU>::execute(const Tensor& a) {
     }
     return b;
 }
-void TanImpl<Device::CPU>::execute(Tensor& a) {
-    dispatch_dtype(a.dtype(), [&](auto type_id) {
-        using T = typename decltype(type_id)::type;
-        T* a_ptr = static_cast<T*>(a.data());
-        tan_kernel<T>(a_ptr,a_ptr,a.numel());
-    });
-}
 Tensor TanImpl<Device::CPU>::execute(const Tensor& a) {
     DataType res_type = a.dtype();
     if (a.dtype() <= DataType::INT64)
@@ -502,13 +562,6 @@ Tensor TanImpl<Device::CPU>::execute(const Tensor& a) {
             std::runtime_error("Unsupported data type");
     }
     return b;
-}
-void ExpImpl<Device::CPU>::execute(Tensor& a) {
-    dispatch_dtype(a.dtype(), [&](auto type_id) {
-        using T = typename decltype(type_id)::type;
-        T* a_ptr = static_cast<T*>(a.data());
-        exp_kernel<T>(a_ptr,a_ptr,a.numel());
-    });
 }
 Tensor ExpImpl<Device::CPU>::execute(const Tensor& a) {
     DataType res_type = a.dtype();
@@ -545,13 +598,6 @@ Tensor ExpImpl<Device::CPU>::execute(const Tensor& a) {
     }
     return b;
 }
-void SqrtImpl<Device::CPU>::execute(Tensor& a) {
-    dispatch_dtype(a.dtype(), [&](auto type_id) {
-        using T = typename decltype(type_id)::type;
-        T* a_ptr = static_cast<T*>(a.data());
-        sqrt_kernel<T>(a_ptr,a_ptr,a.numel());
-    });
-}
 Tensor SqrtImpl<Device::CPU>::execute(const Tensor& a) {
     DataType res_type = a.dtype();
     if (a.dtype() <= DataType::INT64)
@@ -586,13 +632,6 @@ Tensor SqrtImpl<Device::CPU>::execute(const Tensor& a) {
             std::runtime_error("Unsupported data type");
     }
     return b;
-}
-void LogImpl<Device::CPU>::execute(Tensor& a, float val) {
-    dispatch_dtype(a.dtype(), [&](auto type_id) {
-        using T = typename decltype(type_id)::type;
-        T* a_ptr = static_cast<T*>(a.data());
-        log_kernel<T>(a_ptr,a_ptr,a.numel(),val);
-    });
 }
 Tensor LogImpl<Device::CPU>::execute(const Tensor& a, float val) {
     DataType res_type = a.dtype();
@@ -629,13 +668,6 @@ Tensor LogImpl<Device::CPU>::execute(const Tensor& a, float val) {
     }
     return b;
 }
-void PowImpl<Device::CPU>::execute(Tensor& a, float val) {
-    dispatch_dtype(a.dtype(), [&](auto type_id) {
-        using T = typename decltype(type_id)::type;
-        T* a_ptr = static_cast<T*>(a.data());
-        pow_kernel<T>(a_ptr,a_ptr,a.numel(),val);
-    });
-}
 Tensor PowImpl<Device::CPU>::execute(const Tensor& a, float val) {
     DataType res_type = a.dtype();
     if (a.dtype() <= DataType::INT64)
@@ -671,13 +703,6 @@ Tensor PowImpl<Device::CPU>::execute(const Tensor& a, float val) {
     }
     return b;
 }
-void ClampImpl<Device::CPU>::execute(Tensor& a, float min, float max) {
-    dispatch_dtype(a.dtype(), [&](auto type_id) {
-        using T = typename decltype(type_id)::type;
-        T* a_ptr = static_cast<T*>(a.data());
-        clamp_kernel<T>(a_ptr,a_ptr,a.numel(),min,max);
-    });
-}
 Tensor ClampImpl<Device::CPU>::execute(const Tensor& a, float min, float max) {
     Tensor res = Tensor(a.shape(), a.dtype(), Device::CPU);
     dispatch_dtype(a.dtype(), [&](auto type_id) {
@@ -688,11 +713,76 @@ Tensor ClampImpl<Device::CPU>::execute(const Tensor& a, float min, float max) {
     });
     return res;
 }
-
+// ========================================================================
+void AbsImpl<Device::CPU>::execute(Tensor& a) {
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        T* a_ptr = static_cast<T*>(a.data());
+        abs_kernel<T>(a_ptr,a.numel());
+    });
+}
+void SinImpl<Device::CPU>::execute(Tensor& a) {
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        T* a_ptr = static_cast<T*>(a.data());
+        sin_kernel<T>(a_ptr,a_ptr,a.numel());
+    });
+}
+void CosImpl<Device::CPU>::execute(Tensor& a) {
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        T* a_ptr = static_cast<T*>(a.data());
+        cos_kernel<T>(a_ptr,a_ptr,a.numel());
+    });
+}
+void TanImpl<Device::CPU>::execute(Tensor& a) {
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        T* a_ptr = static_cast<T*>(a.data());
+        tan_kernel<T>(a_ptr,a_ptr,a.numel());
+    });
+}
+void ExpImpl<Device::CPU>::execute(Tensor& a) {
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        T* a_ptr = static_cast<T*>(a.data());
+        exp_kernel<T>(a_ptr,a_ptr,a.numel());
+    });
+}
+void SqrtImpl<Device::CPU>::execute(Tensor& a) {
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        T* a_ptr = static_cast<T*>(a.data());
+        sqrt_kernel<T>(a_ptr,a_ptr,a.numel());
+    });
+}
+void LogImpl<Device::CPU>::execute(Tensor& a, float val) {
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        T* a_ptr = static_cast<T*>(a.data());
+        log_kernel<T>(a_ptr,a_ptr,a.numel(),val);
+    });
+}
+void PowImpl<Device::CPU>::execute(Tensor& a, float val) {
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        T* a_ptr = static_cast<T*>(a.data());
+        pow_kernel<T>(a_ptr,a_ptr,a.numel(),val);
+    });
+}
+void ClampImpl<Device::CPU>::execute(Tensor& a, float min, float max) {
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        T* a_ptr = static_cast<T*>(a.data());
+        clamp_kernel<T>(a_ptr,a_ptr,a.numel(),min,max);
+    });
+}
+// ========================================================================
 template struct AddImpl<Device::CPU>;
 template struct SubImpl<Device::CPU>;
 template struct DotImpl<Device::CPU>;
 template struct DivImpl<Device::CPU>;
+template struct AbsImpl<Device::CPU>;
 template struct SinImpl<Device::CPU>;
 template struct CosImpl<Device::CPU>;
 template struct TanImpl<Device::CPU>;
@@ -700,6 +790,5 @@ template struct PowImpl<Device::CPU>;
 template struct LogImpl<Device::CPU>;
 template struct ExpImpl<Device::CPU>;
 template struct SqrtImpl<Device::CPU>;
-template struct AbsImpl<Device::CPU>;
 template struct ClampImpl<Device::CPU>;
 }

@@ -12,11 +12,11 @@ layout(push_constant) uniform Params {
 
 layout(std430, binding = 0) buffer Data {
     int64_t values[];
-};
+}src;
 
 void main() {
     uint idx = gl_GlobalInvocationID.x;
     if (int64_t(idx) >= params.numel) 
         return;
-    values[idx] = max(values[idx], int64_t(0));
+    src.values[idx] = max(src.values[idx], int64_t(0));
 }

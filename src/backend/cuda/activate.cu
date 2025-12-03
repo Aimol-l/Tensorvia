@@ -11,48 +11,6 @@ __global__ void relu_cuda(const T* src_ptr, T* dst_ptr, size_t size) {
         dst_ptr[glob_id] = x > T(0) ? x : T(0);
     }
 }
-void ReluImpl<Device::CUDA>::execute(Tensor& a) {
-    size_t numel = a.numel();
-    constexpr size_t threads = 256;
-    size_t blocks = (numel + threads - 1) / threads;
-    auto src_impl =  std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
-    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_impl->context());
-    auto A = data_as_const_variant(a.dtype(), a.data());
-    std::visit([&](auto ptr_A) {
-        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_A)>>; // const T* --> const T --> T
-        if constexpr(std::is_same_v<AType,float16>){
-            relu_cuda<__half><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __half*>(a.data()), static_cast<__half*>(a.data()), numel);
-        }else if constexpr(std::is_same_v<AType,bfloat16>){
-            relu_cuda<__nv_bfloat16><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()), static_cast<__nv_bfloat16*>(a.data()), numel);
-        }else{
-            relu_cuda<AType><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const AType*>(a.data()),static_cast<AType*>(a.data()),numel);
-        }
-    }, A);
-    ctx_impl->wait();
-}
-Tensor ReluImpl<Device::CUDA>::execute(const Tensor& a) {
-    size_t numel = a.numel();
-    constexpr size_t threads = 256;
-    size_t blocks = (numel + threads - 1) / threads;
-    auto src_impl =  std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
-    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_impl->context());
-    Tensor b(a.shape(), a.dtype(), a.device());
-    auto A = data_as_const_variant(a.dtype(), a.data());
-    auto B = data_as_const_variant(b.dtype(), b.data());
-    std::visit([&](auto ptr_A, auto ptr_B) {
-        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_A)>>; // const T* --> const T --> T
-        if constexpr(std::is_same_v<AType,float16>){
-            relu_cuda<__half><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __half*>(a.data()), static_cast<__half*>(b.data()), numel);
-        }else if constexpr(std::is_same_v<AType,bfloat16>){
-            relu_cuda<__nv_bfloat16><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()), static_cast<__nv_bfloat16*>(b.data()), numel);
-        }else{
-            relu_cuda<AType><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const AType*>(a.data()), static_cast<AType*>(b.data()), numel);
-        }   
-    }, A, B);
-    ctx_impl->wait();
-    return b;
-}
-
 template <typename T,typename R = T>
 __global__ void silu_cuda(const T* src_ptr, R* dst_ptr, size_t size) {
     size_t glob_id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -61,61 +19,6 @@ __global__ void silu_cuda(const T* src_ptr, R* dst_ptr, size_t size) {
         dst_ptr[glob_id] = x / R(1 + expf(-x));
     }
 }
-void SiluImpl<Device::CUDA>::execute(Tensor& a) {
-    size_t numel = a.numel();
-    constexpr size_t threads = 256;
-    size_t blocks = (numel + threads - 1) / threads;
-    auto src_impl =  std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
-    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_impl->context());
-    auto A = data_as_const_variant(a.dtype(), a.data());
-    std::visit([&](auto ptr_A) {
-        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_A)>>; // const T* --> const T --> T
-        if constexpr(std::is_same_v<AType,float16>){
-            silu_cuda<__half><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __half*>(a.data()), static_cast<__half*>(a.data()), numel);
-        }else if constexpr(std::is_same_v<AType,bfloat16>){
-            silu_cuda<__nv_bfloat16><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()), static_cast<__nv_bfloat16*>(a.data()), numel);
-        }else{
-            silu_cuda<AType><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const AType*>(a.data()),static_cast<AType*>(a.data()),numel);
-        }
-    }, A);
-    ctx_impl->wait();
-}
-Tensor SiluImpl<Device::CUDA>::execute(const Tensor& a) {
-    size_t numel = a.numel();
-    constexpr size_t threads = 256;
-    size_t blocks = (numel + threads - 1) / threads;
-    auto src_impl =  std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
-    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_impl->context());
-    DataType res_type = a.dtype();
-    if(res_type <= DataType::INT32){
-        res_type = DataType::FLOAT32;
-    }else if(res_type == DataType::INT64||res_type== DataType::FLOAT64){
-        res_type = DataType::FLOAT64;
-    }
-    Tensor b(a.shape(),res_type,a.device());
-    switch (a.dtype()) {
-        case DataType::INT8:            
-            silu_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const int8_t*>(a.data()),static_cast<float32*>(b.data()), numel);break;
-        case DataType::INT16:           
-            silu_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const int16_t*>(a.data()),static_cast<float32*>(b.data()), numel);break;
-        case DataType::INT32:           
-            silu_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const int32_t*>(a.data()),static_cast<float32*>(b.data()), numel);break;
-        case DataType::INT64:           
-            silu_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const int64_t*>(a.data()),static_cast<float64*>(b.data()), numel);break;
-        case DataType::FLOAT16:         
-            silu_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const __half*>(a.data()),static_cast<__half*>(b.data()), numel);break;
-        case DataType::BFLOAT16:        
-            silu_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()),static_cast<__nv_bfloat16*>(b.data()), numel);break;
-        case DataType::FLOAT32:         
-            silu_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const float32*>(a.data()),static_cast<float32*>(b.data()), numel);break;
-        case DataType::FLOAT64:         
-            silu_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const float64*>(a.data()),static_cast<float64*>(b.data()), numel);break;
-        default: throw std::runtime_error("Unsupported dtype for silu");
-    }
-    ctx_impl->wait();   
-    return b;
-}
-
 template <typename T,typename R = T>
 __global__ void tanh_cuda(const T* src_ptr, R* dst_ptr, size_t size) {
     size_t glob_id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -124,61 +27,6 @@ __global__ void tanh_cuda(const T* src_ptr, R* dst_ptr, size_t size) {
         dst_ptr[glob_id] = tanhf(x);
     }
 }
-void TanhImpl<Device::CUDA>::execute(Tensor& a) {
-    size_t numel = a.numel();
-    constexpr size_t threads = 256;
-    size_t blocks = (numel + threads - 1) / threads;
-    auto src_impl =  std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
-    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_impl->context());
-    auto A = data_as_const_variant(a.dtype(), a.data());
-    std::visit([&](auto ptr_A) {
-        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_A)>>; // const T* --> const T --> T
-        if constexpr(std::is_same_v<AType,float16>){
-            tanh_cuda<__half><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __half*>(a.data()), static_cast<__half*>(a.data()), numel);
-        }else if constexpr(std::is_same_v<AType,bfloat16>){
-            tanh_cuda<__nv_bfloat16><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()), static_cast<__nv_bfloat16*>(a.data()), numel);
-        }else{
-            tanh_cuda<AType><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const AType*>(a.data()),static_cast<AType*>(a.data()),numel);
-        }
-    }, A);
-    ctx_impl->wait();
-}
-Tensor TanhImpl<Device::CUDA>::execute(const Tensor& a) {
-    size_t numel = a.numel();
-    constexpr size_t threads = 256;
-    size_t blocks = (numel + threads - 1) / threads;
-    auto src_impl =  std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
-    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_impl->context());
-    DataType res_type = a.dtype();
-    if(res_type <= DataType::INT32){
-        res_type = DataType::FLOAT32;
-    }else if(res_type == DataType::INT64||res_type== DataType::FLOAT64){
-        res_type = DataType::FLOAT64;
-    }
-    Tensor b(a.shape(),res_type,a.device());
-    switch (a.dtype()) {
-        case DataType::INT8:            
-            tanh_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const int8_t*>(a.data()),static_cast<float32*>(b.data()), numel);break;
-        case DataType::INT16:           
-            tanh_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const int16_t*>(a.data()),static_cast<float32*>(b.data()), numel);break;
-        case DataType::INT32:           
-            tanh_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const int32_t*>(a.data()),static_cast<float32*>(b.data()), numel);break;
-        case DataType::INT64:           
-            tanh_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const int64_t*>(a.data()),static_cast<float64*>(b.data()), numel);break;
-        case DataType::FLOAT16:         
-            tanh_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const __half*>(a.data()),static_cast<__half*>(b.data()), numel);break;
-        case DataType::BFLOAT16:        
-            tanh_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()),static_cast<__nv_bfloat16*>(b.data()), numel);break;
-        case DataType::FLOAT32:         
-            tanh_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const float32*>(a.data()),static_cast<float32*>(b.data()), numel);break;
-        case DataType::FLOAT64:         
-            tanh_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const float64*>(a.data()),static_cast<float64*>(b.data()), numel);break;
-        default: throw std::runtime_error("Unsupported dtype for silu");
-    }
-    ctx_impl->wait();   
-    return b;
-}
-
 template <typename T,typename R = T>
 __global__ void sigmoid_cuda(const T* src_ptr, R* dst_ptr, size_t size) {
     size_t glob_id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -187,61 +35,6 @@ __global__ void sigmoid_cuda(const T* src_ptr, R* dst_ptr, size_t size) {
         dst_ptr[glob_id] = R(1 / (1 + expf(-x)));
     }
 }
-void SigmoidImpl<Device::CUDA>::execute(Tensor& a) {
-    size_t numel = a.numel();
-    constexpr size_t threads = 256;
-    size_t blocks = (numel + threads - 1) / threads;
-    auto src_impl =  std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
-    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_impl->context());
-    auto A = data_as_const_variant(a.dtype(), a.data());
-    std::visit([&](auto ptr_A) {
-        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_A)>>; // const T* --> const T --> T
-        if constexpr(std::is_same_v<AType,float16>){
-            sigmoid_cuda<__half><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __half*>(a.data()), static_cast<__half*>(a.data()), numel);
-        }else if constexpr(std::is_same_v<AType,bfloat16>){
-            sigmoid_cuda<__nv_bfloat16><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()), static_cast<__nv_bfloat16*>(a.data()), numel);
-        }else{
-            sigmoid_cuda<AType><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const AType*>(a.data()),static_cast<AType*>(a.data()),numel);
-        }
-    }, A);
-    ctx_impl->wait();
-}
-Tensor SigmoidImpl<Device::CUDA>::execute(const Tensor& a) {
-    size_t numel = a.numel();
-    constexpr size_t threads = 256;
-    size_t blocks = (numel + threads - 1) / threads;
-    auto src_impl =  std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
-    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_impl->context());
-    DataType res_type = a.dtype();
-    if(res_type <= DataType::INT32){
-        res_type = DataType::FLOAT32;
-    }else if(res_type == DataType::INT64||res_type== DataType::FLOAT64){
-        res_type = DataType::FLOAT64;
-    }
-    Tensor b(a.shape(),res_type,a.device());
-    switch (a.dtype()) {
-        case DataType::INT8:            
-            sigmoid_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const int8_t*>(a.data()),static_cast<float32*>(b.data()), numel);break;
-        case DataType::INT16:           
-            sigmoid_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const int16_t*>(a.data()),static_cast<float32*>(b.data()), numel);break;
-        case DataType::INT32:           
-            sigmoid_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const int32_t*>(a.data()),static_cast<float32*>(b.data()), numel);break;
-        case DataType::INT64:           
-            sigmoid_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const int64_t*>(a.data()),static_cast<float64*>(b.data()), numel);break;
-        case DataType::FLOAT16:         
-            sigmoid_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const __half*>(a.data()),static_cast<__half*>(b.data()), numel);break;
-        case DataType::BFLOAT16:        
-            sigmoid_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()),static_cast<__nv_bfloat16*>(b.data()), numel);break;
-        case DataType::FLOAT32:         
-            sigmoid_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const float32*>(a.data()),static_cast<float32*>(b.data()), numel);break;
-        case DataType::FLOAT64:         
-            sigmoid_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const float64*>(a.data()),static_cast<float64*>(b.data()), numel);break;
-        default: throw std::runtime_error("Unsupported dtype for silu");
-    }
-    ctx_impl->wait();   
-    return b;
-}
-
 template <typename T, typename R = float>
 __global__ void softmax_cuda(const T* src_ptr, R* dst_ptr, size_t outer_dim, size_t axis_dim, size_t inner_dim) {
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -287,6 +80,211 @@ __global__ void softmax_cuda(const T* src_ptr, R* dst_ptr, size_t outer_dim, siz
             dst_ptr[base_offset + i * inner_dim] = static_cast<R>(result);
         }
     }
+}
+//====================================================================
+void ReluImpl<Device::CUDA>::execute(Tensor& a) {
+    size_t numel = a.numel();
+    constexpr size_t threads = 256;
+    size_t blocks = (numel + threads - 1) / threads;
+    auto src_impl =  std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_impl->context());
+    auto A = data_as_const_variant(a.dtype(), a.data());
+    std::visit([&](auto ptr_A) {
+        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_A)>>; // const T* --> const T --> T
+        if constexpr(std::is_same_v<AType,float16>){
+            relu_cuda<__half><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __half*>(a.data()), static_cast<__half*>(a.data()), numel);
+        }else if constexpr(std::is_same_v<AType,bfloat16>){
+            relu_cuda<__nv_bfloat16><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()), static_cast<__nv_bfloat16*>(a.data()), numel);
+        }else{
+            relu_cuda<AType><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const AType*>(a.data()),static_cast<AType*>(a.data()),numel);
+        }
+    }, A);
+    ctx_impl->wait();
+}
+void SiluImpl<Device::CUDA>::execute(Tensor& a) {
+    size_t numel = a.numel();
+    constexpr size_t threads = 256;
+    size_t blocks = (numel + threads - 1) / threads;
+    auto src_impl =  std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_impl->context());
+    auto A = data_as_const_variant(a.dtype(), a.data());
+    std::visit([&](auto ptr_A) {
+        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_A)>>; // const T* --> const T --> T
+        if constexpr(std::is_same_v<AType,float16>){
+            silu_cuda<__half><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __half*>(a.data()), static_cast<__half*>(a.data()), numel);
+        }else if constexpr(std::is_same_v<AType,bfloat16>){
+            silu_cuda<__nv_bfloat16><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()), static_cast<__nv_bfloat16*>(a.data()), numel);
+        }else{
+            silu_cuda<AType><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const AType*>(a.data()),static_cast<AType*>(a.data()),numel);
+        }
+    }, A);
+    ctx_impl->wait();
+}
+void TanhImpl<Device::CUDA>::execute(Tensor& a) {
+    size_t numel = a.numel();
+    constexpr size_t threads = 256;
+    size_t blocks = (numel + threads - 1) / threads;
+    auto src_impl =  std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_impl->context());
+    auto A = data_as_const_variant(a.dtype(), a.data());
+    std::visit([&](auto ptr_A) {
+        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_A)>>; // const T* --> const T --> T
+        if constexpr(std::is_same_v<AType,float16>){
+            tanh_cuda<__half><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __half*>(a.data()), static_cast<__half*>(a.data()), numel);
+        }else if constexpr(std::is_same_v<AType,bfloat16>){
+            tanh_cuda<__nv_bfloat16><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()), static_cast<__nv_bfloat16*>(a.data()), numel);
+        }else{
+            tanh_cuda<AType><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const AType*>(a.data()),static_cast<AType*>(a.data()),numel);
+        }
+    }, A);
+    ctx_impl->wait();
+}
+void SigmoidImpl<Device::CUDA>::execute(Tensor& a) {
+    size_t numel = a.numel();
+    constexpr size_t threads = 256;
+    size_t blocks = (numel + threads - 1) / threads;
+    auto src_impl =  std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_impl->context());
+    auto A = data_as_const_variant(a.dtype(), a.data());
+    std::visit([&](auto ptr_A) {
+        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_A)>>; // const T* --> const T --> T
+        if constexpr(std::is_same_v<AType,float16>){
+            sigmoid_cuda<__half><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __half*>(a.data()), static_cast<__half*>(a.data()), numel);
+        }else if constexpr(std::is_same_v<AType,bfloat16>){
+            sigmoid_cuda<__nv_bfloat16><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()), static_cast<__nv_bfloat16*>(a.data()), numel);
+        }else{
+            sigmoid_cuda<AType><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const AType*>(a.data()),static_cast<AType*>(a.data()),numel);
+        }
+    }, A);
+    ctx_impl->wait();
+}
+//====================================================================
+Tensor ReluImpl<Device::CUDA>::execute(const Tensor& a) {
+    size_t numel = a.numel();
+    constexpr size_t threads = 256;
+    size_t blocks = (numel + threads - 1) / threads;
+    auto src_impl =  std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_impl->context());
+    Tensor b(a.shape(), a.dtype(), a.device());
+    auto A = data_as_const_variant(a.dtype(), a.data());
+    auto B = data_as_const_variant(b.dtype(), b.data());
+    std::visit([&](auto ptr_A, auto ptr_B) {
+        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_A)>>; // const T* --> const T --> T
+        if constexpr(std::is_same_v<AType,float16>){
+            relu_cuda<__half><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __half*>(a.data()), static_cast<__half*>(b.data()), numel);
+        }else if constexpr(std::is_same_v<AType,bfloat16>){
+            relu_cuda<__nv_bfloat16><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()), static_cast<__nv_bfloat16*>(b.data()), numel);
+        }else{
+            relu_cuda<AType><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const AType*>(a.data()), static_cast<AType*>(b.data()), numel);
+        }   
+    }, A, B);
+    ctx_impl->wait();
+    return b;
+}
+Tensor SiluImpl<Device::CUDA>::execute(const Tensor& a) {
+    size_t numel = a.numel();
+    constexpr size_t threads = 256;
+    size_t blocks = (numel + threads - 1) / threads;
+    auto src_impl =  std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_impl->context());
+    DataType res_type = a.dtype();
+    if(res_type <= DataType::INT32){
+        res_type = DataType::FLOAT32;
+    }else if(res_type == DataType::INT64||res_type== DataType::FLOAT64){
+        res_type = DataType::FLOAT64;
+    }
+    Tensor b(a.shape(),res_type,a.device());
+    switch (a.dtype()) {
+        case DataType::INT8:            
+            silu_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const int8_t*>(a.data()),static_cast<float32*>(b.data()), numel);break;
+        case DataType::INT16:           
+            silu_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const int16_t*>(a.data()),static_cast<float32*>(b.data()), numel);break;
+        case DataType::INT32:           
+            silu_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const int32_t*>(a.data()),static_cast<float32*>(b.data()), numel);break;
+        case DataType::INT64:           
+            silu_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const int64_t*>(a.data()),static_cast<float64*>(b.data()), numel);break;
+        case DataType::FLOAT16:         
+            silu_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const __half*>(a.data()),static_cast<__half*>(b.data()), numel);break;
+        case DataType::BFLOAT16:        
+            silu_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()),static_cast<__nv_bfloat16*>(b.data()), numel);break;
+        case DataType::FLOAT32:         
+            silu_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const float32*>(a.data()),static_cast<float32*>(b.data()), numel);break;
+        case DataType::FLOAT64:         
+            silu_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const float64*>(a.data()),static_cast<float64*>(b.data()), numel);break;
+        default: throw std::runtime_error("Unsupported dtype for silu");
+    }
+    ctx_impl->wait();   
+    return b;
+}
+Tensor TanhImpl<Device::CUDA>::execute(const Tensor& a) {
+    size_t numel = a.numel();
+    constexpr size_t threads = 256;
+    size_t blocks = (numel + threads - 1) / threads;
+    auto src_impl =  std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_impl->context());
+    DataType res_type = a.dtype();
+    if(res_type <= DataType::INT32){
+        res_type = DataType::FLOAT32;
+    }else if(res_type == DataType::INT64||res_type== DataType::FLOAT64){
+        res_type = DataType::FLOAT64;
+    }
+    Tensor b(a.shape(),res_type,a.device());
+    switch (a.dtype()) {
+        case DataType::INT8:            
+            tanh_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const int8_t*>(a.data()),static_cast<float32*>(b.data()), numel);break;
+        case DataType::INT16:           
+            tanh_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const int16_t*>(a.data()),static_cast<float32*>(b.data()), numel);break;
+        case DataType::INT32:           
+            tanh_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const int32_t*>(a.data()),static_cast<float32*>(b.data()), numel);break;
+        case DataType::INT64:           
+            tanh_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const int64_t*>(a.data()),static_cast<float64*>(b.data()), numel);break;
+        case DataType::FLOAT16:         
+            tanh_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const __half*>(a.data()),static_cast<__half*>(b.data()), numel);break;
+        case DataType::BFLOAT16:        
+            tanh_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()),static_cast<__nv_bfloat16*>(b.data()), numel);break;
+        case DataType::FLOAT32:         
+            tanh_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const float32*>(a.data()),static_cast<float32*>(b.data()), numel);break;
+        case DataType::FLOAT64:         
+            tanh_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const float64*>(a.data()),static_cast<float64*>(b.data()), numel);break;
+        default: throw std::runtime_error("Unsupported dtype for silu");
+    }
+    ctx_impl->wait();   
+    return b;
+}
+Tensor SigmoidImpl<Device::CUDA>::execute(const Tensor& a) {
+    size_t numel = a.numel();
+    constexpr size_t threads = 256;
+    size_t blocks = (numel + threads - 1) / threads;
+    auto src_impl =  std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_impl->context());
+    DataType res_type = a.dtype();
+    if(res_type <= DataType::INT32){
+        res_type = DataType::FLOAT32;
+    }else if(res_type == DataType::INT64||res_type== DataType::FLOAT64){
+        res_type = DataType::FLOAT64;
+    }
+    Tensor b(a.shape(),res_type,a.device());
+    switch (a.dtype()) {
+        case DataType::INT8:            
+            sigmoid_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const int8_t*>(a.data()),static_cast<float32*>(b.data()), numel);break;
+        case DataType::INT16:           
+            sigmoid_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const int16_t*>(a.data()),static_cast<float32*>(b.data()), numel);break;
+        case DataType::INT32:           
+            sigmoid_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const int32_t*>(a.data()),static_cast<float32*>(b.data()), numel);break;
+        case DataType::INT64:           
+            sigmoid_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const int64_t*>(a.data()),static_cast<float64*>(b.data()), numel);break;
+        case DataType::FLOAT16:         
+            sigmoid_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const __half*>(a.data()),static_cast<__half*>(b.data()), numel);break;
+        case DataType::BFLOAT16:        
+            sigmoid_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()),static_cast<__nv_bfloat16*>(b.data()), numel);break;
+        case DataType::FLOAT32:         
+            sigmoid_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const float32*>(a.data()),static_cast<float32*>(b.data()), numel);break;
+        case DataType::FLOAT64:         
+            sigmoid_cuda<<<blocks,threads,0,ctx_impl->stream()>>>(static_cast<const float64*>(a.data()),static_cast<float64*>(b.data()), numel);break;
+        default: throw std::runtime_error("Unsupported dtype for silu");
+    }
+    ctx_impl->wait();   
+    return b;
 }
 Tensor SoftmaxImpl<Device::CUDA>::execute(const Tensor& a,int axis) {
     int dims = a.shape().size();
@@ -336,7 +334,7 @@ Tensor SoftmaxImpl<Device::CUDA>::execute(const Tensor& a,int axis) {
     ctx_impl->wait();
     return result;
 }
-
+//====================================================================
 template struct ReluImpl<Device::CUDA>;
 template struct SiluImpl<Device::CUDA>;
 template struct TanhImpl<Device::CUDA>;

@@ -33,21 +33,18 @@ struct ClampImpl;
 
 template <>
 struct AddImpl<Device::CPU> {
-    // inplace
     static void execute(Tensor& a, float b);
-    // uninplace
-    static Tensor execute(const Tensor& a, const Tensor& b);
     static Tensor execute(const Tensor& a, float b);
-
+    static Tensor execute(const Tensor& a, const Tensor& b);
     static void execute(const Tensor& a, const Tensor& b,Tensor& dst);
 };
 
 template <>
 struct SubImpl<Device::CPU> {
     static void execute(Tensor& a, float b);
-
-    static Tensor execute(const Tensor& a, const Tensor& b);
     static Tensor execute(const Tensor& a, float b);
+    static Tensor execute(const Tensor& a, const Tensor& b);
+    static void execute(const Tensor& a, const Tensor& b,Tensor& dst);
 };
 
 template <>
@@ -55,6 +52,8 @@ struct DotImpl<Device::CPU> {
     static void execute(Tensor& a, float b);
     static Tensor execute(const Tensor& a, const Tensor& b);
     static Tensor execute(const Tensor& a, float b);
+    static void execute(const Tensor& a, const Tensor& b,Tensor& dst);
+
 };
 
 template <>
@@ -62,6 +61,8 @@ struct DivImpl<Device::CPU> {
     static void execute(Tensor& a, float b);
     static Tensor execute(const Tensor& a, const Tensor& b);
     static Tensor execute(const Tensor& a, float b);
+    static void execute(const Tensor& a, const Tensor& b,Tensor& dst);
+
 };
 
 template <>

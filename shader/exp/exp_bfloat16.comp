@@ -11,12 +11,18 @@ layout(push_constant) uniform Params {
     int64_t numel;
 } params;
 
-layout(std430, binding = 0) buffer Data {
-    bfloat16_t values[];
-}src;
+layout(std430, binding = 0) buffer InputA {
+    bfloat16_t data[];
+} a;
+
+layout(std430, binding = 1) buffer InputB {
+    bfloat16_t data[];
+} b;
+
 
 void main() {
     uint idx = gl_GlobalInvocationID.x;
     if (int64_t(idx) >= params.numel) return;
-    src.values[idx] = bfloat16_t(max(src.values[idx],0));
+
+    b.data[idx] = bfloat16_t(exp(float(a.data[idx])));
 }

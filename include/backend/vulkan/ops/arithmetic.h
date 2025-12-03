@@ -29,18 +29,21 @@ struct SubImpl<Device::VULKAN> {
     static void execute(Tensor& a,float b);
     static Tensor execute(const Tensor& a, float b);
     static Tensor execute(const Tensor& a, const Tensor& b);
+    static void execute(const Tensor& a, const Tensor& b,Tensor& dst);
 };
 template <>
 struct DotImpl<Device::VULKAN> {
     static void execute(Tensor& a,float b);
     static Tensor execute(const Tensor& a, float b);
     static Tensor execute(const Tensor& a, const Tensor& b);
+    static void execute(const Tensor& a, const Tensor& b,Tensor& dst);
 };
 template <>
 struct DivImpl<Device::VULKAN> {
     static void execute(Tensor& a,float b);
     static Tensor execute(const Tensor& a, float b);
     static Tensor execute(const Tensor& a, const Tensor& b);
+    static void execute(const Tensor& a, const Tensor& b,Tensor& dst);
 };  
 template <>
 struct SinImpl<Device::VULKAN> {

@@ -29,18 +29,24 @@ struct SubImpl<Device::CUDA> {
     static void execute(Tensor& a,float b);
     static Tensor execute(const Tensor& a, float b);
     static Tensor execute(const Tensor& a, const Tensor& b);
+    static void execute(const Tensor& a, const Tensor& b,Tensor& dst);
+
 };
 template <>
 struct DotImpl<Device::CUDA> {
     static void execute(Tensor& a,float b);
     static Tensor execute(const Tensor& a, float b);
     static Tensor execute(const Tensor& a, const Tensor& b);
+    static void execute(const Tensor& a, const Tensor& b,Tensor& dst);
+
 };
 template <>
 struct DivImpl<Device::CUDA> {
     static void execute(Tensor& a,float b);
     static Tensor execute(const Tensor& a, float b);
     static Tensor execute(const Tensor& a, const Tensor& b);
+    static void execute(const Tensor& a, const Tensor& b,Tensor& dst);
+
 };  
 template <>
 struct SinImpl<Device::CUDA> {

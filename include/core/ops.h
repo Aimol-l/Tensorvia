@@ -49,9 +49,9 @@ namespace ops{
 
     //  out-of-place
     OPS_API void   Add(const Tensor& a,const Tensor& b,Tensor& dst);
-    // OPS_API void   Sub(const Tensor& a,const Tensor& b,Tensor& dst);
-    // OPS_API void   Dot(const Tensor& a,const Tensor& b,Tensor& dst);
-    // OPS_API void   Div(const Tensor& a,const Tensor& b,Tensor& dst);
+    OPS_API void   Sub(const Tensor& a,const Tensor& b,Tensor& dst);
+    OPS_API void   Dot(const Tensor& a,const Tensor& b,Tensor& dst);
+    OPS_API void   Div(const Tensor& a,const Tensor& b,Tensor& dst);
 
 
     // [w,k] @ [k,h] --> [w,h]
@@ -59,6 +59,18 @@ namespace ops{
     OPS_API Tensor Mul(const Tensor& a,const Tensor& b);
 
     // 激活函数
+    OPS_API void Abs(Tensor& a);
+    OPS_API void Relu(Tensor& a);
+    OPS_API void Sin(Tensor& a);    // 只支持浮点数
+    OPS_API void Cos(Tensor& a);    // 只支持浮点数
+    OPS_API void Tan(Tensor& a);    // 只支持浮点数
+    OPS_API void Silu(Tensor& a);    // 只支持浮点数
+    OPS_API void Tanh(Tensor& a);    // 只支持浮点数
+    OPS_API void Sigmoid(Tensor& a); // 只支持浮点数
+    OPS_API void Pow(Tensor& a,float val);  //浮点数正常运算，整数会按值截断
+    OPS_API void Log(Tensor& a,float val);  //浮点数正常运算，整数会按值截断
+    OPS_API void Clamp(Tensor& a,float min,float max);
+
     OPS_API Tensor Abs(const Tensor& a);
     OPS_API Tensor Sin(const Tensor& a);
     OPS_API Tensor Cos(const Tensor& a);
@@ -74,20 +86,11 @@ namespace ops{
     OPS_API Tensor Softmax(const Tensor& a,int axis);
     OPS_API Tensor Clamp(const Tensor& a,float min,float max);
 
-    OPS_API void Abs(Tensor& a);
-    OPS_API void Sin(Tensor& a);    // 只支持浮点数
-    OPS_API void Cos(Tensor& a);    // 只支持浮点数
-    OPS_API void Tan(Tensor& a);    // 只支持浮点数
-    OPS_API void Relu(Tensor& a);
-    OPS_API void Silu(Tensor& a);    // 只支持浮点数
-    OPS_API void Tanh(Tensor& a);    // 只支持浮点数
-    OPS_API void Sigmoid(Tensor& a); // 只支持浮点数
-    OPS_API void Clamp(Tensor& a,float min,float max);
-
     OPS_API float Sum(const Tensor& a);
     OPS_API float Min(const Tensor& a);
     OPS_API float Max(const Tensor& a);
     OPS_API float Mean(const Tensor& a);
+
     OPS_API Tensor Sum(const Tensor& a,int axis);
     OPS_API Tensor Min(const Tensor& a,int axis);
     OPS_API Tensor Max(const Tensor& a,int axis);

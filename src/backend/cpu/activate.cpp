@@ -78,10 +78,7 @@ void softmax_kernel(const T* src, R* res_ptr, size_t outer_size, size_t axis_siz
         }
     }
 }
-
-
 // ================================================================
-
 void ReluImpl<Device::CPU>::execute(Tensor& a) {
     // auto A = data_as_const_variant(a.dtype(), a.data());
     // std::visit([&](auto ptr_A) {
@@ -94,6 +91,31 @@ void ReluImpl<Device::CPU>::execute(Tensor& a) {
         relu_kernel<T>(a_ptr,a_ptr,a.numel());
     });
 }
+void SiluImpl<Device::CPU>::execute(Tensor& a) {
+    auto A = data_as_const_variant(a.dtype(), a.data());
+    std::visit([&](auto ptr_A) {
+        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_A)>>;
+        silu_kernel<AType>(static_cast<AType*>(a.data()), static_cast<AType*>(a.data()), a.numel());
+    },
+               A);
+}
+void TanhImpl<Device::CPU>::execute(Tensor& a) {
+    auto A = data_as_const_variant(a.dtype(), a.data());
+    std::visit([&](auto ptr_A) {
+        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_A)>>;
+        tanh_kernel<AType>(static_cast<AType*>(a.data()), static_cast<AType*>(a.data()), a.numel());
+    },
+               A);
+}
+void SigmoidImpl<Device::CPU>::execute(Tensor& a) {
+    auto A = data_as_const_variant(a.dtype(), a.data());
+    std::visit([&](auto ptr_A) {
+        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_A)>>;
+        sigmoid_kernel<AType>(static_cast<AType*>(a.data()), static_cast<AType*>(a.data()), a.numel());
+    },
+               A);
+}
+// ================================================================
 Tensor ReluImpl<Device::CPU>::execute(const Tensor& a) {
     auto A = data_as_const_variant(a.dtype(), a.data());
     Tensor res = Tensor(a.shape(), a.dtype(), Device::CPU);
@@ -102,15 +124,6 @@ Tensor ReluImpl<Device::CPU>::execute(const Tensor& a) {
         relu_kernel<AType>(ptr_A, static_cast<AType*>(res.data()), a.numel());
     },A);
     return res;
-}
-
-void SiluImpl<Device::CPU>::execute(Tensor& a) {
-    auto A = data_as_const_variant(a.dtype(), a.data());
-    std::visit([&](auto ptr_A) {
-        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_A)>>;
-        silu_kernel<AType>(static_cast<AType*>(a.data()), static_cast<AType*>(a.data()), a.numel());
-    },
-               A);
 }
 Tensor SiluImpl<Device::CPU>::execute(const Tensor& a) {
     DataType res_type = a.dtype();
@@ -129,15 +142,6 @@ Tensor SiluImpl<Device::CPU>::execute(const Tensor& a) {
     },A, Res);
 
     return res;
-}
-
-void TanhImpl<Device::CPU>::execute(Tensor& a) {
-    auto A = data_as_const_variant(a.dtype(), a.data());
-    std::visit([&](auto ptr_A) {
-        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_A)>>;
-        tanh_kernel<AType>(static_cast<AType*>(a.data()), static_cast<AType*>(a.data()), a.numel());
-    },
-               A);
 }
 Tensor TanhImpl<Device::CPU>::execute(const Tensor& a) {
     DataType res_type = a.dtype();
@@ -158,15 +162,6 @@ Tensor TanhImpl<Device::CPU>::execute(const Tensor& a) {
 
     return res;
 }
-
-void SigmoidImpl<Device::CPU>::execute(Tensor& a) {
-    auto A = data_as_const_variant(a.dtype(), a.data());
-    std::visit([&](auto ptr_A) {
-        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_A)>>;
-        sigmoid_kernel<AType>(static_cast<AType*>(a.data()), static_cast<AType*>(a.data()), a.numel());
-    },
-               A);
-}
 Tensor SigmoidImpl<Device::CPU>::execute(const Tensor& a) {
     DataType res_type = a.dtype();
     if (a.dtype() <= DataType::INT64)
@@ -186,7 +181,6 @@ Tensor SigmoidImpl<Device::CPU>::execute(const Tensor& a) {
 
     return res;
 }
-
 Tensor SoftmaxImpl<Device::CPU>::execute(const Tensor& a, int axis) {
     size_t dim = a.shape().size();
     if (axis < 0)   axis += dim;
@@ -233,12 +227,10 @@ Tensor SoftmaxImpl<Device::CPU>::execute(const Tensor& a, int axis) {
     }
     return res;
 }
-
+// ================================================================
 template struct ReluImpl<Device::CPU>;
 template struct SiluImpl<Device::CPU>;
 template struct TanhImpl<Device::CPU>;
 template struct SigmoidImpl<Device::CPU>;
 template struct SoftmaxImpl<Device::CPU>;
-
-
 }  // namespace ops

@@ -2,11 +2,9 @@
 #include <print>
 
 int main() {
-    Tensor a = Tensor::Random({3,2592,2048},0,1,DataType::FLOAT16);
+    Tensor a = Tensor::Fill({3,2592,2048},2,DataType::FLOAT32);
 
-    ops::println(a);
-
-    auto b = ops::Softmax(a,0);
+    auto b = ops::Pow(static_cast<const Tensor&>(a),3);
 
     ops::println(b);
 

@@ -41,7 +41,9 @@ void main() {
     // 计算！
     for(int i =0;i<params.axis_dim;i++){
         float temp = src.data[base_offset + i * params.inner_dim];
-        float res = float(exp(float(temp - max_val))) / sum;
+        
+        float res = exp(float(temp - max_val)) / sum;
+
         dst.data[base_offset + i * params.inner_dim] = res;
     }
 }
