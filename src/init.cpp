@@ -110,6 +110,7 @@ struct VulkanRegistrar {
         ctx->registerOp(OpType::Sidmoid,FloatTypes,2,sizeof(int64_t));
         ctx->registerOp(OpType::Softmax,FloatTypes,2,sizeof(SoftmaxParams));
 
+        ctx->registerOp(OpType::Matmul,AllTypes,3,sizeof(MatmulParams));
 
         ctx->registerOp(OpType::Random,AllTypes,1,sizeof(RandomParams));
         ctx->registerOp(OpType::Fill,AllTypes,1,sizeof(ValueParams<float32>));

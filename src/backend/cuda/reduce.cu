@@ -318,6 +318,7 @@ Tensor MinImpl<Device::CUDA>::execute(const Tensor& a, int axis) {
     
     size_t outer_size = 1;
     for(int i = 0; i < axis; ++i) outer_size *= a_shape[i];
+    
     size_t axis_size = a.shape()[axis];
     size_t inner_size = 1;
     for(int i = axis+1; i < dim; ++i) inner_size *= a_shape[i];

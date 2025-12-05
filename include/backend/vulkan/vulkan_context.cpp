@@ -84,7 +84,7 @@ void VulkanContext::registerOp(OpType ops,std::vector<DataType>& Dtypes,int tens
         this->m_pipelines[type_op] = result.value;
         this->m_device.destroyShaderModule(shaderModule);
     }
-    std::println("{} SPIR-V:{}",ori_op,need_types);
+    // std::println("{} SPIR-V:{}",ori_op,need_types);
 }
 void VulkanContext::createDescriptorSetLayout(std::string ori_op, int tensor_count, int params_size) {
     if (m_pipeline_layouts.find(ori_op) != m_pipeline_layouts.end()) return;

@@ -54,7 +54,7 @@ enum class OpType {
     Abs,
     Sin,Cos,Tan,Exp,Relu,Silu,Tanh,Sqrt,Sidmoid,Pow,Log,Softmax,
     Clamp,Sum,Min,Max,Mean,Concat,
-    Transpose,Equal,NotEqual,Greater,Less,GreaterEqual,LessEqual,
+    Transpose2d,TransposeNd,Equal,NotEqual,Greater,Less,GreaterEqual,LessEqual,
     All,Any,Nonzero,Argmax,Argmin
 };
 inline const char* op_to_string(OpType op) {
@@ -90,7 +90,8 @@ inline const char* op_to_string(OpType op) {
         case OpType::Max:       return "max";
         case OpType::Mean:      return "mean";
         case OpType::Concat:    return "concat";
-        case OpType::Transpose: return "transpose";
+        case OpType::Transpose2d: return "transpose2d";
+        case OpType::TransposeNd: return "transposeNd";
         case OpType::Equal:     return "equal";
         case OpType::NotEqual:  return "not_equal";
         case OpType::Greater:    return "greater";

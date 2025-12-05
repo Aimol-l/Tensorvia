@@ -1005,6 +1005,27 @@ namespace ops {
             TanhImpl<Device::VULKAN>::execute(a);
         #endif
     }
+    void Pow(Tensor&a,float val){
+        if(a.data() == nullptr || a.numel() == 0) 
+            throw std::runtime_error("tensor a is null");
+        // 后端实现分发
+        if(a.device() == Device::CPU){
+            PowImpl<Device::CPU>::execute(a,val);
+            return;
+        }
+        #ifdef BACKEND_CPU
+            PowImpl<Device::CPU>::execute(a,val);
+        #endif
+        #ifdef BACKEND_SYCL
+            PowImpl<Device::SYCL>::execute(a,val);
+        #endif
+        #ifdef BACKEND_CUDA
+            PowImpl<Device::CUDA>::execute(a,val);
+        #endif
+        #ifdef BACKEND_VULKAN
+            PowImpl<Device::VULKAN>::execute(a,val);
+        #endif
+    }
     void Sigmoid(Tensor& a){
         if(a.data() == nullptr || a.numel() == 0) 
             throw std::runtime_error("tensor a is null");
@@ -1045,6 +1066,7 @@ namespace ops {
             ClampImpl<Device::VULKAN>::execute(a,min,max);
         #endif
     }
+    
     float Sum(const Tensor& a){
         if(a.data() == nullptr|| a.numel() == 0) 
             throw std::runtime_error("tensor a is null");

@@ -67,19 +67,18 @@ struct SoftmaxParams{
 
 // for: transpose_2d
 struct Trans2DParams{
-    int32_t rows;
-    int32_t cols;
+    uint32_t rows;
+    uint32_t cols;
 };
 
 // for: transpose_nd
 struct TransNDParams{
     int32_t dims;
     int32_t numel;
-    int32_t axes[4];
-    int32_t in_shape[4];
-    int32_t in_strides[4];
-    int32_t out_strides[4];
-}; // 72kb
+    int32_t axes[8];
+    int32_t in_strides[8];
+    int32_t out_strides[8];
+}; // 102kb
 
 
 // for: concat

@@ -1,0 +1,43 @@
+#version 460
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform Params {
+    int numel;
+    int dims;
+    int axes[8];        // axes[i] = input dimension corresponding to output dimension i
+    int in_strides[8];  // input strides (row-major)
+    int out_strides[8]; // output strides (row-major)
+} params;
+
+layout(std430, binding = 0) readonly buffer InputA {
+    float data[];
+} src;
+
+layout(std430, binding = 1) writeonly buffer Output {
+    float data[];
+} dst;
+
+void main() {
+    uint gid = gl_GlobalInvocationID.x;
+    if (int(gid) >= params.numel) return;
+
+    // Step 1: Decompose output linear index into output coordinates
+    uint temp = gid;
+    uint input_idx = 0;
+
+    // Step 2: For each output dimension i, extract coordinate and map to input
+    for (int i = 0; i < params.dims; ++i) {
+        // Coordinate along output dimension i
+        uint coord = temp / uint(params.out_strides[i]);
+        temp = temp % uint(params.out_strides[i]);
+
+        // This coordinate comes from input dimension `params.axes[i]`
+        // So we add: coord * input_stride[corresponding_input_dim]
+        int input_dim = params.axes[i];
+        input_idx += coord * uint(params.in_strides[input_dim]);
+    }
+
+    // Step 3: Copy data
+    dst.data[gid] = src.data[input_idx];
+}

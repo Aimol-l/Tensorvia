@@ -6,8 +6,8 @@ namespace ops {
 // [b,cols,k] @ [b,k,rows] --> [b,cols,rows]
 template <typename T, typename R, typename S, int TILE = 16>
 __global__ void mul_cuda_3d(const T*  a_ptr, const R*  b_ptr, S* __restrict__ res_ptr,size_t batch, size_t cols, size_t rows, size_t k) {
-    __shared__ T tile_a[TILE][TILE];
-    __shared__ R tile_b[TILE][TILE];
+    __shared__ T tile_a[TILE][TILE+1];
+    __shared__ R tile_b[TILE][TILE+1];
     int tx = threadIdx.x;
     int ty = threadIdx.y;
     int bx = blockIdx.x;
@@ -15,12 +15,9 @@ __global__ void mul_cuda_3d(const T*  a_ptr, const R*  b_ptr, S* __restrict__ re
     int bz = blockIdx.z;
     int row = by * TILE + ty; 
     int col = bx * TILE + tx;
-
     using PromotedType = decltype(std::declval<compute_type_t<T>>() + std::declval<compute_type_t<R>>());
-
     PromotedType sum = 0;
-
-    int numTiles = (int)((k + TILE - 1) / TILE);
+    int numTiles = (int)((k + TILE - 1) / TILE); //
     for (int tile_idx = 0; tile_idx < numTiles; ++tile_idx) {
         int a_k = tile_idx * TILE + tx; // 加载 A 的列索引 (k)
         if (row < rows && a_k < (int)k) {
@@ -50,11 +47,12 @@ __global__ void mul_cuda_3d(const T*  a_ptr, const R*  b_ptr, S* __restrict__ re
 }
 
 // 基本原则：输入的 shape 必须合法。
+// eg. [3,2592,2048] @ [3,2048,2592] = [3,2592,2592]
 Tensor MulImpl<Device::CUDA>::execute(const Tensor& a, const Tensor& b) {
-    int batch =     a.shape().size() == 3?a.shape(0):1;
-    int rows =      a.shape().size() == 3?a.shape(1):a.shape(0);
-    int common =    a.shape().size() == 3?a.shape(2):a.shape(1);
-    int cols =      a.shape().size() == 3?b.shape(2):b.shape(1);
+    int batch =     a.shape().size() == 3?a.shape(0):1; // 3
+    int rows =      a.shape().size() == 3?a.shape(1):a.shape(0); //2592
+    int common =    a.shape().size() == 3?a.shape(2):a.shape(1); // 2048
+    int cols =      a.shape().size() == 3?b.shape(2):b.shape(1); // 2592
     std::vector<int64_t> newshape;
     if(a.shape().size() == 3){
         newshape = {batch,rows,cols};
@@ -66,7 +64,8 @@ Tensor MulImpl<Device::CUDA>::execute(const Tensor& a, const Tensor& b) {
 
     constexpr int TILE_SZ = 16; // or match template TILE
     dim3 threads(TILE_SZ, TILE_SZ);
-    dim3 blocks((cols + TILE_SZ - 1) / TILE_SZ,(rows + TILE_SZ - 1) / TILE_SZ,batch );
+    // blocks = [162,162,3]
+    dim3 blocks((cols + TILE_SZ - 1) / TILE_SZ,(rows + TILE_SZ - 1) / TILE_SZ,batch);
 
     auto src_impl =  std::dynamic_pointer_cast<CUDATensor>(result.get_impl());
     auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_impl->context());

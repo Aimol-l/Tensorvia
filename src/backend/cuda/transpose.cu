@@ -56,7 +56,6 @@ __global__ void transpose_cuda_nd(
     const int* in_strides,
     const int* out_strides,
     const int* axes,
-    const int* in_shape,
     int ndim,
     size_t numel
 ) {
@@ -100,15 +99,15 @@ Tensor TransposeImpl<Device::CUDA>::execute(const Tensor& a, std::initializer_li
         in_strides[i] = in_strides[i + 1] * a.shape(i + 1);
         out_strides[i] = out_strides[i + 1] * result.shape(i + 1);
     }
-    int* d_in_strides, * d_out_strides, * d_axes, *input_shape;
+    int* d_in_strides, * d_out_strides, * d_axes;//, *input_shape;
     cudaMallocManaged(&d_in_strides, sizeof(int) * ndim);
     cudaMallocManaged(&d_out_strides, sizeof(int) * ndim);
     cudaMallocManaged(&d_axes, sizeof(int) * ndim);
-    cudaMallocManaged(&input_shape, sizeof(int) * ndim);
+    // cudaMallocManaged(&input_shape, sizeof(int) * ndim);
     memcpy(d_in_strides, in_strides.data(), sizeof(int) * ndim);
     memcpy(d_out_strides, out_strides.data(), sizeof(int) * ndim);
     memcpy(d_axes, axes.begin(), sizeof(int) * ndim);
-    memcpy(input_shape, a.shape().data(), sizeof(int) * ndim);
+    // memcpy(input_shape, a.shape().data(), sizeof(int) * ndim);
     auto src_ptr = std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
     auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_ptr->context());
     auto A = data_as_const_variant(a.dtype(), a.data());
@@ -116,13 +115,13 @@ Tensor TransposeImpl<Device::CUDA>::execute(const Tensor& a, std::initializer_li
     const int blocks = (numel + threads - 1) / threads;
     std::visit([&](auto a_ptr) {
         using AType = std::remove_cv_t<std::remove_pointer_t<decltype(a_ptr)>>;
-        transpose_cuda_nd<AType><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const AType*>(a.data()), static_cast<AType*>(result.data()), d_in_strides, d_out_strides, d_axes, input_shape, ndim, numel);
+        transpose_cuda_nd<AType><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const AType*>(a.data()), static_cast<AType*>(result.data()), d_in_strides, d_out_strides, d_axes, ndim, numel);
     },A);
     ctx_impl->wait();
     cudaFree(d_in_strides);
     cudaFree(d_out_strides);
     cudaFree(d_axes);
-    cudaFree(input_shape);
+    // cudaFree(input_shape);
     return result;
     
 }
@@ -142,15 +141,15 @@ void TransposeImpl<Device::CUDA>::execute(const Tensor& a, Tensor& dst,std::init
         in_strides[i] = in_strides[i + 1] * a.shape(i + 1);
         out_strides[i] = out_strides[i + 1] * dst.shape(i + 1);
     }
-    int* d_in_strides, * d_out_strides, * d_axes, *input_shape;
+    int* d_in_strides, * d_out_strides, * d_axes;//, *input_shape;
     cudaMallocManaged(&d_in_strides, sizeof(int) * ndim);
     cudaMallocManaged(&d_out_strides, sizeof(int) * ndim);
     cudaMallocManaged(&d_axes, sizeof(int) * ndim);
-    cudaMallocManaged(&input_shape, sizeof(int) * ndim);
+    // cudaMallocManaged(&input_shape, sizeof(int) * ndim);
     memcpy(d_in_strides, in_strides.data(), sizeof(int) * ndim);
     memcpy(d_out_strides, out_strides.data(), sizeof(int) * ndim);
     memcpy(d_axes, axes.begin(), sizeof(int) * ndim);
-    memcpy(input_shape, a.shape().data(), sizeof(int) * ndim);
+    // memcpy(input_shape, a.shape().data(), sizeof(int) * ndim);
     auto src_ptr = std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
     auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_ptr->context());
     const int threads = 256;
@@ -158,11 +157,11 @@ void TransposeImpl<Device::CUDA>::execute(const Tensor& a, Tensor& dst,std::init
     dispatch_dtype(a.dtype(),[&](auto type_id){
         using T = typename decltype(type_id)::type;
         if constexpr(std::is_same_v<T,float16>){
-            transpose_cuda_nd<<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __half*>(a.data()), static_cast<__half*>(dst.data()), d_in_strides, d_out_strides, d_axes, input_shape, ndim, numel);
+            transpose_cuda_nd<<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __half*>(a.data()), static_cast<__half*>(dst.data()), d_in_strides, d_out_strides, d_axes, ndim, numel);
         }else if constexpr(std::is_same_v<T,bfloat16>){
-            transpose_cuda_nd<<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()), static_cast<__nv_bfloat16*>(dst.data()), d_in_strides, d_out_strides, d_axes, input_shape, ndim, numel);
+            transpose_cuda_nd<<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()), static_cast<__nv_bfloat16*>(dst.data()), d_in_strides, d_out_strides, d_axes, ndim, numel);
         }else{
-            transpose_cuda_nd<<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const T*>(a.data()), static_cast<T*>(dst.data()), d_in_strides, d_out_strides, d_axes, input_shape, ndim, numel);
+            transpose_cuda_nd<<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const T*>(a.data()), static_cast<T*>(dst.data()), d_in_strides, d_out_strides, d_axes, ndim, numel);
         }
     });
 
@@ -170,7 +169,7 @@ void TransposeImpl<Device::CUDA>::execute(const Tensor& a, Tensor& dst,std::init
     cudaFree(d_in_strides);
     cudaFree(d_out_strides);
     cudaFree(d_axes);
-    cudaFree(input_shape);
+    // cudaFree(input_shape);
 }
 
 template struct TransposeImpl<Device::CUDA>;

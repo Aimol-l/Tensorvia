@@ -1,0 +1,54 @@
+#version 460
+
+
+#define TILE 32
+
+layout(local_size_x = TILE, local_size_y = TILE, local_size_z = 1) in;
+
+layout(push_constant) uniform Params {
+    uint rows;
+    uint cols;
+} params;
+
+layout(std430, binding = 0) buffer InputA {
+    float data[];
+} src; // [rows][cols]
+
+layout(std430, binding = 1) buffer Output {
+    float data[];
+} dst; // [cols][rows]
+
+// Shared memory tile with padding to avoid bank conflicts
+shared float Tile[TILE][TILE + 1];
+
+void main() {
+    uint wg_x = gl_WorkGroupID.x; // block column index in src
+    uint wg_y = gl_WorkGroupID.y; // block row index in src
+
+    uint tx = gl_LocalInvocationID.x; // thread col in block
+    uint ty = gl_LocalInvocationID.y; // thread row in block
+
+    // Global src indices
+    uint global_src_row = wg_y * TILE + ty;
+    uint global_src_col = wg_x * TILE + tx;
+
+    // Load from src[row][col] into shared memory Tile[ty][tx]
+    if (global_src_row < params.rows && global_src_col < params.cols) {
+        uint src_idx = global_src_row * params.cols + global_src_col;
+        Tile[ty][tx] = src.data[src_idx];
+    } else {
+        Tile[ty][tx] = float(0); // padding
+    }
+
+    // Synchronize: ensure all threads finish loading
+    barrier();
+
+    // Transposed write: thread (tx, ty) writes Tile[tx][ty] to dst[col][row]
+    uint global_dst_row = wg_x * TILE + ty; // = original col
+    uint global_dst_col = wg_y * TILE + tx; // = original row
+
+    if (global_dst_row < params.cols && global_dst_col < params.rows) {
+        uint dst_idx = global_dst_row * params.rows + global_dst_col;
+        dst.data[dst_idx] = Tile[tx][ty]; // 注意：[tx][ty] 而非 [ty][tx]
+    }
+}
