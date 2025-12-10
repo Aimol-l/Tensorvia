@@ -76,9 +76,17 @@ struct TransNDParams{
     int32_t dims;
     int32_t numel;
     int32_t axes[8];
-    int32_t in_strides[8];
+    int32_t in_strides[8];  
     int32_t out_strides[8];
 }; // 102kb
+
+
+struct SliceParams{
+    int32_t input_shape[8];
+    int32_t slice_starts[8];
+    int32_t output_shape[8];
+    int32_t input_strides[8];
+};  // 4*8*4 = 128kb
 
 
 // for: concat
