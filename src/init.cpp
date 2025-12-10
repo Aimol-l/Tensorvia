@@ -110,6 +110,11 @@ struct VulkanRegistrar {
         ctx->registerOp(OpType::Sidmoid,FloatTypes,2,sizeof(int64_t));
         ctx->registerOp(OpType::Softmax,FloatTypes,2,sizeof(SoftmaxParams));
 
+        ctx->registerOp(OpType::Sum,AllTypes,1,sizeof(int64_t));
+        ctx->registerOp(OpType::SumVec,AllTypes,2,sizeof(SoftmaxParams));
+        ctx->registerOp(OpType::Mean,AllTypes,2,sizeof(SoftmaxParams));
+        ctx->registerOp(OpType::Min,AllTypes,1,sizeof(int64_t));
+        ctx->registerOp(OpType::MinVec,AllTypes,2,sizeof(SoftmaxParams));
         ctx->registerOp(OpType::Matmul,AllTypes,3,sizeof(MatmulParams));
 
         ctx->registerOp(OpType::Random,AllTypes,1,sizeof(RandomParams));

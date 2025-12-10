@@ -53,7 +53,7 @@ enum class OpType {
     AddVec,SubVec,DotVec,DivVec,
     Abs,
     Sin,Cos,Tan,Exp,Relu,Silu,Tanh,Sqrt,Sidmoid,Pow,Log,Softmax,
-    Clamp,Sum,Min,Max,Mean,Concat,
+    Clamp,Sum, SumVec,Min, MinVec, Max, MaxVec, Mean,Concat,
     Transpose2d,TransposeNd,Equal,NotEqual,Greater,Less,GreaterEqual,LessEqual,
     All,Any,Nonzero,Argmax,Argmin
 };
@@ -86,8 +86,11 @@ inline const char* op_to_string(OpType op) {
         case OpType::Sqrt:       return "sqrt";
         case OpType::Clamp:     return "clamp";
         case OpType::Sum:       return "sum";
+        case OpType::SumVec:       return "sumvec";
         case OpType::Min:       return "min";
+        case OpType::MinVec:       return "minvec";
         case OpType::Max:       return "max";
+        case OpType::MaxVec:       return "maxvec";
         case OpType::Mean:      return "mean";
         case OpType::Concat:    return "concat";
         case OpType::Transpose2d: return "transpose2d";

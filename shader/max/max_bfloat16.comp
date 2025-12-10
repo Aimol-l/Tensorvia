@@ -1,0 +1,59 @@
+#version 460
+
+// 需要启动bfloat16扩展 和 int64扩展
+#extension GL_EXT_bfloat16 : enable
+#extension GL_EXT_shader_explicit_arithmetic_types : enable
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : enable
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform Params {
+    int64_t numel;
+} params;
+
+
+layout(std430, binding = 0) buffer InputA {
+    bfloat16_t data[];
+}src;
+
+layout(std430, binding = 1) buffer OutputB {
+    bfloat16_t data[];
+}dst;
+
+// 声明共享内存数组，大小与工作组大小相同
+shared bfloat16_t sum_sdata[256];
+
+void main() {
+    uint tid = gl_LocalInvocationID.x;
+    uint idx = gl_GlobalInvocationID.x;
+    uint block_size = gl_WorkGroupSize.x;
+    uint group_size = gl_NumWorkGroups.x * block_size; // 网格中的总线程数 (gridDim.x * blockDim.x)
+    if (int64_t(idx) >= params.numel) return;
+    float sum = 0.0f;
+    for(uint i = tid; i < params.numel; i += group_size) {
+        sum += float(src.data[i]);
+    }
+    // 将每个线程的局部和存储到共享内存中
+    sum_sdata[tid] = bfloat16_t(sum);
+    barrier();
+
+    // 规约
+    for(uint s = block_size / 2; s > 32; s >>= 1) {
+        if (tid < s) {
+            sum_sdata[tid] += sum_sdata[tid + s];
+        }
+        barrier();
+    }
+
+    #pragma unroll
+    for (uint i = 32; i > 0; i >>= 1) {
+        if( tid < i) {
+            sum_sdata[tid] += sum_sdata[tid + i]; // 这里没有 barrier 
+        }
+    }
+
+    if (tid == 0) {
+        dst.data[gl_WorkGroupID.x] = bfloat16_t(sum_sdata[0]);
+    }
+    
+}
