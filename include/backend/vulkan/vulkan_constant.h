@@ -90,13 +90,11 @@ struct SliceParams{
 
 
 // for: concat
-struct ConcatParams{
-    int32_t axis;           //合并维度
-    int32_t dims;           //张量维度
-    int32_t numel;          //张量数量
-    int32_t offsets[4];     //输入张量的偏移量
-    int32_t all_strides[4];
-    int32_t all_shapes[4];
-    int32_t res_coord_weights[4];
+struct CopyParams{
+    int64_t subnumel; // 子张量元素数量
+    int64_t offset; // 目标张量偏移
 };
-
+struct CatParams{
+    int64_t numels[8];   // 每个子张量的元素数量
+    
+};

@@ -18,20 +18,16 @@ __global__ void concat_cuda(
 ) {
     // 计算全局线程索引
     size_t global_idx = blockIdx.x * blockDim.x + threadIdx.x;
-    
     // 计算总元素数
     size_t total_elements = 0;
     for (int i = 0; i < tensor_num; ++i) {
         total_elements += numels[i];
     }
-    
     // 如果索引超出总元素数，直接返回
     if (global_idx >= total_elements) return;
-    
     // 确定当前线程处理哪个张量的哪个元素
     size_t remaining_idx = global_idx;
     int tensor_idx = 0;
-    
     // 找到当前元素属于哪个张量
     for (; tensor_idx < tensor_num; ++tensor_idx) {
         if (remaining_idx < numels[tensor_idx]) {
@@ -39,30 +35,23 @@ __global__ void concat_cuda(
         }
         remaining_idx -= numels[tensor_idx];
     }
-    
     // 获取当前张量的相关信息
     const int* strides = all_strides + tensor_idx * t_dim;
     const void* input_ptr = inputs[tensor_idx];
-    
     // 计算当前元素在输入张量中的坐标
     size_t temp = remaining_idx;
     int coord[8]; // 假设最大维度为8，可根据实际情况调整
-    
     for (int k = 0; k < t_dim; ++k) {
         coord[k] = temp / strides[k];
         temp %= strides[k];
     }
-    
     // 调整拼接维度的坐标
     coord[dim] += offsets[tensor_idx];
-    
     // 计算在输出张量中的线性坐标
     int linear_coord = 0;
     for (int k = 0; k < t_dim; ++k) {
         linear_coord += coord[k] * res_coord_weights[k];
     }
-
-    
     // 赋值操作
     output[linear_coord] = static_cast<const T*>(input_ptr)[remaining_idx];
 }
