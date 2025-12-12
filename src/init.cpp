@@ -115,6 +115,10 @@ struct VulkanRegistrar {
         ctx->registerOp(OpType::Mean,AllTypes,2,sizeof(SoftmaxParams));
         ctx->registerOp(OpType::Min,AllTypes,1,sizeof(int64_t));
         ctx->registerOp(OpType::MinVec,AllTypes,2,sizeof(SoftmaxParams));
+        ctx->registerOp(OpType::Argmax,AllTypes,2,sizeof(SoftmaxParams));
+        ctx->registerOp(OpType::Argmin, AllTypes, 2, sizeof(SoftmaxParams));
+        ctx->registerOp(OpType::All,AllTypes,2,sizeof(ValueParams<float32>));
+        ctx->registerOp(OpType::Any, AllTypes, 2, sizeof(ValueParams<float32>));
         ctx->registerOp(OpType::Matmul,AllTypes,3,sizeof(MatmulParams));
 
         ctx->registerOp(OpType::Random,AllTypes,1,sizeof(RandomParams));

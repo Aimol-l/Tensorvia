@@ -1,0 +1,42 @@
+#version 460
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform Params {
+    int axis_dim;
+    int outer_dim; // 实际上是numel
+    int inner_dim;
+} params;
+
+
+layout(std430, binding = 0) buffer InputA {
+    float data[];
+}src;
+
+layout(std430, binding = 1) buffer OutputB {
+    int data[];
+}dst;
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (int64_t(idx) >= params.outer_dim) return;
+
+    uint outer_idx = idx / params.inner_dim;
+    uint inner_idx = idx % params.inner_dim;
+    uint base_offset = outer_idx * params.inner_dim * params.axis_dim + inner_idx;
+
+    // 初始化共享内存
+    float min_val = src.data[base_offset];
+    int min_idx = 0;
+    // --- 主循环 (4-way 展开) ---
+    for (int i = 0; i < params.axis_dim; ++i) {
+        float val = src.data[base_offset + i * params.inner_dim];
+        if (val < min_val) {
+            min_val = val;
+            min_idx = i;
+        }
+    }
+
+    dst.data[idx] = min_idx;
+}

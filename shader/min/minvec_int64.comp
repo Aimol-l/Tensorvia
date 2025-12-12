@@ -21,9 +21,6 @@ layout(std430, binding = 1) buffer OutputB {
     int64_t data[];
 }dst;
 
-// 定义循环展开因子
-const int UNROLL = 4;
-
 void main() {
     uint idx = gl_GlobalInvocationID.x;
     if (int64_t(idx) >= params.outer_dim) return;
@@ -33,21 +30,12 @@ void main() {
     uint base_offset = outer_idx * params.inner_dim * params.axis_dim + inner_idx;
 
     // 初始化共享内存
-    int64_t acc = int64_t(0);
+    int64_t min_val = src.data[base_offset];
     // --- 主循环 (4-way 展开) ---
-    uint i = 0;
-    for(; i + (UNROLL - 1) < params.axis_dim; i += UNROLL) {
-        int64_t sum_f = int64_t(src.data[base_offset + i * params.inner_dim])
-        + int64_t(src.data[base_offset + (i + 1)* params.inner_dim])
-        + int64_t(src.data[base_offset + (i + 2)* params.inner_dim])
-        + int64_t(src.data[base_offset + (i + 3)* params.inner_dim]);
-        acc += int64_t(sum_f);
-    }
-    
-    for(; i < params.axis_dim; ++i) {
-        acc += int64_t(src.data[base_offset + i * params.inner_dim]);
+    for (uint i = 0; i < params.axis_dim; ++i) {
+        min_val = src.data[base_offset + i * params.inner_dim] < min_val ? src.data[base_offset + i * params.inner_dim] : min_val;
     }
 
-    dst.data[idx] = acc;
+    dst.data[idx] = int64_t(min_val);
 }
 

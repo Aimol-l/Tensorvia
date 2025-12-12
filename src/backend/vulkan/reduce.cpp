@@ -17,6 +17,8 @@ float SumImpl<Device::VULKAN>::execute(const Tensor& a){
         &numel,
         sizeof(int64_t)
     );
+    // 转到host
+    res.to_host();
 
     float sum = 0.0f;
     float* res_ptr = static_cast<float*>(res.data());
@@ -40,7 +42,8 @@ Tensor SumImpl<Device::VULKAN>::execute(const Tensor& a,int axis){
     for(int i = axis + 1; i < dims; ++i){
         inner_dim *= a.shape(i);
     }
-    int outer_dim = 1;
+    int32_t axis_dim = a.shape(axis);
+    int32_t outer_dim = 1;
     for(int i = 0; i < axis; ++i){
         outer_dim *= a.shape(i);
     }
@@ -48,7 +51,7 @@ Tensor SumImpl<Device::VULKAN>::execute(const Tensor& a,int axis){
     auto result_impl = std::dynamic_pointer_cast<VKTensor>(result.get_impl());
 
     SoftmaxParams params{
-        .axis_dim = int32_t(a.shape(axis)),
+        .axis_dim = axis_dim,
         .outer_dim = outer_dim * inner_dim, // 因为实际上要传入的参数刚好和softmax的参数所需要开辟的空间大小一致，所以这里先直接用softmax的params
         .inner_dim = inner_dim
     };
@@ -83,13 +86,14 @@ Tensor MeanImpl<Device::VULKAN>::execute(const Tensor& a,int axis){
     for(int i = axis + 1; i < dims; ++i){
         inner_dim *= a.shape(i);
     }
+    int32_t axis_dim = a.shape(axis);
     int32_t outer_dim = 1;
     for(int i = 0; i < dims; ++i){
         outer_dim *= a.shape(i);
     }
 
     SoftmaxParams params{
-        .axis_dim = int32_t(a.shape(axis)),
+        .axis_dim = axis_dim,
         .outer_dim = outer_dim * inner_dim, // 因为实际上要传入的参数刚好和softmax的参数所需要开辟的空间大小一致，所以这里先直接用softmax的params
         .inner_dim = inner_dim
     };
@@ -120,6 +124,7 @@ float MinImpl<Device::VULKAN>::execute(const Tensor& a){
         &numel,
         sizeof(int64_t)
     );
+    res.to_host();
     float min_val = MAXFLOAT;
     float* res_ptr = static_cast<float*>(res.data());
     for (int i = 0; i < 256; i++) {
@@ -141,7 +146,8 @@ Tensor MinImpl<Device::VULKAN>::execute(const Tensor& a,int axis){
     for(int i = axis + 1; i < dims; ++i){
         inner_dim *= a.shape(i);
     }
-    int outer_dim = 1;
+    int32_t axis_dim = a.shape(axis);
+    int32_t outer_dim = 1;
     for(int i = 0; i < axis; ++i){
         outer_dim *= a.shape(i);
     }
@@ -149,7 +155,7 @@ Tensor MinImpl<Device::VULKAN>::execute(const Tensor& a,int axis){
     auto result_impl = std::dynamic_pointer_cast<VKTensor>(result.get_impl());
 
     SoftmaxParams params{
-        .axis_dim = int32_t(a.shape(axis)),
+        .axis_dim = axis_dim,
         .outer_dim = outer_dim * inner_dim, // 因为实际上要传入的参数刚好和softmax的参数所需要开辟的空间大小一致，所以这里先直接用softmax的params
         .inner_dim = inner_dim
     };
@@ -179,6 +185,7 @@ float MaxImpl<Device::VULKAN>::execute(const Tensor& a){
         &numel,
         sizeof(int64_t)
     );
+    res.to_host();
     float max_val = -MAXFLOAT;
     float* res_ptr = static_cast<float*>(res.data());
     for (int i = 0; i < 256; i++) {
@@ -200,7 +207,8 @@ Tensor MaxImpl<Device::VULKAN>::execute(const Tensor& a,int axis){
     for(int i = axis + 1; i < dims; ++i){
         inner_dim *= a.shape(i);
     }
-    int outer_dim = 1;
+    int32_t axis_dim = a.shape()[axis];
+    int32_t outer_dim = 1;
     for(int i = 0; i < axis; ++i){
         outer_dim *= a.shape(i);
     }
@@ -208,7 +216,7 @@ Tensor MaxImpl<Device::VULKAN>::execute(const Tensor& a,int axis){
     auto result_impl = std::dynamic_pointer_cast<VKTensor>(result.get_impl());
 
     SoftmaxParams params{
-        .axis_dim = int32_t(a.shape(axis)),
+        .axis_dim = axis_dim,
         .outer_dim = outer_dim * inner_dim, // 因为实际上要传入的参数刚好和softmax的参数所需要开辟的空间大小一致，所以这里先直接用softmax的params
         .inner_dim = inner_dim
     };
@@ -227,34 +235,137 @@ Tensor MaxImpl<Device::VULKAN>::execute(const Tensor& a,int axis){
 Tensor ArgMaxImpl<Device::VULKAN>::execute(const Tensor &a, int axis){
     auto src_impl = std::dynamic_pointer_cast<VKTensor>(a.get_impl());
     auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
+    auto a_shape = a.shape();
+    int dim = a_shape.size();
+    int numel = a.numel();
+    int32_t outer_dim = 1;
+    for(int i = 0; i < axis; ++i) outer_dim *= a_shape[i];
+    int32_t axis_dim = a.shape()[axis];
+    int32_t inner_dim = 1;
+    for(int i = axis+1; i < dim; ++i) inner_dim *= a_shape[i];
     // 移除 a.shape(axis) 所在的轴
     std::vector<int64_t> new_shape;
     for (int i = 0; i < a.shape().size(); i++) {
         if (i != axis)  new_shape.push_back(a.shape(i));
     }
     Tensor result(new_shape,DataType::INT32,Device::VULKAN);
+    auto res_impl = std::dynamic_pointer_cast<VKTensor>(result.get_impl());
+
+    SoftmaxParams params{
+        .axis_dim = axis_dim,
+        .outer_dim = numel, // 因为实际上要传入的参数刚好和softmax的参数所需要开辟的空间大小一致，所以这里先直接用softmax的params
+        .inner_dim = inner_dim
+    };
+
+    ctx_impl->submitCompute(
+        OpType::Argmax,
+        a.dtype(),
+        {src_impl->buffer(), res_impl->buffer()},
+        ((numel + 255) / 256), 1, 1,
+        &params,
+        sizeof(SoftmaxParams)
+    );
+
     return result;
 }
 
 Tensor ArgMinImpl<Device::VULKAN>::execute(const Tensor &a, int axis) {
     auto src_impl = std::dynamic_pointer_cast<VKTensor>(a.get_impl());
     auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
+    auto a_shape = a.shape();
+    int dim = a_shape.size();
+    int numel = a.numel();
+    int32_t outer_dim = 1;
+    for(int i = 0; i < axis; ++i) outer_dim *= a_shape[i];
+    int32_t axis_dim = a.shape()[axis];
+    int32_t inner_dim = 1;
+    for(int i = axis+1; i < dim; ++i) inner_dim *= a_shape[i];
+    // 移除 a.shape(axis) 所在的轴
     std::vector<int64_t> new_shape;
-    for (int i = 0; i < a.shape().size(); ++i) {
+    for (int i = 0; i < a.shape().size(); i++) {
         if (i != axis)  new_shape.push_back(a.shape(i));
     }
-    Tensor result(new_shape, DataType::INT32, Device::VULKAN);
+    Tensor result(new_shape,DataType::INT32,Device::VULKAN);
+    auto res_impl = std::dynamic_pointer_cast<VKTensor>(result.get_impl());
+
+    SoftmaxParams params{
+        .axis_dim = axis_dim,
+        .outer_dim = numel, // 因为实际上要传入的参数刚好和softmax的参数所需要开辟的空间大小一致，所以这里先直接用softmax的params
+        .inner_dim = inner_dim
+    };
+
+    ctx_impl->submitCompute(
+        OpType::Argmin,
+        a.dtype(),
+        {src_impl->buffer(), res_impl->buffer()},
+        ((numel + 255) / 256), 1, 1,
+        &params,
+        sizeof(SoftmaxParams)
+    );
+
     return result;
 }
 bool AnyImpl<Device::VULKAN>::execute(const Tensor& a,float val) {
     auto src_impl = std::dynamic_pointer_cast<VKTensor>(a.get_impl());
     auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
-    return false;
+
+    // 无法在函数接口中传 bool 指针，用 Tensor 的 INT8 代替，但是shader中的原子操作不支持int8，暂时这里用int32代替
+    // Tensor result({1},DataType::INT32,Device::VULKAN);
+    auto result = Tensor::Fill({1}, 0, DataType::INT32);
+
+    // 初始化为0
+    auto res_impl = std::dynamic_pointer_cast<VKTensor>(result.get_impl());
+    int32_t numel = a.numel();
+
+    ValueParams<float> params{
+        .value = val,
+        .numel = numel
+    };
+
+    ctx_impl->submitCompute(
+        OpType::Any,
+        a.dtype(),
+        {src_impl->buffer(), res_impl->buffer()},
+        ((numel + 255) / 256), 1, 1,
+        &params,
+        sizeof(params)
+    );
+
+    result.to_host();
+
+    int res = static_cast<int*>(result.data())[0];
+
+
+    return res == 1;
 }
 bool AllImpl<Device::VULKAN>::execute(const Tensor& a,float val) {
     auto src_impl = std::dynamic_pointer_cast<VKTensor>(a.get_impl());
     auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
-    return false;
+    // 无法在函数接口中传 bool 指针，用 Tensor 的 INT8 代替
+    Tensor result = Tensor::Fill({1}, 1, DataType::INT32);
+
+    auto res_impl = std::dynamic_pointer_cast<VKTensor>(result.get_impl());
+    int32_t numel = a.numel();
+
+    ValueParams<float> params{
+        .value = val,
+        .numel = numel
+    };
+
+    ctx_impl->submitCompute(
+        OpType::All,
+        a.dtype(),
+        {src_impl->buffer(), res_impl->buffer()},
+        ((numel + 255) / 256), 1, 1,
+        &params,
+        sizeof(params)
+    );
+
+    result.to_host();
+
+    int res = static_cast<int*>(result.data())[0];
+
+    return res == 1;
 }
 
  template struct SumImpl<Device::VULKAN>;

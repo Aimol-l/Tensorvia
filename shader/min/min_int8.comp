@@ -28,18 +28,18 @@ void main() {
     if (int64_t(idx) >= params.numel) return;
 
     // grid stride
-    int8_t sum = int8_t(0);
+    int8_t min_val = src.data[idx];
     for (uint s = tid; s < params.numel; s += group_size) {
-        sum += src.data[s];
+        min_val = src.data[s] < min_val ? src.data[s] : min_val;
     }
 
     // block stride
-    sharedMem[tid] = sum;
+    sharedMem[tid] = min_val;
     barrier();
 
     for (uint stride = block_size / 2; stride > 32; stride >>= 1) {
         if (tid < stride) {
-            sharedMem[tid] += sharedMem[tid + stride];
+            sharedMem[tid] = sharedMem[tid + stride] < sharedMem[tid] ? sharedMem[tid + stride] : sharedMem[tid];
         }
         barrier();
     }
@@ -47,7 +47,7 @@ void main() {
     #pragma unroll
     for(int i = 32; i > 0; i >>= 1) {
         if( tid < i) {
-            sharedMem[tid] += sharedMem[tid + i];
+            sharedMem[tid] = sharedMem[tid + i] < sharedMem[tid] ? sharedMem[tid + i] : sharedMem[tid];
         }
     }
 

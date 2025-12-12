@@ -18,7 +18,7 @@ layout(std430, binding = 1) buffer OutputB {
     float16_t data[];
 }dst;
 
-shared float16_t sharedMem[256];
+shared float16_t sdata[256];
 
 void main() {
     uint tid = gl_LocalInvocationID.x;
@@ -28,18 +28,18 @@ void main() {
     if (int64_t(idx) >= params.numel) return;
 
     // grid stride
-    float16_t sum = float16_t(0.0);
+    float16_t min_val = src.data[idx];
     for (uint s = tid; s < params.numel; s += group_size) {
-        sum += src.data[s];
+        min_val = src.data[s] < min_val ? src.data[s] : min_val;
     }
 
     // block stride
-    sharedMem[tid] = sum;
+    sdata[tid] = min_val;
     barrier();
 
     for (uint stride = block_size / 2; stride > 32; stride >>= 1) {
         if (tid < stride) {
-            sharedMem[tid] += sharedMem[tid + stride];
+            sdata[tid] = sdata[tid + stride] < sdata[tid] ? sdata[tid + stride] : sdata[tid];
         }
         barrier();
     }
@@ -47,12 +47,12 @@ void main() {
     #pragma unroll
     for(int i = 32; i > 0; i >>= 1) {
         if( tid < i) {
-            sharedMem[tid] += sharedMem[tid + i];
+            sdata[tid] = sdata[tid + i] < sdata[tid] ? sdata[tid + i] : sdata[tid];
         }
     }
 
     if (tid == 0) {
-        dst.data[gl_WorkGroupID.x] = float16_t(sharedMem[0]);
+        dst.data[gl_WorkGroupID.x] = float16_t(sdata[0]);
     }
 
 }
