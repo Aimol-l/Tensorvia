@@ -94,7 +94,12 @@ struct CopyParams{
     int64_t subnumel; // 子张量元素数量
     int64_t offset; // 目标张量偏移
 };
-struct CatParams{
-    int64_t numels[8];   // 每个子张量的元素数量
-    
+struct ConcatParams {
+    uint32_t  num;
+    uint32_t  axis;
+    uint32_t offsets[8];
+    uint32_t prefix_sum[9];
+    uint32_t input_sizes[8];
+    uint32_t output_strides[8];
+    uint32_t input_strides[8][8];
 };

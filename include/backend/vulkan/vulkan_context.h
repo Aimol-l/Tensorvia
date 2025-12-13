@@ -69,6 +69,97 @@ public:
     void registerOp(OpType ops,std::vector<DataType>& Dtypes,int tensor_count, int params_size);
     void registerOp(OpType ops,DataType Dtype,int tensor_count, int params_size);
 
+
+    template<typename T>
+    vk::Buffer createBuffer(const T data){
+        vk::BufferCreateInfo bufferInfo;
+        bufferInfo.setSize(sizeof(T))
+                  .setUsage(vk::BufferUsageFlagBits::eStorageBuffer |
+                            vk::BufferUsageFlagBits::eTransferDst |   // for clone / copy_from_host
+                            vk::BufferUsageFlagBits::eTransferSrc);   // for copy_to / clone
+        // 1. 创建 buffer
+        vk::Buffer buffer = m_device.createBuffer(bufferInfo);
+        // 2. 分配显存
+        vk::MemoryRequirements memReqs = m_device.getBufferMemoryRequirements(buffer);
+        vk::PhysicalDeviceMemoryProperties memProps = m_phydevice.getMemoryProperties();
+        uint32_t memoryTypeIndex = 0;
+        bool found = false;
+        vk::MemoryPropertyFlags desiredFlags = vk::MemoryPropertyFlagBits::eDeviceLocal;
+        for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
+            if ((memReqs.memoryTypeBits & (1 << i)) &&
+                (memProps.memoryTypes[i].propertyFlags & desiredFlags) == desiredFlags) {
+                memoryTypeIndex = i;
+                found = true;
+                break;
+            }
+        }
+        if(!found){
+            m_device.destroyBuffer(buffer);
+            throw std::runtime_error("Can't allocate device memory");
+        }
+        vk::MemoryAllocateInfo allocInfo{};
+        allocInfo.setAllocationSize(memReqs.size).setMemoryTypeIndex(memoryTypeIndex);
+        vk::DeviceMemory memory = m_device.allocateMemory(allocInfo);
+        m_device.bindBufferMemory(buffer, memory, 0);
+        // 3. 创建暂存区
+        vk::Buffer stagingBuffer;
+        vk::DeviceMemory stagingMemory;
+        vk::BufferCreateInfo stagingInfo{};
+        stagingInfo.setSize(sizeof(T)).setUsage(vk::BufferUsageFlagBits::eTransferSrc);
+        stagingBuffer = m_device.createBuffer(stagingInfo);
+        vk::MemoryRequirements stagingReqs = m_device.getBufferMemoryRequirements(stagingBuffer);
+        uint32_t stagingMemoryType = 0;
+        found = false;
+        vk::MemoryPropertyFlags hostFlags = vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent;
+        for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
+            if ((stagingReqs.memoryTypeBits & (1 << i)) &&
+                (memProps.memoryTypes[i].propertyFlags & hostFlags) == hostFlags) {
+                stagingMemoryType = i;
+                found = true;
+                break;
+            }
+        }
+        if(!found){
+            device.destroyBuffer(stagingBuffer);
+            throw std::runtime_error("Can't allocate host memory");
+        }
+        vk::MemoryAllocateInfo stagingAlloc{};
+        stagingAlloc.setAllocationSize(stagingReqs.size)
+                    .setMemoryTypeIndex(stagingMemoryType);
+        stagingMemory = device.allocateMemory(stagingAlloc);
+        device.bindBufferMemory(stagingBuffer, stagingMemory, 0);
+        // 4. copy host data to staging buffer
+        void* mappedData = device.mapMemory(stagingMemory, 0, sizeof(T));
+        std::memcpy(mappedData, &data, sizeof(T));
+        device.unmapMemory(stagingMemory);
+        // 5. copy staging buffer to device buffer
+        vk::CommandBufferAllocateInfo allocInfo{};
+        allocInfo.setCommandPool(m_command_pool)
+                 .setLevel(vk::CommandBufferLevel::ePrimary)
+                 .setCommandBufferCount(1);
+        vk::CommandBuffer cmd = device.allocateCommandBuffers(allocInfo)[0];
+        vk::CommandBufferBeginInfo beginInfo{};
+        beginInfo.setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
+        cmd.begin(beginInfo);
+        vk::BufferCopy copyRegion{};
+        copyRegion.setSize(sizeof(T));
+        cmd.copyBuffer(stagingBuffer, buffer, copyRegion);
+        cmd.end();
+        // 6. submit and wait
+        vk::SubmitInfo submitInfo{};
+        submitInfo.setCommandBuffers(cmd);
+        vk::Fence fence = m_device.createFence({});
+        m_compute_queue.submit(submitInfo, fence);
+        vk::Result res = m_device.waitForFences(fence, VK_TRUE, UINT64_MAX);
+        // 7. cleanup staging
+        m_device.destroyFence(fence);
+        m_device.freeCommandBuffers(m_command_pool, cmd);
+        device.freeMemory(stagingMemory);
+        device.destroyBuffer(stagingBuffer);
+        // 8. return buffer and memory
+        return buffer;
+    }
+
     // 高层接口：用户只需传 buffer
     void submitCompute(
         OpType op,
@@ -78,7 +169,6 @@ public:
         const void* push_constants,
         size_t push_size
     );
-    void printPipeLines();
 private:
     void createInstance();
     void setupDebugMessenger();

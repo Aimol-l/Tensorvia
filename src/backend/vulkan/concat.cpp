@@ -17,7 +17,7 @@ Tensor ConcatImpl<Device::VULKAN>::execute(const std::vector<Tensor> &tensors, i
         output_shape[dim] += t.shape()[dim];
     }
     // 3. 创建输出张量
-    // Tensor tmp(output_shape, dtype, Device::VULKAN);
+    Tensor tmp(output_shape, dtype, Device::VULKAN);
     Tensor res(output_shape, dtype, Device::VULKAN);
 
     // 4. 获取VULKAN队列
@@ -49,7 +49,40 @@ Tensor ConcatImpl<Device::VULKAN>::execute(const std::vector<Tensor> &tensors, i
         );
     }
     // 已经把所有子张量复制到目标张量，可以开始concat了
-    
+    // 6. 准备Concat参数
+    ConcatParams concat_params;
+    concat_params.num = static_cast<uint32_t>(tensors.size());
+    concat_params.axis = static_cast<uint32_t>(dim);
+    for(int i = 0;i<tensors.size();i++){
+        concat_params.offsets[i] = static_cast<uint32_t>(offsets[i]);
+        concat_params.input_sizes[i] = static_cast<uint32_t>(tensors[i].shape(dim));
+        // 获取输入张量的stride
+        auto in_strides = tensors[i].strides();
+        for(int j =0;j<in_strides.size();j++){
+            concat_params.input_strides[i][j] = static_cast<uint32_t>(in_strides[j]);
+        }
+    }
+    for(int i =0;i<output_shape.size();i++){
+        concat_params.output_strides[i] = static_cast<uint32_t>(res.strides(i));
+    }
+    auto params_buffer = ctx_impl->createBuffer<ConcatParams>(concat_params);
+    // 7. 调用Vulkan计算管线执行concat
+    constexpr int THREADS = 128;
+    constexpr int BLOCK_SIZE = 64;
+    // ceil(10000 / (64*128)) = 2
+    uint32_t gx = std::ceil(res.numel() / float(BLOCK_SIZE * THREADS));
+
+    auto tmp_impl = std::dynamic_pointer_cast<VKTensor>(tmp.get_impl());
+    ctx_impl->submitCompute(    
+        OpType::Concat,
+        dtype,
+        {params_buffer, tmp_impl->buffer(), dst_impl->buffer()},
+        gx, 1, 1,
+        nullptr,0
+    );
+
+
+
     return res;
 }
 

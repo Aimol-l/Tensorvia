@@ -58,6 +58,9 @@ public:
     void to_host();
     void to_device(uint32_t id=0);
 
+    int64_t strides(int i) const;
+    std::vector<int64_t> strides()const;
+
     Tensor& to_contiguous();
     Tensor contiguous()const;
     bool is_contiguous()const;

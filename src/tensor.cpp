@@ -506,6 +506,19 @@ void Tensor::to_device(uint32_t id){
 #endif
 }
 
+int64_t Tensor:: strides(int i) const{
+    // 判断合法性
+    if(i > this->m_meta.shape.size() -1 || i < -this->m_meta.shape.size())
+        throw std::runtime_error("index out of range");
+    if(i <0) return this->m_meta.strides[this->m_meta.shape.size()+i];
+    return this->m_meta.strides[i];
+}
+
+std::vector<int64_t> Tensor::strides() const{
+    return this->m_meta.strides;
+}
+
+
 Tensor Tensor::empty_like(Tensor& tensor) const{
     return Tensor(tensor.shape(),this->m_meta.dtype,this->m_meta.device);
 }
@@ -599,7 +612,6 @@ Tensor Tensor::Random(std::vector<int64_t> shape, float min, float max, DataType
     return ops::Random(shape,dtype,min,max);
 }
 
-
 template <typename T>
 T Tensor::at(std::initializer_list<int64_t> idxs){
     if(this->device() != Device::CPU) 
@@ -679,6 +691,7 @@ Tensor& Tensor::unsqueeze(size_t dim){
 }
 
 
+
 Tensor Tensor::operator==(const Tensor& other) const{
     return ops::Equal(*this,other);
 }
@@ -727,6 +740,9 @@ Tensor Tensor::operator<=(const float val) const{
     Tensor t = ops::Fill(this->m_meta.shape, DataType::FLOAT32, val);
     return ops::LessEqual(*this,t);
 }
+
+
+
 
 template int8_t Tensor::at<int8_t>(std::initializer_list<int64_t> idxs);
 template int16_t Tensor::at<int16_t>(std::initializer_list<int64_t> idxs);

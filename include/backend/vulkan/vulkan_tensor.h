@@ -28,7 +28,6 @@ public:
     const void* data() const;    // 不要具体使用这个指针！！！！
     vk::Buffer buffer() const { return m_buffer; }      // 用这个！
 
-
     size_t numel() const override{return m_numel;}
     void copy_to(std::shared_ptr<TensorImpl> dst) const override;
     std::unique_ptr<TensorImpl> clone() const override;

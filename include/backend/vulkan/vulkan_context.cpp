@@ -379,17 +379,17 @@ std::vector<uint32_t> VulkanContext::readSpvFile(const std::string& filename) {
 }
 
 
-void VulkanContext::printPipeLines(){
-    for(auto[key,val]:m_pipelines){
-        std::println("compute line: {}",key);
-    }
-    for(auto[key,val]:m_pipeline_layouts){
-        std::println("compute line layout: {}",key);
-    }
-    for(auto[key,val]:m_descriptor_set_layouts){
-        std::println("m_descriptor_set_layouts: {}",key);
-    }
-}
+// void VulkanContext::printPipeLines(){
+//     for(auto[key,val]:m_pipelines){
+//         std::println("compute line: {}",key);
+//     }
+//     for(auto[key,val]:m_pipeline_layouts){
+//         std::println("compute line layout: {}",key);
+//     }
+//     for(auto[key,val]:m_descriptor_set_layouts){
+//         std::println("m_descriptor_set_layouts: {}",key);
+//     }
+// }
 
 // relu,float32,buffers,gx,gy,gz,...
 void VulkanContext::submitCompute(
