@@ -3,15 +3,16 @@
 
 namespace ops {
 
+// 1.先把n个张量按照顺序复制到一个大的temp tensor里面，同时记录offsets[n]。
+// 2.把temp tensor concat 到 res tensor 里面。
 Tensor ConcatImpl<Device::VULKAN>::execute(const std::vector<Tensor> &tensors, int dim) {
     // 最大支持8个张量拼接
     if(tensors.size() > 8){
         throw std::runtime_error("Vulkan Concat only support max 8 tensors!");
     }
-    const auto& first_shape = tensors[0].shape();
     DataType dtype = tensors[0].dtype();
     // 2. 计算输出张量的形状
-    std::vector<int64_t> output_shape = first_shape;
+    std::vector<int64_t> output_shape = tensors[0].shape();
     output_shape[dim] = 0;
     for (const auto& t : tensors) {
         output_shape[dim] += t.shape()[dim];
@@ -21,17 +22,19 @@ Tensor ConcatImpl<Device::VULKAN>::execute(const std::vector<Tensor> &tensors, i
     Tensor res(output_shape, dtype, Device::VULKAN);
 
     // 4. 获取VULKAN队列
+    auto temp_impl = std::dynamic_pointer_cast<VKTensor>(tmp.get_impl());
     auto dst_impl = std::dynamic_pointer_cast<VKTensor>(res.get_impl());
-    auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(dst_impl->context());
+
+    auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(temp_impl->context());
 
     // 5.先把所有的tensor复制到tmp里面，同时记录offsets
-    std::vector<int64_t> offsets(tensors.size(),0);
+    std::vector<uint32_t> offsets(tensors.size(),0);
     for(int i = 1;i<tensors.size();i++){
-        offsets[i] = tensors[i-1].numel() + offsets[i-1];
+        offsets[i] = uint32_t(tensors[i-1].numel()) + offsets[i-1];
     }
     for(int i = 0;i<tensors.size();i++){
         CopyParams params{
-            .subnumel = tensors[i].numel(),
+            .subnumel = uint32_t(tensors[i].numel()),
             .offset = offsets[i]
         };
         auto src_impl = std::dynamic_pointer_cast<VKTensor>(tensors[i].get_impl());
@@ -42,7 +45,7 @@ Tensor ConcatImpl<Device::VULKAN>::execute(const std::vector<Tensor> &tensors, i
         ctx_impl->submitCompute(
             OpType::ConcatAdd,
             dtype,
-            {dst_impl->buffer(),src_impl->buffer()},
+            {temp_impl->buffer(),src_impl->buffer()},
             gx, 1, 1,
             &params,
             sizeof(CopyParams)
@@ -67,22 +70,14 @@ Tensor ConcatImpl<Device::VULKAN>::execute(const std::vector<Tensor> &tensors, i
     }
     auto params_buffer = ctx_impl->createBuffer<ConcatParams>(concat_params);
     // 7. 调用Vulkan计算管线执行concat
-    constexpr int THREADS = 128;
-    constexpr int BLOCK_SIZE = 64;
-    // ceil(10000 / (64*128)) = 2
-    uint32_t gx = std::ceil(res.numel() / float(BLOCK_SIZE * THREADS));
-
     auto tmp_impl = std::dynamic_pointer_cast<VKTensor>(tmp.get_impl());
     ctx_impl->submitCompute(    
         OpType::Concat,
         dtype,
         {params_buffer, tmp_impl->buffer(), dst_impl->buffer()},
-        gx, 1, 1,
+        (res.numel() + 255) / 256, 1, 1,
         nullptr,0
     );
-
-
-
     return res;
 }
 

@@ -1,26 +1,67 @@
 #version 460
-
-#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#define MAX_INPUTS 8
+#define MAX_DIMS 6
 
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
+struct ConcatParams {
+    uint num;                           // 输入 tensor 数量 (≤8)
+    uint axis;                          // 拼接维度 (0~5)
+    uint offsets[MAX_INPUTS];           // 每个输入在 big_input 中的偏移（元素数）
+    uint prefix_sum[MAX_INPUTS + 1];    // 前缀和，prefix_sum[0]=0
+    uint output_strides[MAX_DIMS];      // 输出 tensor 的 strides
+    uint input_strides[MAX_INPUTS][MAX_DIMS]; // 每个输入的 strides
+};
 
-layout(push_constant) uniform Params {
-
+layout(std430, binding = 0) readonly buffer Params {
+    ConcatParams data;
 } params;
 
-
-layout(std430, binding = 0) writeonly buffer Src {
+layout(std430, binding = 1) readonly buffer Input {
     float data[];
-} a;
+}big_input;
 
-layout(std430, binding = 1) readonly buffer Dst {
+layout(std430, binding = 2) writeonly buffer Output {
     float data[];
-} b;
+}res;
 
-
-void main(){
-
-
-    
+void main() {
+    uint gid = gl_GlobalInvocationID.x;
+    // === Step 1: gid → output_coords ===
+    uint temp = gid;
+    uint output_coords[MAX_DIMS];
+    for (uint i = 0; i < MAX_DIMS; ++i) {
+        // 注意：output_strides 中未使用的维度为 0
+        if (params.data.output_strides[i] == 0u) {
+            output_coords[i] = 0u;
+        } else {
+            output_coords[i] = temp / params.data.output_strides[i];
+            temp = temp % params.data.output_strides[i];
+        }
+    }
+    // === Step 2: 找到 axis 维坐标 ===
+    uint c_axis = output_coords[params.data.axis];
+    // === Step 3: 用 prefix_sum 找到来源 tensor ===
+    uint src_tensor_idx = 0u;
+    for (uint i = 0u; i < params.data.num; ++i) {
+        if (c_axis < params.data.prefix_sum[i + 1]) {
+            src_tensor_idx = i;
+            break;
+        }
+    }
+    // === Step 4: 计算在源 tensor 中的局部坐标 ===
+    uint local_axis = c_axis - params.data.prefix_sum[src_tensor_idx];
+    uint src_coords[MAX_DIMS];
+    for (uint i = 0u; i < MAX_DIMS; ++i) {
+        src_coords[i] = output_coords[i];
+    }
+    src_coords[params.data.axis] = local_axis;
+    // === Step 5: src_coords → src_linear_idx ===
+    uint src_linear = 0u;
+    for (uint i = 0u; i < MAX_DIMS; ++i) {
+        src_linear += src_coords[i] * params.data.input_strides[src_tensor_idx][i];
+    }
+    // === Step 6: 从 big_input 读取，写入 output ===
+    uint global_src_idx = params.data.offsets[src_tensor_idx] + src_linear;
+    res.data[gid] = big_input.data[global_src_idx];
 }

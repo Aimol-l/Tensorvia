@@ -91,8 +91,8 @@ struct SliceParams{
 
 // for: concat
 struct CopyParams{
-    int64_t subnumel; // 子张量元素数量
-    int64_t offset; // 目标张量偏移
+    uint32_t subnumel; // 子张量元素数量
+    uint32_t offset; // 目标张量偏移
 };
 struct ConcatParams {
     uint32_t  num;
