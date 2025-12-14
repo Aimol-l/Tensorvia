@@ -14,9 +14,9 @@ Tensor SliceImpl<Device::VULKAN>::execute(const Tensor& t, const std::vector<std
     // 4. 获取VULKAN队列
     auto src_impl = std::dynamic_pointer_cast<VKTensor>(t.get_impl());
     auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
+
     return res;
 }
-
 template struct SliceImpl<Device::VULKAN>;
 
 }

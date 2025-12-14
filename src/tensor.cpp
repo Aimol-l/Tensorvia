@@ -508,9 +508,9 @@ void Tensor::to_device(uint32_t id){
 
 int64_t Tensor:: strides(int i) const{
     // 判断合法性
-    if(i > this->m_meta.shape.size() -1 || i < -this->m_meta.shape.size())
-        throw std::runtime_error("index out of range");
-    if(i <0) return this->m_meta.strides[this->m_meta.shape.size()+i];
+    // if(i >= this->m_meta.strides.size() || i < -this->m_meta.strides.size())
+        // throw std::runtime_error("index out of range");
+    // if(i <0) return this->m_meta.strides[this->m_meta.strides.size()+i];
     return this->m_meta.strides[i];
 }
 

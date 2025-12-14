@@ -47,7 +47,6 @@ Tensor GreaterEqualImpl<Device::VULKAN>::execute(const Tensor& a,const Tensor& b
     auto A = data_as_const_variant(a.dtype(),a.data());
     auto B = data_as_const_variant(b.dtype(),b.data());
     Tensor res(a.shape(), DataType::INT8, Device::VULKAN);
-
     return res;
 }
 Tensor LessEqualImpl<Device::VULKAN>::execute(const Tensor& a,const Tensor& b) {

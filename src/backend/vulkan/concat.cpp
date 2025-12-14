@@ -1,4 +1,5 @@
 ﻿#include <limits>
+#include <ops.h>
 #include "backend/vulkan/ops/concat.h"
 
 namespace ops {
@@ -51,6 +52,7 @@ Tensor ConcatImpl<Device::VULKAN>::execute(const std::vector<Tensor> &tensors, i
             sizeof(CopyParams)
         );
     }
+    ops::println(tmp);
     // 已经把所有子张量复制到目标张量，可以开始concat了
     // 6. 准备Concat参数
     ConcatParams concat_params;
@@ -65,7 +67,7 @@ Tensor ConcatImpl<Device::VULKAN>::execute(const std::vector<Tensor> &tensors, i
             concat_params.input_strides[i][j] = static_cast<uint32_t>(in_strides[j]);
         }
     }
-    for(int i =0;i<output_shape.size();i++){
+    for(int i =0;i<res.strides().size();i++){
         concat_params.output_strides[i] = static_cast<uint32_t>(res.strides(i));
     }
     auto params_buffer = ctx_impl->createBuffer<ConcatParams>(concat_params);

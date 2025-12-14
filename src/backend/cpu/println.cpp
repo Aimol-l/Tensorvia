@@ -21,8 +21,8 @@ inline void _println(const Tensor& a) {
     }
     const T* data = static_cast<const T*>(a.data());
 
-    constexpr size_t elements = 3;
-    constexpr size_t max_elements_per_dim = 7;
+    constexpr size_t elements = 2;
+    constexpr size_t max_elements_per_dim = 5;
 
     size_t total_dims = shape.size();
     std::vector<size_t> strides(total_dims, 1);

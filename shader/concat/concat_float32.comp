@@ -63,5 +63,6 @@ void main() {
     }
     // === Step 6: 从 big_input 读取，写入 output ===
     uint global_src_idx = params.data.offsets[src_tensor_idx] + src_linear;
-    res.data[gid] = big_input.data[global_src_idx];
+    // res.data[gid] = big_input.data[global_src_idx];
+    res.data[gid] = params.data.axis;
 }
