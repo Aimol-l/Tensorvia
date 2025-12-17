@@ -110,6 +110,7 @@ struct VulkanRegistrar {
 
         ctx->registerOp(OpType::Sum,AllTypes,1,sizeof(int64_t));
         ctx->registerOp(OpType::SumVec,AllTypes,2,sizeof(SoftmaxParams));
+        
         ctx->registerOp(OpType::Mean,AllTypes,2,sizeof(SoftmaxParams));
         ctx->registerOp(OpType::Min,AllTypes,1,sizeof(int64_t));
         ctx->registerOp(OpType::MinVec,AllTypes,2,sizeof(SoftmaxParams));
@@ -122,8 +123,7 @@ struct VulkanRegistrar {
         ctx->registerOp(OpType::Random,AllTypes,1,sizeof(RandomParams));
         ctx->registerOp(OpType::Fill,AllTypes,1,sizeof(ValueParams<float32>));
 
-        ctx->registerOp(OpType::ConcatAdd,DataType::FLOAT32,2,sizeof(CopyParams));
-        ctx->registerOp(OpType::Concat,DataType::FLOAT32,3,0); // 输入参数包装到第一个buffer里了
+        ctx->registerOp(OpType::Concat,AllTypes,10,0); // 输入参数包装到第一个buffer里了
 
         // 注册vulkan后端
         register_tensor_impl(Device::VULKAN, [&](void* ptr,int64_t numel, DataType dtype) {
