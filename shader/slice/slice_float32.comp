@@ -1,0 +1,49 @@
+#version 460
+
+#define MAX_DIMS 6
+
+layout(local_size_x = 256) in;
+
+layout(push_constant) uniform Params {
+    uint ndim;
+    uint slice_dims;
+    uint input_shape[MAX_DIMS];
+    uint output_shape[MAX_DIMS];
+    uint input_strides[MAX_DIMS];
+    uint slice_starts[MAX_DIMS];
+}p;
+
+layout(std430, binding = 0) readonly buffer Input {
+    float data[];
+} input0;
+
+layout(std430, binding = 1) writeonly buffer Output {
+    float data[];
+} output0;
+
+void main() {
+    uint gid = gl_GlobalInvocationID.x;
+    // output numel
+    uint total = 1;
+    for (uint i = 0; i < p.ndim; ++i)
+        total *= p.output_shape[i];
+    if (gid >= total)
+        return;
+    // linear -> coord
+    uint coord[MAX_DIMS];
+    uint tmp = gid;
+    for (int i = int(p.ndim) - 1; i >= 0; --i) {
+        uint s = p.output_shape[i];
+        coord[i] = (s > 1u) ? tmp % s : 0u;
+        tmp /= max(s, 1u);
+    }
+    // coord -> input linear
+    uint src = 0;
+    for (uint i = 0; i < p.ndim; ++i) {
+        uint c = coord[i];
+        if (i < p.slice_dims)
+            c += p.slice_starts[i];
+        src += c * p.input_strides[i];
+    }
+    output0.data[gid] = input0.data[src];
+}

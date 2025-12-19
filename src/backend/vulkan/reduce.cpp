@@ -5,6 +5,8 @@ namespace ops {
 float SumImpl<Device::VULKAN>::execute(const Tensor& a){
     auto src_impl = std::dynamic_pointer_cast<VKTensor>(a.get_impl());
     auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
+
+    
     int64_t numel = a.numel();
     Tensor res({256},a.dtype(),Device::VULKAN);
     auto res_impl = std::dynamic_pointer_cast<VKTensor>(res.get_impl());
@@ -50,9 +52,10 @@ Tensor SumImpl<Device::VULKAN>::execute(const Tensor& a,int axis){
     Tensor result(new_shape, a.dtype(), Device::VULKAN);  // 再考虑一下a 是int8_t的时候res应该是int8_t还是int32_t
     auto result_impl = std::dynamic_pointer_cast<VKTensor>(result.get_impl());
 
+    // 因为实际上要传入的参数刚好和softmax的参数所需要开辟的空间大小一致，所以这里先直接用softmax的params
     SoftmaxParams params{
         .axis_dim = axis_dim,
-        .outer_dim = outer_dim * inner_dim, // 因为实际上要传入的参数刚好和softmax的参数所需要开辟的空间大小一致，所以这里先直接用softmax的params
+        .outer_dim = outer_dim * inner_dim, 
         .inner_dim = inner_dim
     };
 

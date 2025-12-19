@@ -21,7 +21,7 @@ layout(std430, binding = 1) buffer OutputB {
 }dst;
 
 // 声明共享内存数组，大小与工作组大小相同
-shared bfloat16_t sum_sdata[256];
+shared float sum_sdata[256];
 
 void main() {
     uint tid = gl_LocalInvocationID.x;
@@ -34,9 +34,8 @@ void main() {
         sum += float(src.data[i]);
     }
     // 将每个线程的局部和存储到共享内存中
-    sum_sdata[tid] = bfloat16_t(sum);
+    sum_sdata[tid] = float(sum);
     barrier();
-
     // 规约
     for(uint s = block_size / 2; s > 32; s >>= 1) {
         if (tid < s) {
@@ -44,14 +43,12 @@ void main() {
         }
         barrier();
     }
-
     #pragma unroll
     for (uint i = 32; i > 0; i >>= 1) {
         if( tid < i) {
             sum_sdata[tid] += sum_sdata[tid + i]; // 这里没有 barrier 
         }
     }
-
     if (tid == 0) {
         dst.data[gl_WorkGroupID.x] = bfloat16_t(sum_sdata[0]);
     }

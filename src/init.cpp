@@ -108,14 +108,17 @@ struct VulkanRegistrar {
         ctx->registerOp(OpType::Sidmoid,FloatTypes,2,sizeof(int64_t));
         ctx->registerOp(OpType::Softmax,FloatTypes,2,sizeof(SoftmaxParams));
 
-        ctx->registerOp(OpType::Sum,AllTypes,1,sizeof(int64_t));
+        ctx->registerOp(OpType::Sum,AllTypes,2,sizeof(int64_t));
         ctx->registerOp(OpType::SumVec,AllTypes,2,sizeof(SoftmaxParams));
         
         ctx->registerOp(OpType::Mean,AllTypes,2,sizeof(SoftmaxParams));
-        ctx->registerOp(OpType::Min,AllTypes,1,sizeof(int64_t));
+        ctx->registerOp(OpType::Min,AllTypes,2,sizeof(int64_t));
         ctx->registerOp(OpType::MinVec,AllTypes,2,sizeof(SoftmaxParams));
         ctx->registerOp(OpType::Argmax,AllTypes,2,sizeof(SoftmaxParams));
         ctx->registerOp(OpType::Argmin, AllTypes, 2, sizeof(SoftmaxParams));
+        ctx->registerOp(OpType::Max,AllTypes,2,sizeof(int64_t));
+        ctx->registerOp(OpType::MaxVec,AllTypes,2,sizeof(SoftmaxParams));
+
         ctx->registerOp(OpType::All,AllTypes,2,sizeof(ValueParams<float32>));
         ctx->registerOp(OpType::Any, AllTypes, 2, sizeof(ValueParams<float32>));
         ctx->registerOp(OpType::Matmul,AllTypes,3,sizeof(MatmulParams));
@@ -124,6 +127,10 @@ struct VulkanRegistrar {
         ctx->registerOp(OpType::Fill,AllTypes,1,sizeof(ValueParams<float32>));
 
         ctx->registerOp(OpType::Concat,AllTypes,10,0); // 输入参数包装到第一个buffer里了
+
+        ctx->registerOp(OpType::Slice,AllTypes,2,sizeof(SliceParams));
+        ctx->registerOp(OpType::Repack,DataType::INT8,2,sizeof(SliceParams));
+
 
         // 注册vulkan后端
         register_tensor_impl(Device::VULKAN, [&](void* ptr,int64_t numel, DataType dtype) {

@@ -51,7 +51,7 @@ enum class OpType {
     Matmul,
     Add,Sub,Dot,Div,
     AddVec,SubVec,DotVec,DivVec,
-    Abs,
+    Abs,Repack,
     Sin,Cos,Tan,Exp,Relu,Silu,Tanh,Sqrt,Sidmoid,Pow,Log,Softmax,
     Clamp,Sum, SumVec,Min, MinVec, Max, MaxVec, Mean,Concat,
     Transpose2d,TransposeNd,Equal,NotEqual,Greater,Less,GreaterEqual,LessEqual,
@@ -95,6 +95,7 @@ inline const char* op_to_string(OpType op) {
         case OpType::Concat:    return "concat";
         case OpType::Transpose2d: return "transpose2d";
         case OpType::TransposeNd: return "transposeNd";
+        case OpType::Repack: return "repack";
         case OpType::Equal:     return "equal";
         case OpType::NotEqual:  return "not_equal";
         case OpType::Greater:    return "greater";

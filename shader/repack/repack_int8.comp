@@ -1,0 +1,51 @@
+#version 460
+
+#define MAX_DIMS 6
+
+#extension GL_EXT_shader_8bit_storage : require
+#extension GL_EXT_shader_explicit_arithmetic_types : require
+
+layout(local_size_x = 256) in;
+
+layout(push_constant) uniform Params {
+    uint ndim;
+    uint dtype_size;
+    uint numel;
+    uint shape[MAX_DIMS];
+    uint strides[MAX_DIMS];
+}p;
+
+layout(std430, binding = 0) writeonly buffer Dst {
+    uint8_t data[];
+} dst;
+
+layout(std430, binding = 1) readonly buffer Src {
+    uint8_t data[];
+} src;
+
+void main() {
+    uint gid = gl_GlobalInvocationID.x;
+    if (gid >= p.numel)
+        return;
+
+    // linear -> coord
+    uint coord[MAX_DIMS];
+    uint tmp = gid;
+    for (int i = int(p.ndim) - 1; i >= 0; --i) {
+        uint s = p.shape[i];
+        coord[i] = (s > 1u) ? tmp % s : 0u;
+        tmp /= max(s, 1u);
+    }
+
+    // coord -> src linear
+    uint src_linear = 0;
+    for (uint i = 0; i < p.ndim; ++i)
+        src_linear += coord[i] * p.strides[i];
+
+    uint src_byte = src_linear * p.dtype_size;
+    uint dst_byte = gid * p.dtype_size;
+
+    // byte copy
+    for (uint b = 0; b < p.dtype_size; ++b)
+        dst.data[dst_byte + b] = src.data[src_byte + b];
+}

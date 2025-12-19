@@ -80,29 +80,11 @@ struct TransNDParams{
     int32_t out_strides[8];
 }; // 102kb
 
-
-struct SliceParams{
-    int32_t input_shape[8];
-    int32_t slice_starts[8];
-    int32_t output_shape[8];
-    int32_t input_strides[8];
-};  // 4*8*4 = 128kb
-
-
 // for: concat
 struct CopyParams{
     uint32_t subnumel; // 子张量元素数量
     uint32_t offset; // 目标张量偏移
 };
-// struct ConcatParams {
-//     uint32_t  num;
-//     uint32_t  axis;
-//     uint32_t offsets[8];
-//     uint32_t prefix_sum[9];
-//     uint32_t input_sizes[8];
-//     uint32_t output_strides[8];
-//     uint32_t input_strides[8][8];
-// };
 
 struct ConcatParams {
     uint32_t num;
@@ -111,4 +93,21 @@ struct ConcatParams {
     uint32_t output_shape[6];
     uint32_t output_strides[6];
     uint32_t input_strides[8][6];
+};
+
+struct SliceParams {
+    uint32_t ndim;
+    uint32_t slice_dims;
+    uint32_t input_shape[6];
+    uint32_t output_shape[6];
+    uint32_t input_strides[6];
+    uint32_t slice_starts[6];
+};
+
+struct RepackParams {
+    uint32_t ndim;
+    uint32_t dtype_size;
+    uint32_t numel;
+    uint32_t shape[6];
+    uint32_t strides[6];
 };

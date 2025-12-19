@@ -1,4 +1,5 @@
 ﻿#include "vulkan_tensor.h"
+#include "ops/repack.h"
 
 VKTensor::~VKTensor() {
     if (m_buffer)   m_context->getDevice().destroyBuffer(m_buffer);
@@ -189,9 +190,10 @@ std::shared_ptr<ContextImpl> VKTensor::context() const{
     return m_context;
 }
 
-std::unique_ptr<TensorImpl> VKTensor::clone_as_contiguous(const Metadata &) const{
-    throw std::runtime_error("clone_as_contiguous todo...");
-    return std::unique_ptr<TensorImpl>();
+std::unique_ptr<TensorImpl> VKTensor::clone_as_contiguous(const Metadata &meta) const{
+    auto cloned = std::make_unique<VKTensor>(meta.numel, this->m_dtype, this->m_context);
+    RepackImpl<Device::VULKAN>::execute(meta,this->buffer(),cloned->buffer(),this->m_context);
+    return cloned;
 }
 void* VKTensor::data(){
     return m_buffer;
