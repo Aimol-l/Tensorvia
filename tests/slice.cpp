@@ -5,7 +5,7 @@
 
 int main() {
 
-    Tensor a = Tensor::Random({2048,2592},-10,10,DataType::FLOAT32);
+    Tensor a = Tensor::Random({2048,2592},-10,10,DataType::FLOAT64);
 
     ops::println(a);
     

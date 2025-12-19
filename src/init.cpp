@@ -123,6 +123,14 @@ struct VulkanRegistrar {
         ctx->registerOp(OpType::Any, AllTypes, 2, sizeof(ValueParams<float32>));
         ctx->registerOp(OpType::Matmul,AllTypes,3,sizeof(MatmulParams));
 
+        ctx->registerOp(OpType::Equal,AllTypes,3,sizeof(int64_t));
+        ctx->registerOp(OpType::NotEqual,AllTypes,3,sizeof(int64_t));
+        ctx->registerOp(OpType::Greater,AllTypes,3,sizeof(int64_t));
+        ctx->registerOp(OpType::GreaterEqual,AllTypes,3,sizeof(int64_t));
+        ctx->registerOp(OpType::Less,AllTypes,3,sizeof(int64_t));
+        ctx->registerOp(OpType::LessEqual,AllTypes,3,sizeof(int64_t));
+        ctx->registerOp(OpType::Nonzero,AllTypes,2,sizeof(int64_t));
+
         ctx->registerOp(OpType::Random,AllTypes,1,sizeof(RandomParams));
         ctx->registerOp(OpType::Fill,AllTypes,1,sizeof(ValueParams<float32>));
 

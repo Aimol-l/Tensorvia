@@ -24,7 +24,7 @@
 | **CPU** | GCC15 |C++20/23 |OpenMP | Multi-core CPUs | 🔧 Doing |
 | **CUDA** | NVCC | C++20|CUDA Toolkit | NVIDIA GPUs | 🔧 Doing |
 | **SYCL** | ICPX2025 |C++23| DPC++ | Intel/AMD/NVIDIA GPUs | 🔧 Doing |
-| **Vulkan** | Clang++20 |C++23 |Vulkan API | AMD/Intel/NVIDIA GPUs | ❌ Todo |
+| **Vulkan** | Clang++20 |C++23 |Vulkan API | AMD/Intel/NVIDIA GPUs | 🔧 Doing |
 
 ## 📦 Installation
 

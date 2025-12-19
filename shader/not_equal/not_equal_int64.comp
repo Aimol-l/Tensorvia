@@ -1,0 +1,28 @@
+#version 460
+#extension GL_EXT_shader_8bit_storage : require
+#extension GL_EXT_shader_explicit_arithmetic_types : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform Params {
+    int64_t numel;
+} params;
+
+layout(std430, binding = 0) readonly buffer InputA {
+    int64_t data[];
+} a;
+
+layout(std430, binding = 1) readonly buffer InputB {
+    int64_t data[];
+} b;
+
+layout(std430, binding = 2) writeonly buffer Output {
+    int8_t data[];
+} dst;
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (int64_t(idx) >= params.numel) return;
+    dst.data[idx] = int8_t(a.data[idx] != b.data[idx] ? 1 : 0);
+}
