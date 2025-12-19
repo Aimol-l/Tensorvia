@@ -13,19 +13,10 @@
 
 namespace ops {
     
-
-template <Device D>
-struct ZerosImpl;
-
-template <Device D>
-struct OnesImpl;
-
-template <Device D>
-struct FillImpl;
-
-template <Device D>
-struct RandomImpl;
-// *****************************************
+template <Device D> struct ZerosImpl;
+template <Device D> struct OnesImpl;
+template <Device D> struct FillImpl;
+template <Device D> struct RandomImpl;
 
 template <>
 struct ZerosImpl<Device::SYCL> {

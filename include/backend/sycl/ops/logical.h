@@ -6,27 +6,15 @@ namespace ops {
 
 
 //************************************
-template <Device D>
-struct EqualImpl;
-
-template <Device D>
-struct NotEqualImpl;
-
-template <Device D>
-struct GreaterImpl;
-
-template <Device D>
-struct LessImpl;
-
-template <Device D>
-struct GreaterEqualImpl;
-
-template <Device D>
-struct LessEqualImpl;
-
-template <Device D>
-struct NonZeroImpl;
+template <Device D> struct EqualImpl;
+template <Device D> struct NotEqualImpl;
+template <Device D> struct GreaterImpl;
+template <Device D> struct LessImpl;
+template <Device D> struct GreaterEqualImpl;
+template <Device D> struct LessEqualImpl;
+template <Device D> struct NonZeroImpl;
 //************************************
+
 template <>
 struct EqualImpl<Device::SYCL> {
     static Tensor execute(const Tensor& a,const Tensor& b) ;

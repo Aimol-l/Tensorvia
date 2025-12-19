@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.25)
+
 # 设置 C++ 标准
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_BUILD_TYPE "Release")
-# set(CMAKE_BUILD_TYPE "Debug")
-
 set(CMAKE_BUILD_PARALLEL_LEVEL 6)
+
 # 项目根路径
 get_filename_component(PROJECT_DIR ${CMAKE_CURRENT_LIST_FILE} DIRECTORY)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_DIR}/bin)
@@ -21,10 +21,8 @@ option(BACKEND_VULKAN  "Enable Vulkan backend" OFF)
 
 # 编译器配置
 if(BACKEND_CPU)
-    set(CMAKE_C_COMPILER "/usr/bin/gcc")
-    set(CMAKE_CXX_COMPILER "/usr/bin/g++")
     add_definitions(-DBACKEND_CPU)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -march=skylake -ffast-math -march=native -fopenmp")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -fopenmp")
 endif()
 
 if(BACKEND_CUDA)
@@ -52,8 +50,6 @@ project(
     LANGUAGES CXX C CUDA    #编程语言
     DESCRIPTION "多后端 Tensor 加速计算库"
 )
-# ------------------------- 依赖查找 -------------------------
-find_package(TBB REQUIRED)
 # ------------------------- .h,hpp文件路径 -------------------------
 include_directories(
     ${CMAKE_SOURCE_DIR}/include
@@ -125,7 +121,6 @@ endif()
 add_library(${PROJECT_NAME} SHARED ${SRC_FILES})
 
 # 链接库
-target_link_libraries(${PROJECT_NAME} PRIVATE TBB::tbb)
 if(BACKEND_CPU)
     target_link_libraries(${PROJECT_NAME} PRIVATE OpenMP::OpenMP_CXX)
 endif()
@@ -153,6 +148,7 @@ if(BUILD_TEST)
         target_link_libraries(${test_name} PRIVATE ${PROJECT_NAME})
         target_include_directories(${test_name} PRIVATE ${INCLUDE_DIRS})
         target_compile_definitions(${test_name} PRIVATE ${BACKEND_MACROS})
+
         if(BACKEND_CPU)
            target_link_libraries(${test_name} PRIVATE OpenMP::OpenMP_CXX)
         endif()

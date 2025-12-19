@@ -7,8 +7,7 @@ namespace ops {
 
 
 //*********************************************
-template <Device D>
-struct SliceImpl;
+template <Device D> struct SliceImpl;
 //*********************************************
 
 template <>

@@ -1,21 +1,82 @@
-#!/usr/bin/env python3
 import os
 import sys
 import argparse
 import subprocess
 from pathlib import Path
 
-# 配置
-GLSLANG = "glslangValidator"
-SHADER_ROOT = Path("./shader")
-SPV_ROOT = Path("./spv")
+
 BUILD_DIR = Path("build")
+SPV_DIR = Path("./spv")
+SHADER_ROOT = Path("./shader")
+OUTPUT_CPP = Path("include/backend/vulkan/spirv/spv_registry.cpp")
+OUTPUT_H = Path("include/backend/vulkan/spirv/spv_registry.h")
 
-SUPPORTED_BACKENDS = ["CPU", "VULKAN", "CUDA", "SYCL"]
+# 生成 SPIR-V 注册表的函数
+def gen_spv_registry():
+    spv_files = list(SPV_DIR.glob("*.spv"))
+    registry = {}
+    for spv in spv_files:
+        # 文件名: "relu_float32.spv" → key = "relu_float32"
+        key = spv.stem
+        # 用 xxd 生成 C 数组
+        result = subprocess.run(["xxd", "-i", str(spv)], capture_output=True, text=True)
+        array_def = result.stdout.strip()
+        registry[key] = array_def
 
+    # 生成 .h
+    with open(OUTPUT_H, "w") as f:
+        f.write("#pragma once\n")
+        f.write("#include <vector>\n")
+        f.write("#include <string>\n")
+        f.write("#include <cstdint>\n")
+        f.write("#include <unordered_map>\n")
+        f.write("namespace vkspv {\n")
+        f.write("    std::vector<uint32_t> get_spv_code(const std::string& key);\n")
+        f.write("}\n")
+
+    # 生成 .cpp
+    with open(OUTPUT_CPP, "w") as f:
+        f.write("#include \"spv_registry.h\"\n")
+        f.write("#include <stdexcept>\n")
+        f.write("namespace vkspv {\n")
+        
+        # 声明所有数组
+        for key in registry:
+            f.write(f"static unsigned char {key}_data[] = {{\n")
+            # xxd 输出已经是 {0x03, 0x02, ...};
+            lines = registry[key].splitlines()
+            for line in lines:
+                if line.strip().startswith("unsigned char"):
+                    continue
+                f.write(f"{line}\n")
+            # f.write("};\n\n")
+
+        # 生成 map
+        f.write("std::vector<uint32_t> get_spv_code(const std::string& key) {\n")
+        f.write("    static const std::unordered_map<std::string, std::pair<unsigned char*, size_t>> registry = {\n")
+        for key in registry:
+            # 从 xxd 提取长度：查找 "xxx_len = N;"
+            len_var = f"{key}_len"
+            f.write(f"        {{\"{key}\", {{{key}_data, sizeof({key}_data)}}}},\n")
+        f.write("    };\n")
+        f.write("    auto it = registry.find(key);\n")
+        f.write("    if (it == registry.end()) {\n")
+        f.write("        throw std::runtime_error(\"SPIR-V not found: \" + key);\n")
+        f.write("    }\n")
+        f.write("    auto* data = it->second.first;\n")
+        f.write("    auto size = it->second.second;\n")
+        f.write("    return std::vector<uint32_t>(\n")
+        f.write("        reinterpret_cast<uint32_t*>(data),\n")
+        f.write("        reinterpret_cast<uint32_t*>(data + size)\n")
+        f.write("    );\n")
+        f.write("}\n")
+        f.write("} // namespace vkspv\n")
+
+
+# 编译 SPIR-V 着色器的函数
 def compile_spv(op_name: str | None = None):
     print("🔍 Compiling SPIR-V shaders...")
-    SPV_ROOT.mkdir(parents=True, exist_ok=True)
+    SPV_DIR.mkdir(parents=True, exist_ok=True)
 
     if op_name:
         # 只编译 shader/{op_name}/*.comp
@@ -37,9 +98,9 @@ def compile_spv(op_name: str | None = None):
 
     success_count = 0
     for shader in shader_files:
-        out_path = SPV_ROOT / (shader.stem + ".spv")
+        out_path = SPV_DIR / (shader.stem + ".spv")
         cmd = [
-            GLSLANG,
+            "glslangValidator",
             "-V",
             "--target-env", "vulkan1.4",
             str(shader),
@@ -60,96 +121,45 @@ def compile_spv(op_name: str | None = None):
     total = len(shader_files)
     print(f"✅ Successfully compiled {success_count}/{total} shaders{' for operator ' + op_name if op_name else ''}.")
 
-def compile_library(backend: str, build_test: bool = True):
-    print(f"⚙️  Configuring CMake for backend: {backend}...")
-    if backend not in SUPPORTED_BACKENDS:
-        print(f"❌ Unsupported backend: {backend}. Supported: {', '.join(SUPPORTED_BACKENDS)}")
-        sys.exit(1)
 
+def compile_library(backend: str, build_test: bool = True):
     BUILD_DIR.mkdir(exist_ok=True)
 
     cmd = [
-        "cmake",
-        "-B", str(BUILD_DIR),
-        "-S", ".",
-        f"-DBACKEND_{backend}=ON",
+        "cmake","-B", str(BUILD_DIR),"-S", ".",f"-DBACKEND_{backend}=ON",f"-DBUILD_TEST={'ON' if build_test else 'OFF'}"
     ]
-    if build_test:
-        cmd.append("-DBUILD_TEST=ON")
-
     try:
         subprocess.run(cmd, check=True)
     except subprocess.CalledProcessError:
-        print("❌ CMake configure failed.")
-        sys.exit(1)
+        print("❌ CMake configuration failed.")
+        sys.exit(1) 
 
     print("🔨 Building the Tensorvia library...")
-    build_cmd = ["cmake", "--build", str(BUILD_DIR), "-j6"]
+    build_cmd = ["cmake", "--build", str(BUILD_DIR), "-j"]
     try:
         subprocess.run(build_cmd, check=True)
     except subprocess.CalledProcessError:
         print("❌ Build failed.")
         sys.exit(1)
-
     print("✅ Tensorvia library built successfully.")
 
-def main():
-    parser = argparse.ArgumentParser(
-        prog="build.py",
-        description="Build tensor library and/or compile SPIR-V shaders."
-    )
-    parser.add_argument(
-        "--backend", "-b",
-        type=str,
-        choices=SUPPORTED_BACKENDS,
-        default="VULKAN",
-        help="Target backend (default: VULKAN)"
-    )
-    parser.add_argument(
-        "--lib",
-        action="store_true",
-        help="Skip building the tensor library"
-    )
-    parser.add_argument(
-        "--spirv",
-        action="store_true",
-        help="Skip compiling SPIR-V shaders"
-    )
-    parser.add_argument(
-        "--test",
-        action="store_true",
-        help="Disable BUILD_TEST in CMake"
-    )
-    parser.add_argument(
-        "--op",
-        type=str,
-        metavar="OPERATOR",
-        help="Only compile SPIR-V shaders for a specific operator (e.g. --op div)"
-    )
-
-
-    #=============================================================
-    args = parser.parse_args()
-
-    # 1. 编译张量库
-    if args.lib:
-        compile_library(backend=args.backend, build_test=args.test)
-    else:
-        print("⏭️  Skipping Tensorvia library build.")
-
-    # 2. 编译 SPIR-V（可选：仅特定算子）
-    if args.spirv:
-        should_compile_spirv = (
-            args.backend == "VULKAN" or
-            os.getenv("FORCE_SPIRV", "0") == "1" or
-            args.op is not None  # 显式指定 --op 时，即使非 Vulkan 也编译
-        )
-        if should_compile_spirv:
-            compile_spv(op_name=args.op)
-        else:
-            print("⏭️  Skipping SPIR-V compilation (not needed for non-Vulkan backend).")
-    else:
-        print("⏭️  Skipping SPIR-V compilation (--no-spirv).")
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-spv', '--spirv', default='all',required=True)
+    parser.add_argument('-b', '--backend', choices=['cpu', 'cuda', 'sycl', 'vulkan'], required=True)
+    parser.add_argument('-test', '--test', choices=['on', 'off'], default='off',required=True)
+    args = parser.parse_args()
+
+
+    # 生成 SPIR-V 注册表
+    if args.backend == 'vulkan':
+        # 先编译 SPIR-V 文件
+        if args.spirv != 'none':
+            compile_spv(None if args.spirv == 'all' else args.spirv)
+        # 然后生成注册表
+        gen_spv_registry()
+    
+    # 编译库
+    compile_library(args.backend.upper(), build_test=(args.test == 'on'))
+    

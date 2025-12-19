@@ -3,9 +3,6 @@
 #include <cstdint>
 #include <type_traits>
 
-// #ifndef BACKEND_VULKAN
-//   #define BACKEND_VULKAN //临时使用
-// #endif
 
 template<typename T>
 struct compute_type_helper { using type = T; };
@@ -61,8 +58,6 @@ struct compute_type_helper { using type = T; };
   struct compute_type_helper<__nv_bfloat16> { using type = float; };
 
 #endif
-
-
 
 #ifndef RESTRICT
     #if defined(_MSC_VER)

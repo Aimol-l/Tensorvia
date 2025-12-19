@@ -7,29 +7,14 @@
 namespace ops {
 
 //**************************************************
-template <Device D>
-struct SumImpl;
-
-template <Device D>
-struct MeanImpl;
-
-template <Device D>
-struct MinImpl;
-
-template <Device D>
-struct MaxImpl;
-
-template <Device D>
-struct ArgMaxImpl;
-
-template <Device D>
-struct ArgMinImpl;
-
-template <Device D>
-struct AllImpl;
-
-template <Device D>
-struct AnyImpl;
+template <Device D> struct SumImpl;
+template <Device D> struct MeanImpl;
+template <Device D> struct MinImpl;
+template <Device D> struct MaxImpl;
+template <Device D> struct ArgMaxImpl;
+template <Device D> struct ArgMinImpl;
+template <Device D> struct AllImpl;
+template <Device D> struct AnyImpl;
 //**************************************************
 template <>
 struct SumImpl<Device::SYCL> {

@@ -1,5 +1,7 @@
 #include "vulkan_context.h"
 #include "vulkan_constant.h"
+#include "spirv/spv_registry.h"
+
 
 VulkanContext::VulkanContext(){
     this->createInstance();
@@ -42,16 +44,11 @@ void VulkanContext::registerOp(OpType ops,std::vector<DataType>& Dtypes,int tens
     // 加载一个算子的8个不同类型的shader
     std::vector<std::string> need_types;
     for(auto& type:Dtypes){
-        std::string spvFile = std::format("./spv/{}_{}.spv",ori_op,dtype_to_string(type));
-        // std::print("[{}] ",spvFile);
-        std::ifstream file(spvFile.c_str());
-        // 判断算子文件是否存在
-        if(!file.good()){
-            throw std::runtime_error(std::format("{} not found",spvFile));
-        }
         need_types.push_back(std::format("{}",dtype_to_string(type)));
         // 加载shader
-        auto spvCode = readSpvFile(spvFile);
+        std::string key = std::format("{}_{}", ori_op, dtype_to_string(type));
+        auto spvCode = vkspv::get_spv_code(key);
+        // auto spvCode = readSpvFile(spvFile);
         vk::ShaderModuleCreateInfo createInfo;
         createInfo.setCode(spvCode);
         vk::ShaderModule shaderModule;
@@ -85,7 +82,7 @@ void VulkanContext::registerOp(OpType ops,std::vector<DataType>& Dtypes,int tens
         this->m_pipelines[type_op] = result.value;
         this->m_device.destroyShaderModule(shaderModule);
     }
-    std::println("{} SPIR-V:{}",ori_op,need_types);
+    // std::println("{} SPIR-V:{}",ori_op,need_types);
 }
 void VulkanContext::createDescriptorSetLayout(std::string ori_op, int tensor_count, int params_size) {
     if (m_pipeline_layouts.find(ori_op) != m_pipeline_layouts.end()) return;

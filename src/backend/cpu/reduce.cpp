@@ -1,7 +1,6 @@
 #include <print>
 #include <cmath>
 #include <numbers>
-#include <execution>
 
 #include "core/tensor.h"
 #include "core/types.h"
@@ -221,13 +220,25 @@ template <typename T>
 bool all_kernel(const T *ptr, float val, size_t n) {
     if constexpr (std::is_integral_v<T>) {
         // 整数类型：精确比较
-        return std::all_of(std::execution::par, ptr, ptr + n, 
-            [val](T x) { return x == static_cast<T>(val); });
+        bool res = true;
+        for(size_t i = 0; i < n; ++i){
+            if(ptr[i] != static_cast<T>(val)){
+                res = false;
+                break;
+            }
+        }
+        return res;
     } else {
         // 浮点类型：允许误差的比较
         const T tolerance = static_cast<T>(1e-5); // 根据需求调整容差
-        return std::all_of(std::execution::par, ptr, ptr + n,
-            [val, tolerance](T x) { return std::abs(x - static_cast<T>(val)) <= tolerance; });
+        bool res = true;
+        for(size_t i = 0; i < n; ++i){
+            if(std::abs(ptr[i] - static_cast<T>(val)) > tolerance){
+                res = false;
+                break;
+            }
+        }
+        return  res;
     }
 }
 template <typename T>
@@ -243,11 +254,25 @@ bool any_kernel(const T *ptr, float val, size_t n) {
 
     if constexpr (std::is_integral_v<T>) {
         // 整数类型：精确比较
-        return std::any_of(std::execution::par, ptr, ptr + n,
-            [val](T x) { return x == static_cast<T>(val); });
+        bool res = false;
+        for(size_t i = 0; i < n; ++i){
+            if(ptr[i] == static_cast<T>(val)){
+                res = true;
+                break;
+            }
+        }
+        return res;
     } else {
+
         // 浮点类型：允许误差的比较
-        return std::any_of(std::execution::par, ptr, ptr + n,[val, tolerance](T x) { return std::abs(x - static_cast<T>(val)) <= tolerance; });
+        bool res = false;
+        for(size_t i = 0; i < n; ++i){
+            if(std::abs(ptr[i] - static_cast<T>(val)) <= tolerance){
+                res = true;
+                break;
+            }
+        }
+        return res;
     }
 }
 

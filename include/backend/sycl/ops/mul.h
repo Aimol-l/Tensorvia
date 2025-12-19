@@ -7,8 +7,7 @@
 namespace ops {
 
 //***************************************
-template <Device D>
-struct MulImpl;
+template <Device D> struct MulImpl;
 //***************************************
 
 template <>

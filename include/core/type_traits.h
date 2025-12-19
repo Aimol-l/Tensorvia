@@ -295,14 +295,3 @@ inline size_t calc_numel(const std::vector<int64_t>& shape) {
     }
     return numel;
 }
-
-// 返回每一维的字节 stride（从最内层维度开始是 dtype size）
-inline std::vector<size_t> calc_strides(const std::vector<int64_t>& shape, DataType dtype) {
-    std::vector<size_t> strides(shape.size());
-    size_t stride = calc_dtype_size(dtype);
-    for (int i = static_cast<int>(shape.size()) - 1; i >= 0; --i) {
-        strides[i] = stride;
-        stride *= shape[i];
-    }
-    return strides;
-}

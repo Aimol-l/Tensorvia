@@ -176,8 +176,7 @@ Tensor SigmoidImpl<Device::CPU>::execute(const Tensor& a) {
         using AType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_A)>>;      // const T* --> const T --> T
         using ResType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_res)>>;  // const R* --> const R --> R
         sigmoid_kernel<AType>(ptr_A, static_cast<ResType*>(res.data()), a.numel());
-    },
-               A, Res);
+    },A, Res);
 
     return res;
 }
@@ -191,40 +190,17 @@ Tensor SoftmaxImpl<Device::CPU>::execute(const Tensor& a, int axis) {
     size_t inner_size = 1;
     for (int i = axis + 1; i < dim; ++i)
         inner_size *= a.shape(i);
-
     DataType res_type = a.dtype();
     if (a.dtype() <= DataType::INT64)
         res_type = DataType::FLOAT32;
     Tensor res(a.shape(), res_type, a.device());
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        const T* a_ptr = static_cast<const T*>(a.data());
+        T* res_ptr = static_cast<T*>(res.data());
+        softmax_kernel<T>(a_ptr, res_ptr, outer_size, axis_size, inner_size);
 
-    switch (a.dtype()) {
-        case DataType::FLOAT64:
-            softmax_kernel<float64>(static_cast<const float64*>(a.data()), static_cast<float64*>(res.data()), outer_size, axis_size, inner_size);
-            break;
-        case DataType::FLOAT32:
-            softmax_kernel<float32>(static_cast<const float32*>(a.data()), static_cast<float32*>(res.data()), outer_size, axis_size, inner_size);
-            break;
-        case DataType::FLOAT16:
-            softmax_kernel<float16>(static_cast<const float16*>(a.data()), static_cast<float16*>(res.data()), outer_size, axis_size, inner_size);
-            break;
-        case DataType::BFLOAT16:
-            softmax_kernel<bfloat16>(static_cast<const bfloat16*>(a.data()), static_cast<bfloat16*>(res.data()), outer_size, axis_size, inner_size);
-            break;
-        case DataType::INT64:
-            softmax_kernel<int64_t>(static_cast<const int64_t*>(a.data()), static_cast<float32*>(res.data()), outer_size, axis_size, inner_size);
-            break;
-        case DataType::INT32:
-            softmax_kernel<int32_t>(static_cast<const int32_t*>(a.data()), static_cast<float32*>(res.data()), outer_size, axis_size, inner_size);
-            break;
-        case DataType::INT16:
-            softmax_kernel<int16_t>(static_cast<const int16_t*>(a.data()), static_cast<float32*>(res.data()), outer_size, axis_size, inner_size);
-            break;
-        case DataType::INT8:
-            softmax_kernel<int8_t>(static_cast<const int8_t*>(a.data()), static_cast<float32*>(res.data()), outer_size, axis_size, inner_size);
-            break;
-        default:
-            std::runtime_error("Unsupported data type");
-    }
+    });
     return res;
 }
 // ================================================================

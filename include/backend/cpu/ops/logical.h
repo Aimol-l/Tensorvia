@@ -1,6 +1,5 @@
 ﻿#pragma once
 #include "backend/cpu/cpu_tensor.h"
-#include <execution>
 #include "ops.h"
 
 namespace ops {

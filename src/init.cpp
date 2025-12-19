@@ -133,13 +133,9 @@ struct VulkanRegistrar {
 
         ctx->registerOp(OpType::Random,AllTypes,1,sizeof(RandomParams));
         ctx->registerOp(OpType::Fill,AllTypes,1,sizeof(ValueParams<float32>));
-
         ctx->registerOp(OpType::Concat,AllTypes,10,0); // 输入参数包装到第一个buffer里了
-
         ctx->registerOp(OpType::Slice,AllTypes,2,sizeof(SliceParams));
         ctx->registerOp(OpType::Repack,DataType::INT8,2,sizeof(SliceParams));
-
-
         // 注册vulkan后端
         register_tensor_impl(Device::VULKAN, [&](void* ptr,int64_t numel, DataType dtype) {
             return std::make_shared<VKTensor>(ptr,numel, dtype,ctx);

@@ -265,7 +265,7 @@ Tensor SubImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
     const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a, res_type);
     const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b, res_type);
     Tensor result(a.shape(), res_type, Device::CPU);
-    dispatch_dtype(a.dtype(), [&](auto type_id) {
+    (a.dtype(), [&](auto type_id) {
         using T = typename decltype(type_id)::type;
         const T* a_ptr = static_cast<const T*>(A.data());
         const T* b_ptr = static_cast<const T*>(B.data());
