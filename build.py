@@ -126,7 +126,7 @@ def compile_library(backend: str, build_test: bool = True):
     BUILD_DIR.mkdir(exist_ok=True)
 
     cmd = [
-        "cmake","-B", str(BUILD_DIR),"-S", ".",f"-DBACKEND_{backend}=ON",f"-DBUILD_TEST={'ON' if build_test else 'OFF'}"
+        "cmake","-B", str(BUILD_DIR),"-S", ".",f"-DBACKEND_{backend}=ON","-DCMAKE_INSTALL_PREFIX=./build/install",f"-DBUILD_TEST={'ON' if build_test else 'OFF'}"
     ]
     try:
         subprocess.run(cmd, check=True)
@@ -135,9 +135,11 @@ def compile_library(backend: str, build_test: bool = True):
         sys.exit(1) 
 
     print("🔨 Building the Tensorvia library...")
-    build_cmd = ["cmake", "--build", str(BUILD_DIR), "-j"]
+    build_cmd = ["cmake", "--build", str(BUILD_DIR), "--parallel"]
+    install_cmd = ["cmake" ,"--install","build"]
     try:
         subprocess.run(build_cmd, check=True)
+        subprocess.run(install_cmd, check=True)
     except subprocess.CalledProcessError:
         print("❌ Build failed.")
         sys.exit(1)
@@ -146,7 +148,7 @@ def compile_library(backend: str, build_test: bool = True):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('-spv', '--spirv', default='all',required=True)
+    parser.add_argument('-spv', '--spirv', default='all',required=False)
     parser.add_argument('-b', '--backend', choices=['cpu', 'cuda', 'sycl', 'vulkan'], required=True)
     parser.add_argument('-test', '--test', choices=['on', 'off'], default='off',required=True)
     args = parser.parse_args()
