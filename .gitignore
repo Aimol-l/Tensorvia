@@ -3,6 +3,7 @@ bin/
 build/
 dist/
 spv/
+include/backend/vulkan/spirv/spv_registry.cpp
 
 *.o
 *.so

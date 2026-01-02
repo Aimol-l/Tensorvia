@@ -25,7 +25,7 @@
 | **CPU** | GCC/Clang | C++23 | OpenMP/SIMD | Multi-core CPUs | ✅ Working |
 | **CUDA** | NVCC | C++23 | CUDA Toolkit | NVIDIA GPUs | ✅ Working |
 | **SYCL** | ICPX | C++23 | DPC++ | Intel/NVIDIA GPUs | ⚠️ Experimental |
-| **Vulkan** | GCC/Clang | C++23 | Vulkan API | GPUs | ✅ Working |
+| **Vulkan** | GCC/Clang | C++23 | Vulkan API | GPUs | ⚠️ Experimental |
 
 ## 📦 Installation
 
