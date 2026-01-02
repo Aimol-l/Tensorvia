@@ -1,6 +1,9 @@
 #include "vulkan_context.h"
 #include "vulkan_constant.h"
 #include "spirv/spv_registry.h"
+#include "core/type_traits.h"
+
+using namespace via;
 
 
 VulkanContext::VulkanContext(){

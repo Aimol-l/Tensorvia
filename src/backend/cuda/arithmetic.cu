@@ -1,6 +1,7 @@
 #include <cmath>
 #include "ops.h"
 #include "backend/cuda/ops/arithmetic.h"
+using namespace via;
 
 namespace ops {
 

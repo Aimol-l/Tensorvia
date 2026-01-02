@@ -1,4 +1,5 @@
 #include "backend/sycl/ops/initializer.h"
+using namespace via;
 
 namespace ops {
     
@@ -29,85 +30,50 @@ void fill_random_sycl(T* data_ptr, size_t numel, float min, float max, sycl::que
     }).wait();
 }
 
-
 Tensor ZerosImpl<Device::SYCL>::execute(const std::vector<int64_t>& shape, DataType dtype){
-        Tensor temp(shape, dtype, Device::SYCL);
-        size_t numel = temp.numel();
-        auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(temp.get_impl()->context());
-        auto& queue_ = ctx_impl->get_queue();
-        switch (dtype) {
-            case DataType::INT8:    fill_value_sycl<int8_t>(static_cast<int8_t*>(temp.data()), 0,numel,queue_);break;
-            case DataType::INT16:   fill_value_sycl<int16_t>(static_cast<int16_t*>(temp.data()), 0,numel,queue_); break;
-            case DataType::INT32:   fill_value_sycl<int32_t>(static_cast<int32_t*>(temp.data()), 0,numel,queue_); break;
-            case DataType::INT64:   fill_value_sycl<int64_t>(static_cast<int64_t*>(temp.data()), 0,numel,queue_); break;
-            case DataType::FLOAT16: fill_value_sycl<float16>(static_cast<float16*>(temp.data()), 0,numel,queue_); break;
-            case DataType::FLOAT32: fill_value_sycl<float32>(static_cast<float32*>(temp.data()), 0,numel,queue_); break;
-            case DataType::FLOAT64: fill_value_sycl<float64>(static_cast<float64*>(temp.data()), 0,numel,queue_); break;
-            case DataType::BFLOAT16:fill_value_sycl<bfloat16>(static_cast<bfloat16*>(temp.data()), 0,numel,queue_); break;
-        }
-        return  temp;
-    }
-
-
+    Tensor temp(shape, dtype, Device::SYCL);
+    auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(temp.get_impl()->context());
+    auto& queue_ = ctx_impl->get_queue();
+    dispatch_dtype(dtype, [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        fill_value_sycl<T>(static_cast<T*>(temp.data()),0,temp.numel(),queue_);
+    });
+    return  temp;
+}
 Tensor OnesImpl<Device::SYCL>::execute(const std::vector<int64_t>& shape, DataType dtype){
-        Tensor temp(shape, dtype, Device::SYCL);
-        size_t numel = temp.numel();
-        auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(temp.get_impl()->context());
-        auto& queue_ = ctx_impl->get_queue();
-        switch (dtype) {
-            case DataType::INT8:    fill_value_sycl<int8_t>(static_cast<int8_t*>(temp.data()), 1,numel,queue_);break;
-            case DataType::INT16:   fill_value_sycl<int16_t>(static_cast<int16_t*>(temp.data()), 1,numel,queue_); break;
-            case DataType::INT32:   fill_value_sycl<int32_t>(static_cast<int32_t*>(temp.data()), 1,numel,queue_); break;
-            case DataType::INT64:   fill_value_sycl<int64_t>(static_cast<int64_t*>(temp.data()), 1,numel,queue_); break;
-            case DataType::FLOAT16: fill_value_sycl<float16>(static_cast<float16*>(temp.data()), 1,numel,queue_); break;
-            case DataType::FLOAT32: fill_value_sycl<float32>(static_cast<float32*>(temp.data()), 1,numel,queue_); break;
-            case DataType::FLOAT64: fill_value_sycl<float64>(static_cast<float64*>(temp.data()), 1,numel,queue_); break;
-            case DataType::BFLOAT16:fill_value_sycl<bfloat16>(static_cast<bfloat16*>(temp.data()), 1,numel,queue_); break;
-        }
-        return  temp;
-    }
-
- Tensor FillImpl<Device::SYCL>::execute(const std::vector<int64_t>& shape, DataType dtype, float value){
-        Tensor temp(shape, dtype, Device::SYCL);
-        size_t numel = temp.numel();
-        auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(temp.get_impl()->context());
-        auto& queue_ = ctx_impl->get_queue();
-        switch (dtype) {
-            case DataType::INT8:    fill_value_sycl<int8_t>(static_cast<int8_t*>(temp.data()), value,numel,queue_);break;
-            case DataType::INT16:   fill_value_sycl<int16_t>(static_cast<int16_t*>(temp.data()), value,numel,queue_); break;
-            case DataType::INT32:   fill_value_sycl<int32_t>(static_cast<int32_t*>(temp.data()), value,numel,queue_); break;
-            case DataType::INT64:   fill_value_sycl<int64_t>(static_cast<int64_t*>(temp.data()), value,numel,queue_); break;
-            case DataType::FLOAT16: fill_value_sycl<float16>(static_cast<float16*>(temp.data()), value,numel,queue_); break;
-            case DataType::FLOAT32: fill_value_sycl<float32>(static_cast<float32*>(temp.data()), value,numel,queue_); break;
-            case DataType::FLOAT64: fill_value_sycl<float64>(static_cast<float64*>(temp.data()), value,numel,queue_); break;
-            case DataType::BFLOAT16:fill_value_sycl<bfloat16>(static_cast<bfloat16*>(temp.data()), value,numel,queue_); break;
-        }
-        return  temp;
-    }
-
+    Tensor temp(shape, dtype, Device::SYCL);
+    auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(temp.get_impl()->context());
+    auto& queue_ = ctx_impl->get_queue();
+    dispatch_dtype(dtype, [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        fill_value_sycl<T>(static_cast<T*>(temp.data()),1,temp.numel(),queue_);
+    });
+    return  temp;
+}
+Tensor FillImpl<Device::SYCL>::execute(const std::vector<int64_t>& shape, DataType dtype, float value){
+    Tensor temp(shape, dtype, Device::SYCL);
+    auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(temp.get_impl()->context());
+    auto& queue_ = ctx_impl->get_queue();
+    dispatch_dtype(dtype, [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        fill_value_sycl<T>(static_cast<T*>(temp.data()),value,temp.numel(),queue_);
+    });
+    return  temp;
+}
 
 Tensor RandomImpl<Device::SYCL>::execute(const std::vector<int64_t>& shape, DataType dtype,float min,float max){
-        Tensor temp(shape, dtype, Device::SYCL);
-        size_t numel = temp.numel();
-        auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(temp.get_impl()->context());
-        auto& queue_ = ctx_impl->get_queue();
-        switch (dtype) {
-            case DataType::INT8:     fill_random_sycl<int8_t>(static_cast<int8_t*>(temp.data()), numel,  min,max,queue_);break;
-            case DataType::INT16:    fill_random_sycl<int16_t>(static_cast<int16_t*>(temp.data()), numel, min,max,queue_);break;
-            case DataType::INT32:    fill_random_sycl<int32_t>(static_cast<int32_t*>(temp.data()), numel, min,max,queue_);break;
-            case DataType::INT64:    fill_random_sycl<int64_t>(static_cast<int64_t*>(temp.data()), numel, min,max,queue_);break;
-            case DataType::FLOAT16:  fill_random_sycl<float16>(static_cast<float16*>(temp.data()), numel, min,max,queue_);break;
-            case DataType::FLOAT32:  fill_random_sycl<float32>(static_cast<float32*>(temp.data()), numel, min,max,queue_);break;
-            case DataType::FLOAT64:  fill_random_sycl<float64>(static_cast<float64*>(temp.data()), numel, min,max,queue_);break;
-            case DataType::BFLOAT16: fill_random_sycl<bfloat16>(static_cast<bfloat16*>(temp.data()), numel, min,max,queue_);break;
-            default: throw std::runtime_error("Unsupported dtype for random initializer.");
-        }
-        return  temp;
-    }
+    Tensor temp(shape, dtype, Device::SYCL);
+    auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(temp.get_impl()->context());
+    auto& queue_ = ctx_impl->get_queue();
+    dispatch_dtype(dtype, [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        fill_random_sycl<T>(static_cast<T*>(temp.data()), temp.numel(),min,max,queue_);
+    });
+    return  temp;
+}
 
-     template struct ZerosImpl<Device::SYCL>;
- template struct OnesImpl<Device::SYCL>;
- template struct FillImpl<Device::SYCL>;
- template struct RandomImpl<Device::SYCL>;
-
+template struct ZerosImpl<Device::SYCL>;
+template struct OnesImpl<Device::SYCL>;
+template struct FillImpl<Device::SYCL>;
+template struct RandomImpl<Device::SYCL>;
 }

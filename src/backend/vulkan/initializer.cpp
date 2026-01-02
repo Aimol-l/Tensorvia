@@ -1,5 +1,6 @@
 #include "backend/vulkan/ops/initializer.h"
 
+using namespace via;
 
 namespace ops {
 Tensor ZerosImpl<Device::VULKAN>::execute(const std::vector<int64_t>& shape, DataType dtype){

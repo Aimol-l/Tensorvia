@@ -3,65 +3,65 @@
 
 namespace ops {
 
-template <Device D> struct SumImpl;
-template <Device D> struct MeanImpl;
-template <Device D> struct MinImpl;
-template <Device D> struct MaxImpl;
-template <Device D> struct ArgMaxImpl;
-template <Device D> struct ArgMinImpl;
-template <Device D> struct AllImpl;
-template <Device D> struct AnyImpl;
+template <via::Device D> struct SumImpl;
+template <via::Device D> struct MeanImpl;
+template <via::Device D> struct MinImpl;
+template <via::Device D> struct MaxImpl;
+template <via::Device D> struct ArgMaxImpl;
+template <via::Device D> struct ArgMinImpl;
+template <via::Device D> struct AllImpl;
+template <via::Device D> struct AnyImpl;
 
 template <>
-struct SumImpl<Device::CUDA> {
+struct SumImpl<via::Device::CUDA> {
     static float execute(const Tensor& a);
     static Tensor execute(const Tensor& a,int axis);
 };
 
 template <>
-struct MinImpl<Device::CUDA> {
+struct MinImpl<via::Device::CUDA> {
     static float execute(const Tensor& a);
     static Tensor execute(const Tensor& a,int axis);
 };
 
 template <>
-struct MaxImpl<Device::CUDA> {
+struct MaxImpl<via::Device::CUDA> {
     static float execute(const Tensor& a);
     static Tensor execute(const Tensor& a, int axis);
 };
 
 template <>
-struct MeanImpl<Device::CUDA> {
+struct MeanImpl<via::Device::CUDA> {
     static float execute(const Tensor& a);
     static Tensor execute(const Tensor& a,int axis);
 };
 
 template <>
-struct ArgMaxImpl<Device::CUDA> {
+struct ArgMaxImpl<via::Device::CUDA> {
    static Tensor execute(const Tensor& a, int axis);
 };
 
 template <>
-struct ArgMinImpl<Device::CUDA> {
+struct ArgMinImpl<via::Device::CUDA> {
     static Tensor execute(const Tensor& a, int axis);
 };
 template <>
-struct AnyImpl<Device::CUDA> {
+struct AnyImpl<via::Device::CUDA> {
     static bool execute(const Tensor& a,float val);
 };
 
 template <>
-struct AllImpl<Device::CUDA> {
+struct AllImpl<via::Device::CUDA> {
     static bool execute(const Tensor& a,float val);
 };
 
-extern template struct SumImpl<Device::CUDA>;
-extern template struct MinImpl<Device::CUDA>;
-extern template struct MaxImpl<Device::CUDA>;   
-extern template struct MeanImpl<Device::CUDA>;
-extern template struct ArgMaxImpl<Device::CUDA>;
-extern template struct ArgMinImpl<Device::CUDA>;
-extern template struct AnyImpl<Device::CUDA>;
-extern template struct AllImpl<Device::CUDA>;
+extern template struct SumImpl<via::Device::CUDA>;
+extern template struct MinImpl<via::Device::CUDA>;
+extern template struct MaxImpl<via::Device::CUDA>;   
+extern template struct MeanImpl<via::Device::CUDA>;
+extern template struct ArgMaxImpl<via::Device::CUDA>;
+extern template struct ArgMinImpl<via::Device::CUDA>;
+extern template struct AnyImpl<via::Device::CUDA>;
+extern template struct AllImpl<via::Device::CUDA>;
 
 }

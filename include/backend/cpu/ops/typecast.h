@@ -4,15 +4,15 @@
 
 namespace ops {
 
-template <Device D>
+template <via::Device D>
 struct TypecastImpl;
 
 template <>
-struct TypecastImpl<Device::CPU> {
-    static void execute(Tensor& a, DataType dst_type);
-    static Tensor execute(const Tensor& a, DataType dst_type);
+struct TypecastImpl<via::Device::CPU> {
+    static void execute(Tensor& a, via::DataType dst_type);
+    static Tensor execute(const Tensor& a, via::DataType dst_type);
 };
 
-extern template struct TypecastImpl<Device::CPU>;
+extern template struct TypecastImpl<via::Device::CPU>;
 
 }  // namespace ops

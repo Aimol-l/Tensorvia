@@ -2,6 +2,7 @@
 #include <vector>
 #include "ops.h"
 #include "backend/vulkan/ops/concat.h"
+using namespace via;
 
 namespace ops {
 

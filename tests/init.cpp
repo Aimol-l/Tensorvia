@@ -2,6 +2,7 @@
 #include <iostream>
 
 #include "ops.h"
+using namespace via;
 
 
 int main() {

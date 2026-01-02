@@ -13,16 +13,16 @@
 class VKTensor : public TensorImpl {
 private:
     size_t m_numel;
-    DataType m_dtype;
+    via::DataType m_dtype;
     vk::Buffer m_buffer; 
     vk::DeviceMemory m_memory;
     std::shared_ptr<VulkanContext> m_context;
 public:
     ~VKTensor();
-    VKTensor(size_t numel, DataType dtype, std::shared_ptr<VulkanContext> context);
-    VKTensor(void* ptr, size_t numel, DataType dtype, std::shared_ptr<VulkanContext> context);
+    VKTensor(size_t numel, via::DataType dtype, std::shared_ptr<VulkanContext> context);
+    VKTensor(void* ptr, size_t numel, via::DataType dtype, std::shared_ptr<VulkanContext> context);
 
-    void init(void* ptr,size_t numel, DataType dtype,std::shared_ptr<VulkanContext> context);
+    void init(void* ptr,size_t numel, via::DataType dtype,std::shared_ptr<VulkanContext> context);
 
     void* data();                // 不要具体使用这个指针！！！！ 
     const void* data() const;    // 不要具体使用这个指针！！！！

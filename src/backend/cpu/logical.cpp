@@ -1,4 +1,5 @@
 ﻿#include "backend/cpu/ops/logical.h"
+using namespace via;
 
 namespace ops {
 template <OpType Op, typename T, typename R>

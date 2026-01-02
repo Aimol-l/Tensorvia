@@ -2,6 +2,9 @@
 #include "core/factory.h"
 #include "vulkan_tensor.h"
 #include "cpu_tensor.h"
+
+using namespace via;
+
 // vulkan --> cpu
 void copy_device_to_host(std::shared_ptr<TensorImpl> src, std::shared_ptr<TensorImpl> dst, DataType dtype) {
     auto* vk_src = dynamic_cast<VKTensor*>(src.get());

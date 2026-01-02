@@ -1,4 +1,5 @@
 #include "backend/sycl/ops/arithmetic.h"
+using namespace via;
 
 namespace ops {
 template <typename T>
@@ -246,15 +247,178 @@ void clamp_sycl(const T* src_ptr,T* dst_ptr,float min,float max,size_t size,sycl
 
 
 void AddImpl<Device::SYCL>::execute(Tensor& a,float b){
-        auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
-        auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
-        auto& q = ctx_impl->get_queue(); 
+    auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
+    auto& q = ctx_impl->get_queue(); 
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        add_sycl<T>(a, b, a.numel(),q);
+    });
+}
+void SubImpl<Device::SYCL>::execute(Tensor& a,float b){
+    auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
+    auto& q = ctx_impl->get_queue(); 
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        sub_sycl<T>(a, b, a.numel(),q);
+    });
+}
+void DotImpl<Device::SYCL>::execute(Tensor& a,float b){
+    auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
+    auto& q = ctx_impl->get_queue(); 
+
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        dot_sycl<T>(a, b, a.numel(),q);
+    });
+}
+void DivImpl<Device::SYCL>::execute(Tensor& a,float b){
+    auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
+    auto& q = ctx_impl->get_queue(); 
+    size_t size = a.numel();
+    // 分发到模板 kernel（根据 dtype 决定类型）
+    switch (a.dtype()) {
+        case DataType::INT8:            div_sycl<int8_t>(a, b,size, q);break;
+        case DataType::INT16:           div_sycl<int16_t>(a, b,size, q);break;
+        case DataType::INT32:           div_sycl<int32_t>(a, b,size, q);break;
+        case DataType::INT64:           div_sycl<int64_t>(a, b,size, q);break;
+        case DataType::FLOAT16:         div_sycl<float16>(a, b,size, q);break;
+        case DataType::BFLOAT16:        div_sycl<bfloat16>(a, b,size, q);break;
+        case DataType::FLOAT32:         div_sycl<float32>(a, b,size, q);break;
+        case DataType::FLOAT64:         div_sycl<float64>(a, b,size, q);break;
+        default:throw std::runtime_error("Unsupported dtype for add");
+    }
+}
+// ========================================================================
+void AddImpl<Device::SYCL>::execute(const Tensor& a, const Tensor& b,Tensor& dst) {
+    DataType res_type = compute_type(a.dtype(),b.dtype());
+    if(dst.dtype() != res_type){
+        throw std::runtime_error("dst dtype error!");
+    }
+    auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
+    auto& q = ctx_impl->get_queue(); 
+    // 快速路径：相同类型且无需转换
+    if (a.dtype() == b.dtype()) {
         dispatch_dtype(a.dtype(), [&](auto type_id) {
             using T = typename decltype(type_id)::type;
-            add_sycl<T>(static_cast<T*>(a.data()), b, a.numel(),q);
+            add_sycl<T>(a,b,dst,a.numel(),q);
         });
+        return; 
     }
-// uninplace
+    // 慢速路径：类型不同，需要 Typecast
+    const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a, res_type);
+    const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b, res_type);
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        const T* a_ptr = static_cast<const T*>(A.data());
+        const T* b_ptr = static_cast<const T*>(B.data());
+        T* res_ptr = static_cast<T*>(dst.data());
+        add_sycl<T>(A,B,dst,a.numel(),q);
+    });
+}
+void SubImpl<Device::SYCL>::execute(const Tensor& a, const Tensor& b,Tensor& dst) {
+    DataType res_type = compute_type(a.dtype(),b.dtype());
+    if(dst.dtype() != res_type){
+        throw std::runtime_error("dst dtype error!");
+    }
+    auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
+    auto& q = ctx_impl->get_queue(); 
+    // 快速路径：相同类型且无需转换
+    if (a.dtype() == b.dtype()) {
+        dispatch_dtype(a.dtype(), [&](auto type_id) {
+            using T = typename decltype(type_id)::type;
+            sub_sycl<T>(a,b,dst,a.numel(),q);
+        });
+        return; 
+    }
+    // 慢速路径：类型不同，需要 Typecast
+    const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a, res_type);
+    const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b, res_type);
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        const T* a_ptr = static_cast<const T*>(A.data());
+        const T* b_ptr = static_cast<const T*>(B.data());
+        T* res_ptr = static_cast<T*>(dst.data());
+        sub_sycl<T>(A,B,dst,a.numel(),q);
+    });
+}
+void DotImpl<Device::SYCL>::execute(const Tensor& a, const Tensor& b,Tensor& dst) {
+    DataType res_type = compute_type(a.dtype(),b.dtype());
+    if(dst.dtype() != res_type){
+        throw std::runtime_error("dst dtype error!");
+    }
+    auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
+    auto& q = ctx_impl->get_queue(); 
+    // 快速路径：相同类型且无需转换
+    if (a.dtype() == b.dtype()) {
+        dispatch_dtype(a.dtype(), [&](auto type_id) {
+            using T = typename decltype(type_id)::type;
+            dot_sycl<T>(a,b,dst,a.numel(),q);
+        });
+        return; 
+    }
+    // 慢速路径：类型不同，需要 Typecast
+    const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a, res_type);
+    const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b, res_type);
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        const T* a_ptr = static_cast<const T*>(A.data());
+        const T* b_ptr = static_cast<const T*>(B.data());
+        T* res_ptr = static_cast<T*>(dst.data());
+        dot_sycl<T>(A,B,dst,a.numel(),q);
+    });
+}
+void DivImpl<Device::SYCL>::execute(const Tensor& a, const Tensor& b,Tensor& dst) {
+    DataType res_type = compute_type(a.dtype(),b.dtype());
+    if(dst.dtype() != res_type){
+        throw std::runtime_error("dst dtype error!");
+    }
+    auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
+    auto& q = ctx_impl->get_queue(); 
+    // 快速路径：相同类型且无需转换
+    if (a.dtype() == b.dtype()) {
+        dispatch_dtype(a.dtype(), [&](auto type_id) {
+            using T = typename decltype(type_id)::type;
+            div_sycl<T>(a,b,dst,a.numel(),q);
+        });
+        return; 
+    }
+    // 慢速路径：类型不同，需要 Typecast
+    const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a, res_type);
+    const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b, res_type);
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        const T* a_ptr = static_cast<const T*>(A.data());
+        const T* b_ptr = static_cast<const T*>(B.data());
+        T* res_ptr = static_cast<T*>(dst.data());
+        div_sycl<T>(A,B,dst,a.numel(),q);
+    });
+}
+// ========================================================================
+Tensor AddImpl<Device::SYCL>::execute(const Tensor& a, float b){
+    Tensor t = ops::Fill(a.shape(),a.dtype(),b);
+    return ops::Add(a, t);
+}
+Tensor SubImpl<Device::SYCL>::execute(const Tensor& a, float b){
+    Tensor t = ops::Fill(a.shape(),a.dtype(),b);
+    return ops::Sub(a, t);
+}
+Tensor DotImpl<Device::SYCL>::execute(const Tensor& a, float b){
+    Tensor t = ops::Fill(a.shape(),a.dtype(),b);
+    return ops::Dot(a, t);
+}
+Tensor DivImpl<Device::SYCL>::execute(const Tensor& a, float b){
+    Tensor t = ops::Fill(a.shape(),a.dtype(),b);
+    return ops::Div(a, t);
+}
+// ========================================================================
 Tensor AddImpl<Device::SYCL>::execute(const Tensor& a, const Tensor& b) {
     // 避免自加修改：a + a 返回新 tensor
     if (&a == &b) ops::Add(a.clone(), b.clone());
@@ -288,58 +452,6 @@ Tensor AddImpl<Device::SYCL>::execute(const Tensor& a, const Tensor& b) {
     }
     return result;
 }
-Tensor AddImpl<Device::SYCL>::execute(const Tensor& a, float b){
-    Tensor t = ops::Fill(a.shape(),a.dtype(),b);
-    return ops::Add(a, t);
-}
-void AddImpl<Device::SYCL>::execute(const Tensor& a, const Tensor& b,Tensor& dst) {
-    DataType res_type = compute_type(a.dtype(),b.dtype());
-    if(dst.dtype() != res_type){
-        throw std::runtime_error("dst dtype error!");
-    }
-    auto& q = ctx_impl->get_queue(); 
-
-    // 快速路径：相同类型且无需转换
-    if (a.dtype() == b.dtype()) {
-        dispatch_dtype(a.dtype(), [&](auto type_id) {
-            using T = typename decltype(type_id)::type;
-            add_sycl<T>(A,B,dst,a.numel(),q);
-        });
-        return; 
-    }
-    // 慢速路径：类型不同，需要 Typecast
-    const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a, res_type);
-    const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b, res_type);
-
-    dispatch_dtype(a.dtype(), [&](auto type_id) {
-        using T = typename decltype(type_id)::type;
-        const T* a_ptr = static_cast<const T*>(A.data());
-        const T* b_ptr = static_cast<const T*>(B.data());
-        T* res_ptr = static_cast<T*>(dst.data());
-        add_sycl<T>(A,B,dst,a.numel(),q);
-    });
-}
-
-
-void SubImpl<Device::SYCL>::execute(Tensor& a,float b){
-        auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
-        auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
-        auto& q = ctx_impl->get_queue(); 
-        size_t size = a.numel();
-        // 分发到模板 kernel（根据 dtype 决定类型）
-        switch (a.dtype()) {
-            case DataType::INT8:            sub_sycl<int8_t>(a, b,size, q);break;
-            case DataType::INT16:           sub_sycl<int16_t>(a, b,size, q);break;
-            case DataType::INT32:           sub_sycl<int32_t>(a, b,size, q);break;
-            case DataType::INT64:           sub_sycl<int64_t>(a, b,size, q);break;
-            case DataType::FLOAT16:         sub_sycl<float16>(a, b,size, q);break;
-            case DataType::BFLOAT16:        sub_sycl<bfloat16>(a, b,size, q);break;
-            case DataType::FLOAT32:         sub_sycl<float32>(a, b,size, q);break;
-            case DataType::FLOAT64:         sub_sycl<float64>(a, b,size, q);break;
-            default:throw std::runtime_error("Unsupported dtype for add");
-        }
-    }
-// uninplace
 Tensor SubImpl<Device::SYCL>::execute(const Tensor& a, const Tensor& b) {
     // 避免自加修改：a + a 返回新 tensor
     if (&a == &b) ops::Sub(a.clone(), b.clone());
@@ -373,59 +485,6 @@ Tensor SubImpl<Device::SYCL>::execute(const Tensor& a, const Tensor& b) {
     }
     return result;
 }
-Tensor SubImpl<Device::SYCL>::execute(const Tensor& a, float b){
-    Tensor t = ops::Fill(a.shape(),a.dtype(),b);
-    return ops::Sub(a, t);
-}
-
-void SubImpl<Device::SYCL>::execute(const Tensor& a, const Tensor& b,Tensor& dst) {
-    DataType res_type = compute_type(a.dtype(),b.dtype());
-    if(dst.dtype() != res_type){
-        throw std::runtime_error("dst dtype error!");
-    }
-    auto& q = ctx_impl->get_queue(); 
-
-    // 快速路径：相同类型且无需转换
-    if (a.dtype() == b.dtype()) {
-        dispatch_dtype(a.dtype(), [&](auto type_id) {
-            using T = typename decltype(type_id)::type;
-            sub_sycl<T>(A,B,dst,a.numel(),q);
-        });
-        return; 
-    }
-    // 慢速路径：类型不同，需要 Typecast
-    const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a, res_type);
-    const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b, res_type);
-
-    dispatch_dtype(a.dtype(), [&](auto type_id) {
-        using T = typename decltype(type_id)::type;
-        const T* a_ptr = static_cast<const T*>(A.data());
-        const T* b_ptr = static_cast<const T*>(B.data());
-        T* res_ptr = static_cast<T*>(dst.data());
-        sub_sycl<T>(A,B,dst,a.numel(),q);
-    });
-}
-
-
- void DotImpl<Device::SYCL>::execute(Tensor& a,float b){
-        auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
-        auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
-        auto& q = ctx_impl->get_queue(); 
-        size_t size = a.numel();
-        // 分发到模板 kernel（根据 dtype 决定类型）
-        switch (a.dtype()) {
-            case DataType::INT8:            dot_sycl<int8_t>(a, b,size, q);break;
-            case DataType::INT16:           dot_sycl<int16_t>(a, b,size, q);break;
-            case DataType::INT32:           dot_sycl<int32_t>(a, b,size, q);break;
-            case DataType::INT64:           dot_sycl<int64_t>(a, b,size, q);break;
-            case DataType::FLOAT16:         dot_sycl<float16>(a, b,size, q);break;
-            case DataType::BFLOAT16:        dot_sycl<bfloat16>(a, b,size, q);break;
-            case DataType::FLOAT32:         dot_sycl<float32>(a, b,size, q);break;
-            case DataType::FLOAT64:         dot_sycl<float64>(a, b,size, q);break;
-            default:throw std::runtime_error("Unsupported dtype for add");
-        }
-    }
-// uninplace
 Tensor DotImpl<Device::SYCL>::execute(const Tensor& a, const Tensor& b) {
         // 避免自加修改：a + a 返回新 tensor
         if (&a == &b) ops::Dot(a.clone(), b.clone());
@@ -459,29 +518,6 @@ Tensor DotImpl<Device::SYCL>::execute(const Tensor& a, const Tensor& b) {
         }
         return result;
     }
-Tensor DotImpl<Device::SYCL>::execute(const Tensor& a, float b){
-        Tensor t = ops::Fill(a.shape(),a.dtype(),b);
-        return ops::Dot(a, t);
-    }
-void DivImpl<Device::SYCL>::execute(Tensor& a,float b){
-        auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
-        auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
-        auto& q = ctx_impl->get_queue(); 
-        size_t size = a.numel();
-        // 分发到模板 kernel（根据 dtype 决定类型）
-        switch (a.dtype()) {
-            case DataType::INT8:            div_sycl<int8_t>(a, b,size, q);break;
-            case DataType::INT16:           div_sycl<int16_t>(a, b,size, q);break;
-            case DataType::INT32:           div_sycl<int32_t>(a, b,size, q);break;
-            case DataType::INT64:           div_sycl<int64_t>(a, b,size, q);break;
-            case DataType::FLOAT16:         div_sycl<float16>(a, b,size, q);break;
-            case DataType::BFLOAT16:        div_sycl<bfloat16>(a, b,size, q);break;
-            case DataType::FLOAT32:         div_sycl<float32>(a, b,size, q);break;
-            case DataType::FLOAT64:         div_sycl<float64>(a, b,size, q);break;
-            default:throw std::runtime_error("Unsupported dtype for add");
-        }
-    }
-// uninplace
 Tensor DivImpl<Device::SYCL>::execute(const Tensor& a, const Tensor& b) {
         // 避免自加修改：a + a 返回新 tensor
         if (&a == &b) ops::Div(a.clone(), b.clone());
@@ -515,29 +551,172 @@ Tensor DivImpl<Device::SYCL>::execute(const Tensor& a, const Tensor& b) {
         }
         return result;
     }
-Tensor DivImpl<Device::SYCL>::execute(const Tensor& a, float b){
-        Tensor t = ops::Fill(a.shape(),a.dtype(),b);
-        return ops::Div(a, t);
-    }
-
+// ========================================================================
 void SinImpl<Device::SYCL>::execute(Tensor& a){
-        auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
-        auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
-        auto& q = ctx_impl->get_queue();
-        void* dst = a.data();
-        void* src = a.data();
-        switch (a.dtype()) {
-            // case DataType::INT8:            sin_sycl<int8_t>(static_cast<int8_t*>(src),static_cast<int8_t*>(dst),a.numel(),q);break;
-            // case DataType::INT16:           sin_sycl<int16_t>(static_cast<int16_t*>(src),static_cast<int16_t*>(dst),a.numel(),q);break;
-            // case DataType::INT32:           sin_sycl<int32_t>(static_cast<int32_t*>(src),static_cast<int32_t*>(dst),a.numel(),q);break;
-            // case DataType::INT64:           sin_sycl<int64_t>(static_cast<int64_t*>(src),static_cast<int64_t*>(dst),a.numel(),q);break;
-            case DataType::FLOAT16:         sin_sycl<float16>(static_cast<float16*>(src),static_cast<float16*>(dst),a.numel(),q);break;
-            case DataType::BFLOAT16:        sin_sycl<bfloat16>(static_cast<bfloat16*>(src),static_cast<bfloat16*>(dst),a.numel(),q);break;
-            case DataType::FLOAT32:         sin_sycl<float32>(static_cast<float32*>(src),static_cast<float32*>(dst),a.numel(),q);break;
-            case DataType::FLOAT64:         sin_sycl<float64>(static_cast<float64*>(src),static_cast<float64*>(dst),a.numel(),q);break;
-            default:throw std::runtime_error("Unsupported dtype for sin");
-        }
+    auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
+    auto& q = ctx_impl->get_queue();
+    void* dst = a.data();
+    void* src = a.data();
+    switch (a.dtype()) {
+        // case DataType::INT8:            sin_sycl<int8_t>(static_cast<int8_t*>(src),static_cast<int8_t*>(dst),a.numel(),q);break;
+        // case DataType::INT16:           sin_sycl<int16_t>(static_cast<int16_t*>(src),static_cast<int16_t*>(dst),a.numel(),q);break;
+        // case DataType::INT32:           sin_sycl<int32_t>(static_cast<int32_t*>(src),static_cast<int32_t*>(dst),a.numel(),q);break;
+        // case DataType::INT64:           sin_sycl<int64_t>(static_cast<int64_t*>(src),static_cast<int64_t*>(dst),a.numel(),q);break;
+        case DataType::FLOAT16:         sin_sycl<float16>(static_cast<float16*>(src),static_cast<float16*>(dst),a.numel(),q);break;
+        case DataType::BFLOAT16:        sin_sycl<bfloat16>(static_cast<bfloat16*>(src),static_cast<bfloat16*>(dst),a.numel(),q);break;
+        case DataType::FLOAT32:         sin_sycl<float32>(static_cast<float32*>(src),static_cast<float32*>(dst),a.numel(),q);break;
+        case DataType::FLOAT64:         sin_sycl<float64>(static_cast<float64*>(src),static_cast<float64*>(dst),a.numel(),q);break;
+        default:throw std::runtime_error("Unsupported dtype for sin");
     }
+}
+void CosImpl<Device::SYCL>::execute(Tensor& a){
+    auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
+    auto& q = ctx_impl->get_queue();
+    void* dst = a.data();
+    void* src = a.data();
+    switch (a.dtype()) {
+        // case DataType::INT8:            cos_sycl<int8_t>(static_cast<int8_t*>(src),static_cast<int8_t*>(dst),a.numel(),q);break;
+        // case DataType::INT16:           cos_sycl<int16_t>(static_cast<int16_t*>(src),static_cast<int16_t*>(dst),a.numel(),q);break;
+        // case DataType::INT32:           cos_sycl<int32_t>(static_cast<int32_t*>(src),static_cast<int32_t*>(dst),a.numel(),q);break;
+        // case DataType::INT64:           cos_sycl<int64_t>(static_cast<int64_t*>(src),static_cast<int64_t*>(dst),a.numel(),q);break;
+        case DataType::FLOAT16:         cos_sycl<float16>(static_cast<float16*>(src),static_cast<float16*>(dst),a.numel(),q);break;
+        case DataType::BFLOAT16:        cos_sycl<bfloat16>(static_cast<bfloat16*>(src),static_cast<bfloat16*>(dst),a.numel(),q);break;
+        case DataType::FLOAT32:         cos_sycl<float32>(static_cast<float32*>(src),static_cast<float32*>(dst),a.numel(),q);break;
+        case DataType::FLOAT64:         cos_sycl<float64>(static_cast<float64*>(src),static_cast<float64*>(dst),a.numel(),q);break;
+        default:throw std::runtime_error("Unsupported dtype for cos");
+    }
+}
+void TanImpl<Device::SYCL>::execute(Tensor& a){
+    auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
+    auto& q = ctx_impl->get_queue();
+    void* dst = a.data();
+    void* src = a.data();
+    switch (a.dtype()) {
+        // case DataType::INT8:            tan_sycl<int8_t>(static_cast<int8_t*>(src),static_cast<int8_t*>(dst),a.numel(),q);break;
+        // case DataType::INT16:           tan_sycl<int16_t>(static_cast<int16_t*>(src),static_cast<int16_t*>(dst),a.numel(),q);break;
+        // case DataType::INT32:           tan_sycl<int32_t>(static_cast<int32_t*>(src),static_cast<int32_t*>(dst),a.numel(),q);break;
+        // case DataType::INT64:           tan_sycl<int64_t>(static_cast<int64_t*>(src),static_cast<int64_t*>(dst),a.numel(),q);break;
+        case DataType::FLOAT16:         tan_sycl<float16>(static_cast<float16*>(src),static_cast<float16*>(dst),a.numel(),q);break;
+        case DataType::BFLOAT16:        tan_sycl<bfloat16>(static_cast<bfloat16*>(src),static_cast<bfloat16*>(dst),a.numel(),q);break;
+        case DataType::FLOAT32:         tan_sycl<float32>(static_cast<float32*>(src),static_cast<float32*>(dst),a.numel(),q);break;
+        case DataType::FLOAT64:         tan_sycl<float64>(static_cast<float64*>(src),static_cast<float64*>(dst),a.numel(),q);break;
+        default:throw std::runtime_error("Unsupported dtype for tan");
+    }
+}
+void ExpImpl<Device::SYCL>::execute(Tensor& a){
+    auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
+    auto& q = ctx_impl->get_queue();
+    void* dst = a.data();
+    void* src = a.data();
+    switch (a.dtype()) {
+        // case DataType::INT8:            exp_sycl<int8_t>(static_cast<int8_t*>(src),static_cast<int8_t*>(dst),a.numel(),q);break;
+        // case DataType::INT16:           exp_sycl<int16_t>(static_cast<int16_t*>(src),static_cast<int16_t*>(dst),a.numel(),q);break;
+        // case DataType::INT32:           exp_sycl<int32_t>(static_cast<int32_t*>(src),static_cast<int32_t*>(dst),a.numel(),q);break;
+        // case DataType::INT64:           exp_sycl<int64_t>(static_cast<int64_t*>(src),static_cast<int64_t*>(dst),a.numel(),q);break;
+        case DataType::FLOAT16:         exp_sycl<float16>(static_cast<float16*>(src),static_cast<float16*>(dst),a.numel(),q);break;
+        case DataType::BFLOAT16:        exp_sycl<bfloat16>(static_cast<bfloat16*>(src),static_cast<bfloat16*>(dst),a.numel(),q);break;
+        case DataType::FLOAT32:         exp_sycl<float32>(static_cast<float32*>(src),static_cast<float32*>(dst),a.numel(),q);break;
+        case DataType::FLOAT64:         exp_sycl<float64>(static_cast<float64*>(src),static_cast<float64*>(dst),a.numel(),q);break;
+        default:throw std::runtime_error("Unsupported dtype for exp");
+    }
+}
+void SqrtImpl<Device::SYCL>::execute(Tensor& a){
+    auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
+    auto& q = ctx_impl->get_queue();
+    void* dst = a.data();
+    void* src = a.data();
+    switch (a.dtype()) {
+        // case DataType::INT8:            sqrt_sycl<int8_t>(static_cast<int8_t*>(src),static_cast<int8_t*>(dst),a.numel(),q);break;
+        // case DataType::INT16:           sqrt_sycl<int16_t>(static_cast<int16_t*>(src),static_cast<int16_t*>(dst),a.numel(),q);break;
+        // case DataType::INT32:           sqrt_sycl<int32_t>(static_cast<int32_t*>(src),static_cast<int32_t*>(dst),a.numel(),q);break;
+        // case DataType::INT64:           sqrt_sycl<int64_t>(static_cast<int64_t*>(src),static_cast<int64_t*>(dst),a.numel(),q);break;
+        case DataType::FLOAT16:         sqrt_sycl<float16>(static_cast<float16*>(src),static_cast<float16*>(dst),a.numel(),q);break;
+        case DataType::BFLOAT16:        sqrt_sycl<bfloat16>(static_cast<bfloat16*>(src),static_cast<bfloat16*>(dst),a.numel(),q);break;
+        case DataType::FLOAT32:         sqrt_sycl<float32>(static_cast<float32*>(src),static_cast<float32*>(dst),a.numel(),q);break;
+        case DataType::FLOAT64:         sqrt_sycl<float64>(static_cast<float64*>(src),static_cast<float64*>(dst),a.numel(),q);break;
+        default:throw std::runtime_error("Unsupported dtype for sigmoid");
+    }
+}
+void PowImpl<Device::SYCL>::execute(Tensor& a,float val){
+    auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
+    auto& q = ctx_impl->get_queue();
+    void* dst = a.data();
+    void* src = a.data();
+    switch (a.dtype()) {
+        // case DataType::INT8:            pow_sycl<int8_t>(static_cast<int8_t*>(src),static_cast<int8_t*>(dst),a.numel(),q);break;
+        // case DataType::INT16:           pow_sycl<int16_t>(static_cast<int16_t*>(src),static_cast<int16_t*>(dst),a.numel(),q);break;
+        // case DataType::INT32:           pow_sycl<int32_t>(static_cast<int32_t*>(src),static_cast<int32_t*>(dst),a.numel(),q);break;
+        // case DataType::INT64:           pow_sycl<int64_t>(static_cast<int64_t*>(src),static_cast<int64_t*>(dst),a.numel(),q);break;
+        case DataType::FLOAT16:         pow_sycl<float16>(static_cast<float16*>(src),static_cast<float16*>(dst),a.numel(),val,q);break;
+        case DataType::BFLOAT16:        pow_sycl<bfloat16>(static_cast<bfloat16*>(src),static_cast<bfloat16*>(dst),a.numel(),val,q);break;
+        case DataType::FLOAT32:         pow_sycl<float32>(static_cast<float32*>(src),static_cast<float32*>(dst),a.numel(),val,q);break;
+        case DataType::FLOAT64:         pow_sycl<float64>(static_cast<float64*>(src),static_cast<float64*>(dst),a.numel(),val,q);break;
+        default:throw std::runtime_error("Unsupported dtype for sigmoid");
+    }
+}
+void LogImpl<Device::SYCL>::execute(Tensor& a,float val){
+    auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
+    auto& q = ctx_impl->get_queue();
+    void* dst = a.data();
+    void* src = a.data();
+    switch (a.dtype()) {
+        // case DataType::INT8:            log_sycl<int8_t>(static_cast<int8_t*>(src),static_cast<int8_t*>(dst),a.numel(),q);break;
+        // case DataType::INT16:           log_sycl<int16_t>(static_cast<int16_t*>(src),static_cast<int16_t*>(dst),a.numel(),q);break;
+        // case DataType::INT32:           log_sycl<int32_t>(static_cast<int32_t*>(src),static_cast<int32_t*>(dst),a.numel(),q);break;
+        // case DataType::INT64:           log_sycl<int64_t>(static_cast<int64_t*>(src),static_cast<int64_t*>(dst),a.numel(),q);break;
+        case DataType::FLOAT16:         log_sycl<float16>(static_cast<float16*>(src),static_cast<float16*>(dst),a.numel(),val,q);break;
+        case DataType::BFLOAT16:        log_sycl<bfloat16>(static_cast<bfloat16*>(src),static_cast<bfloat16*>(dst),a.numel(),val,q);break;
+        case DataType::FLOAT32:         log_sycl<float32>(static_cast<float32*>(src),static_cast<float32*>(dst),a.numel(),val,q);break;
+        case DataType::FLOAT64:         log_sycl<float64>(static_cast<float64*>(src),static_cast<float64*>(dst),a.numel(),val,q);break;
+        default:throw std::runtime_error("Unsupported dtype for sigmoid");
+    }
+}
+void ClampImpl<Device::SYCL>::execute(Tensor& a,float min,float max){
+    auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
+    auto& q = ctx_impl->get_queue();
+    void* src = a.data();
+    void* dst = a.data();
+    switch (a.dtype()) {
+        case DataType::INT8:            clamp_sycl<int8_t>(static_cast<int8_t*>(src),static_cast<int8_t*>(dst),min,max,a.numel(),q);break;
+        case DataType::INT16:           clamp_sycl<int16_t>(static_cast<int16_t*>(src),static_cast<int16_t*>(dst),min,max,a.numel(),q);break;
+        case DataType::INT32:           clamp_sycl<int32_t>(static_cast<int32_t*>(src),static_cast<int32_t*>(dst),min,max,a.numel(),q);break;
+        case DataType::INT64:           clamp_sycl<int64_t>(static_cast<int64_t*>(src),static_cast<int64_t*>(dst),min,max,a.numel(),q);break;
+        case DataType::FLOAT16:         clamp_sycl<float16>(static_cast<float16*>(src),static_cast<float16*>(dst),min,max,a.numel(),q);break;
+        case DataType::BFLOAT16:        clamp_sycl<bfloat16>(static_cast<bfloat16*>(src),static_cast<bfloat16*>(dst),min,max,a.numel(),q);break;
+        case DataType::FLOAT32:         clamp_sycl<float32>(static_cast<float32*>(src),static_cast<float32*>(dst),min,max,a.numel(),q);break;
+        case DataType::FLOAT64:         clamp_sycl<float64>(static_cast<float64*>(src),static_cast<float64*>(dst),min,max,a.numel(),q);break;
+        default:throw std::runtime_error("Unsupported dtype for clamp");
+    }
+}
+void AbsImpl<Device::SYCL>::execute(Tensor& a){
+    auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
+    auto& q = ctx_impl->get_queue();
+
+    void* src = a.data();
+    void* dst = a.data();
+
+    switch (a.dtype()) {
+        case DataType::INT8:            abs_sycl<int8_t>(static_cast<int8_t*>(src),static_cast<int8_t*>(dst),a.numel(),q);break;
+        case DataType::INT16:           abs_sycl<int16_t>(static_cast<int16_t*>(src),static_cast<int16_t*>(dst),a.numel(),q);break;
+        case DataType::INT32:           abs_sycl<int32_t>(static_cast<int32_t*>(src),static_cast<int32_t*>(dst),a.numel(),q);break;
+        case DataType::INT64:           abs_sycl<int64_t>(static_cast<int64_t*>(src),static_cast<int64_t*>(dst),a.numel(),q);break;
+        case DataType::FLOAT16:         abs_sycl<float16>(static_cast<float16*>(src),static_cast<float16*>(dst),a.numel(),q);break;
+        case DataType::BFLOAT16:        abs_sycl<bfloat16>(static_cast<bfloat16*>(src),static_cast<bfloat16*>(dst),a.numel(),q);break;
+        case DataType::FLOAT32:         abs_sycl<float32>(static_cast<float32*>(src),static_cast<float32*>(dst),a.numel(),q);break;
+        case DataType::FLOAT64:         abs_sycl<float64>(static_cast<float64*>(src),static_cast<float64*>(dst),a.numel(),q);break;
+        default:throw std::runtime_error("Unsupported dtype for tanh,only support float");
+    }
+}
+// ========================================================================
 Tensor SinImpl<Device::SYCL>::execute(const Tensor& a){
         auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
         auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
@@ -589,24 +768,6 @@ Tensor SinImpl<Device::SYCL>::execute(const Tensor& a){
             default:throw std::runtime_error("Unsupported dtype for sin");
         }
         return result;
-    }
-void CosImpl<Device::SYCL>::execute(Tensor& a){
-        auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
-        auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
-        auto& q = ctx_impl->get_queue();
-        void* dst = a.data();
-        void* src = a.data();
-        switch (a.dtype()) {
-            // case DataType::INT8:            cos_sycl<int8_t>(static_cast<int8_t*>(src),static_cast<int8_t*>(dst),a.numel(),q);break;
-            // case DataType::INT16:           cos_sycl<int16_t>(static_cast<int16_t*>(src),static_cast<int16_t*>(dst),a.numel(),q);break;
-            // case DataType::INT32:           cos_sycl<int32_t>(static_cast<int32_t*>(src),static_cast<int32_t*>(dst),a.numel(),q);break;
-            // case DataType::INT64:           cos_sycl<int64_t>(static_cast<int64_t*>(src),static_cast<int64_t*>(dst),a.numel(),q);break;
-            case DataType::FLOAT16:         cos_sycl<float16>(static_cast<float16*>(src),static_cast<float16*>(dst),a.numel(),q);break;
-            case DataType::BFLOAT16:        cos_sycl<bfloat16>(static_cast<bfloat16*>(src),static_cast<bfloat16*>(dst),a.numel(),q);break;
-            case DataType::FLOAT32:         cos_sycl<float32>(static_cast<float32*>(src),static_cast<float32*>(dst),a.numel(),q);break;
-            case DataType::FLOAT64:         cos_sycl<float64>(static_cast<float64*>(src),static_cast<float64*>(dst),a.numel(),q);break;
-            default:throw std::runtime_error("Unsupported dtype for cos");
-        }
     }
 Tensor CosImpl<Device::SYCL>::execute(const Tensor& a){
         auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
@@ -660,25 +821,6 @@ Tensor CosImpl<Device::SYCL>::execute(const Tensor& a){
         }
         return result;
     }
-
-void TanImpl<Device::SYCL>::execute(Tensor& a){
-        auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
-        auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
-        auto& q = ctx_impl->get_queue();
-        void* dst = a.data();
-        void* src = a.data();
-        switch (a.dtype()) {
-            // case DataType::INT8:            tan_sycl<int8_t>(static_cast<int8_t*>(src),static_cast<int8_t*>(dst),a.numel(),q);break;
-            // case DataType::INT16:           tan_sycl<int16_t>(static_cast<int16_t*>(src),static_cast<int16_t*>(dst),a.numel(),q);break;
-            // case DataType::INT32:           tan_sycl<int32_t>(static_cast<int32_t*>(src),static_cast<int32_t*>(dst),a.numel(),q);break;
-            // case DataType::INT64:           tan_sycl<int64_t>(static_cast<int64_t*>(src),static_cast<int64_t*>(dst),a.numel(),q);break;
-            case DataType::FLOAT16:         tan_sycl<float16>(static_cast<float16*>(src),static_cast<float16*>(dst),a.numel(),q);break;
-            case DataType::BFLOAT16:        tan_sycl<bfloat16>(static_cast<bfloat16*>(src),static_cast<bfloat16*>(dst),a.numel(),q);break;
-            case DataType::FLOAT32:         tan_sycl<float32>(static_cast<float32*>(src),static_cast<float32*>(dst),a.numel(),q);break;
-            case DataType::FLOAT64:         tan_sycl<float64>(static_cast<float64*>(src),static_cast<float64*>(dst),a.numel(),q);break;
-            default:throw std::runtime_error("Unsupported dtype for tan");
-        }
-    }
 Tensor TanImpl<Device::SYCL>::execute(const Tensor& a){
         auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
         auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
@@ -730,24 +872,6 @@ Tensor TanImpl<Device::SYCL>::execute(const Tensor& a){
             default:throw std::runtime_error("Unsupported dtype for tan");
         }
         return result;
-    }
-void ExpImpl<Device::SYCL>::execute(Tensor& a){
-        auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
-        auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
-        auto& q = ctx_impl->get_queue();
-        void* dst = a.data();
-        void* src = a.data();
-        switch (a.dtype()) {
-            // case DataType::INT8:            exp_sycl<int8_t>(static_cast<int8_t*>(src),static_cast<int8_t*>(dst),a.numel(),q);break;
-            // case DataType::INT16:           exp_sycl<int16_t>(static_cast<int16_t*>(src),static_cast<int16_t*>(dst),a.numel(),q);break;
-            // case DataType::INT32:           exp_sycl<int32_t>(static_cast<int32_t*>(src),static_cast<int32_t*>(dst),a.numel(),q);break;
-            // case DataType::INT64:           exp_sycl<int64_t>(static_cast<int64_t*>(src),static_cast<int64_t*>(dst),a.numel(),q);break;
-            case DataType::FLOAT16:         exp_sycl<float16>(static_cast<float16*>(src),static_cast<float16*>(dst),a.numel(),q);break;
-            case DataType::BFLOAT16:        exp_sycl<bfloat16>(static_cast<bfloat16*>(src),static_cast<bfloat16*>(dst),a.numel(),q);break;
-            case DataType::FLOAT32:         exp_sycl<float32>(static_cast<float32*>(src),static_cast<float32*>(dst),a.numel(),q);break;
-            case DataType::FLOAT64:         exp_sycl<float64>(static_cast<float64*>(src),static_cast<float64*>(dst),a.numel(),q);break;
-            default:throw std::runtime_error("Unsupported dtype for exp");
-        }
     }
 Tensor ExpImpl<Device::SYCL>::execute(const Tensor& a){
         auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
@@ -801,24 +925,6 @@ Tensor ExpImpl<Device::SYCL>::execute(const Tensor& a){
         }
         return result;
     }
-void SqrtImpl<Device::SYCL>::execute(Tensor& a){
-        auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
-        auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
-        auto& q = ctx_impl->get_queue();
-        void* dst = a.data();
-        void* src = a.data();
-        switch (a.dtype()) {
-            // case DataType::INT8:            sqrt_sycl<int8_t>(static_cast<int8_t*>(src),static_cast<int8_t*>(dst),a.numel(),q);break;
-            // case DataType::INT16:           sqrt_sycl<int16_t>(static_cast<int16_t*>(src),static_cast<int16_t*>(dst),a.numel(),q);break;
-            // case DataType::INT32:           sqrt_sycl<int32_t>(static_cast<int32_t*>(src),static_cast<int32_t*>(dst),a.numel(),q);break;
-            // case DataType::INT64:           sqrt_sycl<int64_t>(static_cast<int64_t*>(src),static_cast<int64_t*>(dst),a.numel(),q);break;
-            case DataType::FLOAT16:         sqrt_sycl<float16>(static_cast<float16*>(src),static_cast<float16*>(dst),a.numel(),q);break;
-            case DataType::BFLOAT16:        sqrt_sycl<bfloat16>(static_cast<bfloat16*>(src),static_cast<bfloat16*>(dst),a.numel(),q);break;
-            case DataType::FLOAT32:         sqrt_sycl<float32>(static_cast<float32*>(src),static_cast<float32*>(dst),a.numel(),q);break;
-            case DataType::FLOAT64:         sqrt_sycl<float64>(static_cast<float64*>(src),static_cast<float64*>(dst),a.numel(),q);break;
-            default:throw std::runtime_error("Unsupported dtype for sigmoid");
-        }
-    }
 Tensor SqrtImpl<Device::SYCL>::execute(const Tensor& a){
         auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
         auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
@@ -870,24 +976,6 @@ Tensor SqrtImpl<Device::SYCL>::execute(const Tensor& a){
             default:throw std::runtime_error("Unsupported dtype for tan");
         }
         return result;
-    }
-void PowImpl<Device::SYCL>::execute(Tensor& a,float val){
-        auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
-        auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
-        auto& q = ctx_impl->get_queue();
-        void* dst = a.data();
-        void* src = a.data();
-        switch (a.dtype()) {
-            // case DataType::INT8:            pow_sycl<int8_t>(static_cast<int8_t*>(src),static_cast<int8_t*>(dst),a.numel(),q);break;
-            // case DataType::INT16:           pow_sycl<int16_t>(static_cast<int16_t*>(src),static_cast<int16_t*>(dst),a.numel(),q);break;
-            // case DataType::INT32:           pow_sycl<int32_t>(static_cast<int32_t*>(src),static_cast<int32_t*>(dst),a.numel(),q);break;
-            // case DataType::INT64:           pow_sycl<int64_t>(static_cast<int64_t*>(src),static_cast<int64_t*>(dst),a.numel(),q);break;
-            case DataType::FLOAT16:         pow_sycl<float16>(static_cast<float16*>(src),static_cast<float16*>(dst),a.numel(),val,q);break;
-            case DataType::BFLOAT16:        pow_sycl<bfloat16>(static_cast<bfloat16*>(src),static_cast<bfloat16*>(dst),a.numel(),val,q);break;
-            case DataType::FLOAT32:         pow_sycl<float32>(static_cast<float32*>(src),static_cast<float32*>(dst),a.numel(),val,q);break;
-            case DataType::FLOAT64:         pow_sycl<float64>(static_cast<float64*>(src),static_cast<float64*>(dst),a.numel(),val,q);break;
-            default:throw std::runtime_error("Unsupported dtype for sigmoid");
-        }
     }
 Tensor PowImpl<Device::SYCL>::execute(const Tensor& a,float val){
         auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
@@ -941,24 +1029,6 @@ Tensor PowImpl<Device::SYCL>::execute(const Tensor& a,float val){
         }
         return result;
     }
-void LogImpl<Device::SYCL>::execute(Tensor& a,float val){
-        auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
-        auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
-        auto& q = ctx_impl->get_queue();
-        void* dst = a.data();
-        void* src = a.data();
-        switch (a.dtype()) {
-            // case DataType::INT8:            log_sycl<int8_t>(static_cast<int8_t*>(src),static_cast<int8_t*>(dst),a.numel(),q);break;
-            // case DataType::INT16:           log_sycl<int16_t>(static_cast<int16_t*>(src),static_cast<int16_t*>(dst),a.numel(),q);break;
-            // case DataType::INT32:           log_sycl<int32_t>(static_cast<int32_t*>(src),static_cast<int32_t*>(dst),a.numel(),q);break;
-            // case DataType::INT64:           log_sycl<int64_t>(static_cast<int64_t*>(src),static_cast<int64_t*>(dst),a.numel(),q);break;
-            case DataType::FLOAT16:         log_sycl<float16>(static_cast<float16*>(src),static_cast<float16*>(dst),a.numel(),val,q);break;
-            case DataType::BFLOAT16:        log_sycl<bfloat16>(static_cast<bfloat16*>(src),static_cast<bfloat16*>(dst),a.numel(),val,q);break;
-            case DataType::FLOAT32:         log_sycl<float32>(static_cast<float32*>(src),static_cast<float32*>(dst),a.numel(),val,q);break;
-            case DataType::FLOAT64:         log_sycl<float64>(static_cast<float64*>(src),static_cast<float64*>(dst),a.numel(),val,q);break;
-            default:throw std::runtime_error("Unsupported dtype for sigmoid");
-        }
-    }
 Tensor LogImpl<Device::SYCL>::execute(const Tensor& a,float val){
         auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
         auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
@@ -1011,24 +1081,6 @@ Tensor LogImpl<Device::SYCL>::execute(const Tensor& a,float val){
         }
         return result;
     }
-void ClampImpl<Device::SYCL>::execute(Tensor& a,float min,float max){
-        auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
-        auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
-        auto& q = ctx_impl->get_queue();
-        void* src = a.data();
-        void* dst = a.data();
-        switch (a.dtype()) {
-            case DataType::INT8:            clamp_sycl<int8_t>(static_cast<int8_t*>(src),static_cast<int8_t*>(dst),min,max,a.numel(),q);break;
-            case DataType::INT16:           clamp_sycl<int16_t>(static_cast<int16_t*>(src),static_cast<int16_t*>(dst),min,max,a.numel(),q);break;
-            case DataType::INT32:           clamp_sycl<int32_t>(static_cast<int32_t*>(src),static_cast<int32_t*>(dst),min,max,a.numel(),q);break;
-            case DataType::INT64:           clamp_sycl<int64_t>(static_cast<int64_t*>(src),static_cast<int64_t*>(dst),min,max,a.numel(),q);break;
-            case DataType::FLOAT16:         clamp_sycl<float16>(static_cast<float16*>(src),static_cast<float16*>(dst),min,max,a.numel(),q);break;
-            case DataType::BFLOAT16:        clamp_sycl<bfloat16>(static_cast<bfloat16*>(src),static_cast<bfloat16*>(dst),min,max,a.numel(),q);break;
-            case DataType::FLOAT32:         clamp_sycl<float32>(static_cast<float32*>(src),static_cast<float32*>(dst),min,max,a.numel(),q);break;
-            case DataType::FLOAT64:         clamp_sycl<float64>(static_cast<float64*>(src),static_cast<float64*>(dst),min,max,a.numel(),q);break;
-            default:throw std::runtime_error("Unsupported dtype for clamp");
-        }
-    }
 Tensor ClampImpl<Device::SYCL>::execute(const Tensor& a,float min,float max){
         auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
         auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
@@ -1048,27 +1100,6 @@ Tensor ClampImpl<Device::SYCL>::execute(const Tensor& a,float min,float max){
             default:throw std::runtime_error("Unsupported dtype for clamp");
         }
         return result;
-    }
-
-void AbsImpl<Device::SYCL>::execute(Tensor& a){
-        auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
-        auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
-        auto& q = ctx_impl->get_queue();
-
-        void* src = a.data();
-        void* dst = a.data();
-
-        switch (a.dtype()) {
-            case DataType::INT8:            abs_sycl<int8_t>(static_cast<int8_t*>(src),static_cast<int8_t*>(dst),a.numel(),q);break;
-            case DataType::INT16:           abs_sycl<int16_t>(static_cast<int16_t*>(src),static_cast<int16_t*>(dst),a.numel(),q);break;
-            case DataType::INT32:           abs_sycl<int32_t>(static_cast<int32_t*>(src),static_cast<int32_t*>(dst),a.numel(),q);break;
-            case DataType::INT64:           abs_sycl<int64_t>(static_cast<int64_t*>(src),static_cast<int64_t*>(dst),a.numel(),q);break;
-            case DataType::FLOAT16:         abs_sycl<float16>(static_cast<float16*>(src),static_cast<float16*>(dst),a.numel(),q);break;
-            case DataType::BFLOAT16:        abs_sycl<bfloat16>(static_cast<bfloat16*>(src),static_cast<bfloat16*>(dst),a.numel(),q);break;
-            case DataType::FLOAT32:         abs_sycl<float32>(static_cast<float32*>(src),static_cast<float32*>(dst),a.numel(),q);break;
-            case DataType::FLOAT64:         abs_sycl<float64>(static_cast<float64*>(src),static_cast<float64*>(dst),a.numel(),q);break;
-            default:throw std::runtime_error("Unsupported dtype for tanh,only support float");
-        }
     }
 Tensor AbsImpl<Device::SYCL>::execute(const Tensor& a){
         auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
@@ -1090,19 +1121,18 @@ Tensor AbsImpl<Device::SYCL>::execute(const Tensor& a){
         }
         return result;
     }
-
- template struct AddImpl<Device::SYCL>;
- template struct SubImpl<Device::SYCL>;
- template struct DotImpl<Device::SYCL>;
- template struct DivImpl<Device::SYCL>;
- template struct SinImpl<Device::SYCL>;
- template struct CosImpl<Device::SYCL>;
- template struct TanImpl<Device::SYCL>;
- template struct ExpImpl<Device::SYCL>;
- template struct SqrtImpl<Device::SYCL>;
- template struct PowImpl<Device::SYCL>;
- template struct LogImpl<Device::SYCL>;
- template struct ClampImpl<Device::SYCL>;
- template struct AbsImpl<Device::SYCL>;
-
+// ========================================================================
+template struct AddImpl<Device::SYCL>;
+template struct SubImpl<Device::SYCL>;
+template struct DotImpl<Device::SYCL>;
+template struct DivImpl<Device::SYCL>;
+template struct SinImpl<Device::SYCL>;
+template struct CosImpl<Device::SYCL>;
+template struct TanImpl<Device::SYCL>;
+template struct ExpImpl<Device::SYCL>;
+template struct SqrtImpl<Device::SYCL>;
+template struct PowImpl<Device::SYCL>;
+template struct LogImpl<Device::SYCL>;
+template struct ClampImpl<Device::SYCL>;
+template struct AbsImpl<Device::SYCL>;
 }

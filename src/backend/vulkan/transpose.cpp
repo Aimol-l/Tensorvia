@@ -1,5 +1,6 @@
 ﻿
 #include "backend/vulkan/ops/transpose.h"
+using namespace via;
 
 namespace ops {
 

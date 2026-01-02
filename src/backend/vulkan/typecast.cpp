@@ -1,5 +1,6 @@
 #include "backend/vulkan/ops/typecast.h"
 #include "ops.h"
+using namespace via;
 
 namespace ops {
 Tensor TypecastImpl<Device::VULKAN>::execute(const Tensor& a, DataType dst_type) {

@@ -2,38 +2,30 @@
 #include "backend/cuda/cuda_tensor.h"
 
 namespace ops {
-template <Device D> struct AddImpl;
-template <Device D> struct SubImpl;
-template <Device D> struct DotImpl;
-template <Device D> struct DivImpl;
-template <Device D> struct SinImpl;
-template <Device D> struct CosImpl;
-template <Device D> struct TanImpl;
-template <Device D> struct PowImpl;
-template <Device D> struct LogImpl;
-template <Device D> struct ExpImpl;
-template <Device D> struct SqrtImpl;
-template <Device D> struct AbsImpl;
-template <Device D> struct ClampImpl;
+template <via::Device D> struct AddImpl;
+template <via::Device D> struct SubImpl;
+template <via::Device D> struct DotImpl;
+template <via::Device D> struct DivImpl;
+template <via::Device D> struct SinImpl;
+template <via::Device D> struct CosImpl;
+template <via::Device D> struct TanImpl;
+template <via::Device D> struct PowImpl;
+template <via::Device D> struct LogImpl;
+template <via::Device D> struct ExpImpl;
+template <via::Device D> struct SqrtImpl;
+template <via::Device D> struct AbsImpl;
+template <via::Device D> struct ClampImpl;
 
 
 template <>
-struct AddImpl<Device::CUDA> {
+struct AddImpl<via::Device::CUDA> {
     static void execute(Tensor& a,float b);
     static Tensor execute(const Tensor& a, float b);
     static Tensor execute(const Tensor& a, const Tensor& b);
     static void execute(const Tensor& a, const Tensor& b,Tensor& dst);
 };
 template <>
-struct SubImpl<Device::CUDA> {
-    static void execute(Tensor& a,float b);
-    static Tensor execute(const Tensor& a, float b);
-    static Tensor execute(const Tensor& a, const Tensor& b);
-    static void execute(const Tensor& a, const Tensor& b,Tensor& dst);
-
-};
-template <>
-struct DotImpl<Device::CUDA> {
+struct SubImpl<via::Device::CUDA> {
     static void execute(Tensor& a,float b);
     static Tensor execute(const Tensor& a, float b);
     static Tensor execute(const Tensor& a, const Tensor& b);
@@ -41,7 +33,15 @@ struct DotImpl<Device::CUDA> {
 
 };
 template <>
-struct DivImpl<Device::CUDA> {
+struct DotImpl<via::Device::CUDA> {
+    static void execute(Tensor& a,float b);
+    static Tensor execute(const Tensor& a, float b);
+    static Tensor execute(const Tensor& a, const Tensor& b);
+    static void execute(const Tensor& a, const Tensor& b,Tensor& dst);
+
+};
+template <>
+struct DivImpl<via::Device::CUDA> {
     static void execute(Tensor& a,float b);
     static Tensor execute(const Tensor& a, float b);
     static Tensor execute(const Tensor& a, const Tensor& b);
@@ -49,63 +49,63 @@ struct DivImpl<Device::CUDA> {
 
 };  
 template <>
-struct SinImpl<Device::CUDA> {
+struct SinImpl<via::Device::CUDA> {
     static void execute(Tensor& a);
     static Tensor execute(const Tensor& a);
 };
 template <>
-struct CosImpl<Device::CUDA> {
+struct CosImpl<via::Device::CUDA> {
     static void execute(Tensor& a);
     static Tensor execute(const Tensor& a);
 };
 template <>
-struct TanImpl<Device::CUDA> {
+struct TanImpl<via::Device::CUDA> {
     static void execute(Tensor& a);
     static Tensor execute(const Tensor& a);
 };
 template <>
-struct PowImpl<Device::CUDA> {
+struct PowImpl<via::Device::CUDA> {
     static void execute(Tensor& a,float val);
     static Tensor execute(const Tensor& a,float val);
 };
 template <>
-struct LogImpl<Device::CUDA> {
+struct LogImpl<via::Device::CUDA> {
     static void execute(Tensor& a,float val);
     static Tensor execute(const Tensor& a,float val);
 };
 template <>
-struct ExpImpl<Device::CUDA> {
+struct ExpImpl<via::Device::CUDA> {
     static void execute(Tensor& a);
     static Tensor execute(const Tensor& a);
 };
 template <>
-struct SqrtImpl<Device::CUDA> {
+struct SqrtImpl<via::Device::CUDA> {
     static void execute(Tensor& a);
     static Tensor execute(const Tensor& a);
 };
 template <>
-struct AbsImpl<Device::CUDA> {
+struct AbsImpl<via::Device::CUDA> {
     static void execute(Tensor& a);
     static Tensor execute(const Tensor& a);
 };
 template <>
-struct ClampImpl<Device::CUDA> {
+struct ClampImpl<via::Device::CUDA> {
     static void execute(Tensor& a,float min,float max);
     static Tensor execute(const Tensor& a,float min,float max);
 };
 
-extern template struct AddImpl<Device::CUDA>;
-extern template struct SubImpl<Device::CUDA>;
-extern template struct DotImpl<Device::CUDA>;
-extern template struct DivImpl<Device::CUDA>;
-extern template struct SinImpl<Device::CUDA>;
-extern template struct CosImpl<Device::CUDA>;
-extern template struct TanImpl<Device::CUDA>;
-extern template struct PowImpl<Device::CUDA>;
-extern template struct LogImpl<Device::CUDA>;
-extern template struct ExpImpl<Device::CUDA>;
-extern template struct SqrtImpl<Device::CUDA>;
-extern template struct AbsImpl<Device::CUDA>;
-extern template struct ClampImpl<Device::CUDA>;
+extern template struct AddImpl<via::Device::CUDA>;
+extern template struct SubImpl<via::Device::CUDA>;
+extern template struct DotImpl<via::Device::CUDA>;
+extern template struct DivImpl<via::Device::CUDA>;
+extern template struct SinImpl<via::Device::CUDA>;
+extern template struct CosImpl<via::Device::CUDA>;
+extern template struct TanImpl<via::Device::CUDA>;
+extern template struct PowImpl<via::Device::CUDA>;
+extern template struct LogImpl<via::Device::CUDA>;
+extern template struct ExpImpl<via::Device::CUDA>;
+extern template struct SqrtImpl<via::Device::CUDA>;
+extern template struct AbsImpl<via::Device::CUDA>;
+extern template struct ClampImpl<via::Device::CUDA>;
 
 }

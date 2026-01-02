@@ -4,11 +4,11 @@
 
 namespace ops {
 
-template <Device D>
+template <via::Device D>
 struct TransposeImpl;
 
 template <>
-struct TransposeImpl<Device::CPU> {
+struct TransposeImpl<via::Device::CPU> {
     static void execute(Tensor& a);
 
     static Tensor execute(const Tensor& a, std::initializer_list<int64_t> axes);
@@ -16,5 +16,5 @@ struct TransposeImpl<Device::CPU> {
 
 };
 
-extern template struct TransposeImpl<Device::CPU>;
+extern template struct TransposeImpl<via::Device::CPU>;
 }  // namespace ops

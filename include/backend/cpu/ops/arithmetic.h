@@ -4,35 +4,35 @@
 
 namespace ops {
 
-template <Device D>
+template <via::Device D>
 struct AddImpl;
-template <Device D>
+template <via::Device D>
 struct SubImpl;
-template <Device D>
+template <via::Device D>
 struct DotImpl;
-template <Device D>
+template <via::Device D>
 struct DivImpl;
-template <Device D>
+template <via::Device D>
 struct SinImpl;
-template <Device D>
+template <via::Device D>
 struct CosImpl;
-template <Device D>
+template <via::Device D>
 struct TanImpl;
-template <Device D>
+template <via::Device D>
 struct PowImpl;
-template <Device D>
+template <via::Device D>
 struct LogImpl;
-template <Device D>
+template <via::Device D>
 struct ExpImpl;
-template <Device D>
+template <via::Device D>
 struct SqrtImpl;
-template <Device D>
+template <via::Device D>
 struct AbsImpl;
-template <Device D>
+template <via::Device D>
 struct ClampImpl;
 
 template <>
-struct AddImpl<Device::CPU> {
+struct AddImpl<via::Device::CPU> {
     static void execute(Tensor& a, float b);
     static Tensor execute(const Tensor& a, float b);
     static Tensor execute(const Tensor& a, const Tensor& b);
@@ -40,7 +40,7 @@ struct AddImpl<Device::CPU> {
 };
 
 template <>
-struct SubImpl<Device::CPU> {
+struct SubImpl<via::Device::CPU> {
     static void execute(Tensor& a, float b);
     static Tensor execute(const Tensor& a, float b);
     static Tensor execute(const Tensor& a, const Tensor& b);
@@ -48,16 +48,7 @@ struct SubImpl<Device::CPU> {
 };
 
 template <>
-struct DotImpl<Device::CPU> {
-    static void execute(Tensor& a, float b);
-    static Tensor execute(const Tensor& a, const Tensor& b);
-    static Tensor execute(const Tensor& a, float b);
-    static void execute(const Tensor& a, const Tensor& b,Tensor& dst);
-
-};
-
-template <>
-struct DivImpl<Device::CPU> {
+struct DotImpl<via::Device::CPU> {
     static void execute(Tensor& a, float b);
     static Tensor execute(const Tensor& a, const Tensor& b);
     static Tensor execute(const Tensor& a, float b);
@@ -66,70 +57,79 @@ struct DivImpl<Device::CPU> {
 };
 
 template <>
-struct AbsImpl<Device::CPU> {
+struct DivImpl<via::Device::CPU> {
+    static void execute(Tensor& a, float b);
+    static Tensor execute(const Tensor& a, const Tensor& b);
+    static Tensor execute(const Tensor& a, float b);
+    static void execute(const Tensor& a, const Tensor& b,Tensor& dst);
+
+};
+
+template <>
+struct AbsImpl<via::Device::CPU> {
     static void execute(Tensor& a);
     static Tensor execute(const Tensor& a);
 };
 
 template <>
-struct SinImpl<Device::CPU> {
+struct SinImpl<via::Device::CPU> {
     static void execute(Tensor& a);
     static Tensor execute(const Tensor& a);
 };
 
 template <>
-struct CosImpl<Device::CPU> {
+struct CosImpl<via::Device::CPU> {
     static void execute(Tensor& a);
     static Tensor execute(const Tensor& a);
 };
 
 template <>
-struct TanImpl<Device::CPU> {
+struct TanImpl<via::Device::CPU> {
     static void execute(Tensor& a);
     static Tensor execute(const Tensor& a);
 };
 
 template <>
-struct ExpImpl<Device::CPU> {
+struct ExpImpl<via::Device::CPU> {
     static void execute(Tensor& a);
     static Tensor execute(const Tensor& a);
 };
 
 template <>
-struct SqrtImpl<Device::CPU> {
+struct SqrtImpl<via::Device::CPU> {
     static void execute(Tensor& a);
     static Tensor execute(const Tensor& a);
 };
 
 template <>
-struct LogImpl<Device::CPU> {
+struct LogImpl<via::Device::CPU> {
     static void execute(Tensor& a, float val);
     static Tensor execute(const Tensor& a, float val);
 };
 
 template <>
-struct PowImpl<Device::CPU> {
+struct PowImpl<via::Device::CPU> {
     static void execute(Tensor& a, float val);
     static Tensor execute(const Tensor& a, float val);
 };
 
 template <>
-struct ClampImpl<Device::CPU> {
+struct ClampImpl<via::Device::CPU> {
     static void execute(Tensor& a, float min, float max);
     static Tensor execute(const Tensor& a, float min, float max);
 };
 
-extern template struct AddImpl<Device::CPU>;
-extern template struct SubImpl<Device::CPU>;
-extern template struct DotImpl<Device::CPU>;
-extern template struct DivImpl<Device::CPU>;
-extern template struct SinImpl<Device::CPU>;
-extern template struct CosImpl<Device::CPU>;
-extern template struct TanImpl<Device::CPU>;
-extern template struct PowImpl<Device::CPU>;
-extern template struct LogImpl<Device::CPU>;
-extern template struct ExpImpl<Device::CPU>;
-extern template struct SqrtImpl<Device::CPU>;
-extern template struct AbsImpl<Device::CPU>;
-extern template struct ClampImpl<Device::CPU>;
+extern template struct AddImpl<via::Device::CPU>;
+extern template struct SubImpl<via::Device::CPU>;
+extern template struct DotImpl<via::Device::CPU>;
+extern template struct DivImpl<via::Device::CPU>;
+extern template struct SinImpl<via::Device::CPU>;
+extern template struct CosImpl<via::Device::CPU>;
+extern template struct TanImpl<via::Device::CPU>;
+extern template struct PowImpl<via::Device::CPU>;
+extern template struct LogImpl<via::Device::CPU>;
+extern template struct ExpImpl<via::Device::CPU>;
+extern template struct SqrtImpl<via::Device::CPU>;
+extern template struct AbsImpl<via::Device::CPU>;
+extern template struct ClampImpl<via::Device::CPU>;
 }  // namespace ops

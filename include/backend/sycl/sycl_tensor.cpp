@@ -1,11 +1,13 @@
-﻿#include "sycl_tensor.h"
+﻿#include <print>
+#include "sycl_tensor.h"
 #include "core/types.h"
-#include <print>
+#include "ops/repack.h"
 
-void SYCLTensor::init(void *ptr, std::vector<int64_t> shape, DataType dtype, std::shared_ptr<SYCLContext> context){
+using namespace via;
+
+void SYCLTensor::init(void *ptr,size_t numel, DataType dtype, std::shared_ptr<SYCLContext> context){
     m_dtype = dtype;
-    m_shape = shape;
-    m_numel = calc_numel(shape);
+    m_numel = numel;
     m_context = context;
     auto& queue = m_context->get_queue();
     void* allocated_ptr = nullptr;
@@ -27,22 +29,22 @@ void SYCLTensor::init(void *ptr, std::vector<int64_t> shape, DataType dtype, std
     m_data.reset(allocated_ptr);
 }
 
-SYCLTensor::SYCLTensor(std::vector<int64_t> shape, DataType dtype,std::shared_ptr<SYCLContext> context):
+SYCLTensor::SYCLTensor(size_t numel, via::DataType dtype,std::shared_ptr<SYCLContext> context):
     m_data(nullptr,FreeDeleter(context->get_queue(), dtype)){
     // LOG_INFO("Create SYCL tensor");
-    this->init(nullptr, shape, dtype, context);
+    this->init(nullptr, numel, dtype, context);
 }
-SYCLTensor::SYCLTensor(void *ptr, std::vector<int64_t> shape, DataType dtype, std::shared_ptr<SYCLContext> context):
+SYCLTensor::SYCLTensor(void* ptr,size_t numel, via::DataType dtype,std::shared_ptr<SYCLContext> context):
     m_data(nullptr,FreeDeleter(context->get_queue(), dtype))
 {
     // LOG_INFO("Create SYCL tensor from raw pointer");
-    this->init(ptr, shape, dtype, context);
+    this->init(ptr, numel, dtype, context);
 }
 
 std::unique_ptr<TensorImpl> SYCLTensor::clone() const
 {
     auto& queue = m_context->get_queue();
-    auto cloned = std::make_unique<SYCLTensor>(m_shape, m_dtype,m_context);
+    auto cloned = std::make_unique<SYCLTensor>(m_numel, m_dtype,m_context);
     size_t bytes = this->m_numel * calc_dtype_size(this->m_dtype);
     queue.memcpy(cloned->m_data.get(), m_data.get(), bytes).wait();
     return cloned;
@@ -70,11 +72,8 @@ void* SYCLTensor::data() { return m_data.get(); }
 const void* SYCLTensor::data() const  { return m_data.get();}
 size_t SYCLTensor::numel() const  { return m_numel; }
 
-void SYCLTensor::reshape(std::vector<int64_t> &newshape){
-    m_shape.clear();
-    m_shape.assign(newshape.begin(), newshape.end());
-}
-void SYCLTensor::reshape(std::initializer_list<int64_t> newshape){
-    m_shape.clear();
-    m_shape.assign(newshape.begin(), newshape.end());
+std::unique_ptr<TensorImpl> SYCLTensor::clone_as_contiguous(const Metadata& meta) const{
+    auto cloned = std::make_unique<SYCLTensor>(meta.numel, this->m_dtype, this->m_context);
+    RepackImpl<via::Device::SYCL>::execute(meta,this->m_data.get(),cloned->m_data.get(),this->m_context);
+    return cloned;
 }

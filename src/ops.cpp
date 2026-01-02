@@ -46,6 +46,9 @@
     #include "backend/vulkan/ops/transpose.h"
     #include "backend/vulkan/ops/typecast.h"
 #endif
+
+using namespace via;
+
 //*************************************************
 namespace ops {
     OPS_API void println(Tensor & a){

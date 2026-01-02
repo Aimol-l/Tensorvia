@@ -1,7 +1,7 @@
 @PACKAGE_INIT@
 
 # 包含 targets
-include("${CMAKE_CURRENT_LIST_DIR}/TensorViaTargets.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/TensorviaTargets.cmake")
 
 # 导出公共头文件目录
 set(TensorVia_INCLUDE_DIRS "@CMAKE_INSTALL_FULL_INCLUDEDIR@")

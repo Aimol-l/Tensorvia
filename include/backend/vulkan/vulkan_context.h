@@ -7,6 +7,7 @@
 #include <mutex>
 #include <print>
 #include <fstream>
+#include "core/type_traits.h"
 
 class VulkanContext : public ContextImpl {
 
@@ -66,8 +67,8 @@ public:
 
     // 注册算子和背后对应的计算管线。
     // 创建管线需要使用管线布局，管线布局负责描述使用什么类型的shader(vert/frag/compute),确定使用多少输入数据(binding)
-    void registerOp(OpType ops,std::vector<DataType>& Dtypes,int tensor_count, int params_size);
-    void registerOp(OpType ops,DataType Dtype,int tensor_count, int params_size);
+    void registerOp(via::OpType ops,std::vector<via::DataType>& Dtypes,int tensor_count, int params_size);
+    void registerOp(via::OpType ops,via::DataType Dtype,int tensor_count, int params_size);
 
 
     template<typename T>
@@ -75,8 +76,8 @@ public:
 
     // 高层接口：用户只需传 buffer
     void submitCompute(
-        OpType op,
-        DataType dtype,
+        via::OpType op,
+        via::DataType dtype,
         const std::vector<vk::Buffer>& buffers,
         uint32_t gx, uint32_t gy, uint32_t gz,
         const void* push_constants,

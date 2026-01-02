@@ -4,12 +4,12 @@
 #include "core/tensor.h"
 
 
-template <Device D> struct RepackImpl;
+template <via::Device D> struct RepackImpl;
 
 template <>
-struct RepackImpl<Device::CUDA> {
+struct RepackImpl<via::Device::CUDA> {
     static void execute(const Metadata& meta,void* input,void* output);
 };
 
 // 显式实例化声明
-extern template struct RepackImpl<Device::CUDA>;
+extern template struct RepackImpl<via::Device::CUDA>;

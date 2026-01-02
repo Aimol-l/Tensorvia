@@ -5,14 +5,14 @@
 namespace ops {
 
 //************************************************
-template <Device D>
+template <via::Device D>
 struct TypecastImpl;
 //************************************************
 
 template <>
-struct TypecastImpl<Device::SYCL>{
-    static Tensor execute(const Tensor& a, DataType dst_type);
+struct TypecastImpl<via::Device::SYCL>{
+    static Tensor execute(const Tensor& a, via::DataType dst_type);
 };
 
-extern template struct TypecastImpl<Device::SYCL>;
+extern template struct TypecastImpl<via::Device::SYCL>;
 }

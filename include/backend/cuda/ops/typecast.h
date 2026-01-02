@@ -3,14 +3,14 @@
 
 namespace ops {
 
-template <Device D> struct TypecastImpl;
+template <via::Device D> struct TypecastImpl;
 
 template <>
-struct TypecastImpl<Device::CUDA>{
-    static Tensor execute(const Tensor& a, DataType dst_type);
+struct TypecastImpl<via::Device::CUDA>{
+    static Tensor execute(const Tensor& a, via::DataType dst_type);
 };
 
-extern template struct TypecastImpl<Device::CUDA>;
+extern template struct TypecastImpl<via::Device::CUDA>;
 
 
 }

@@ -5,72 +5,72 @@
 namespace ops {
 
 // ************************************** 声明 **************************************
-template <Device D>
+template <via::Device D>
 struct SumImpl;
-template <Device D>
+template <via::Device D>
 struct MeanImpl;
-template <Device D>
+template <via::Device D>
 struct MaxImpl;
-template <Device D>
+template <via::Device D>
 struct MinImpl;
-template <Device D>
+template <via::Device D>
 struct ArgMaxImpl;
-template <Device D>
+template <via::Device D>
 struct ArgMinImpl;
-template <Device D>
+template <via::Device D>
 struct AllImpl;
-template <Device D>
+template <via::Device D>
 struct AnyImpl;
 // ************************************** 特化 **************************************
 template <>
-struct SumImpl<Device::CPU> {
+struct SumImpl<via::Device::CPU> {
     static float execute(const Tensor& a);
 
     static Tensor execute(const Tensor& a, int axis);
 };
 template <>
-struct MinImpl<Device::CPU> {
+struct MinImpl<via::Device::CPU> {
     static float execute(const Tensor& a);
 
     static Tensor execute(const Tensor& a, int axis);
 };
 template <>
-struct MaxImpl<Device::CPU> {
+struct MaxImpl<via::Device::CPU> {
     static float execute(const Tensor& a);
 
     static Tensor execute(const Tensor& a, int axis);
 };
 template <>
-struct MeanImpl<Device::CPU> {
+struct MeanImpl<via::Device::CPU> {
     static float execute(const Tensor& a);
     static Tensor execute(const Tensor& a, int axis);
 };
 template <>
-struct ArgMaxImpl<Device::CPU> {
+struct ArgMaxImpl<via::Device::CPU> {
     static Tensor execute(const Tensor& a, int axis);
 };
 template <>
-struct ArgMinImpl<Device::CPU> {
+struct ArgMinImpl<via::Device::CPU> {
     static Tensor execute(const Tensor& a, int axis);
 };
 
 template <>
-struct AllImpl<Device::CPU> {
+struct AllImpl<via::Device::CPU> {
     static bool execute(const Tensor& a, float value);
 };
 
 template <>
-struct AnyImpl<Device::CPU> {
+struct AnyImpl<via::Device::CPU> {
     static bool execute(const Tensor& a, float value);
 };
 
-extern template struct SumImpl<Device::CPU>;
-extern template struct MeanImpl<Device::CPU>;
-extern template struct MaxImpl<Device::CPU>;
-extern template struct MinImpl<Device::CPU>;
-extern template struct ArgMaxImpl<Device::CPU>;
-extern template struct ArgMinImpl<Device::CPU>;
-extern template struct AllImpl<Device::CPU>;
-extern template struct AnyImpl<Device::CPU>;
+extern template struct SumImpl<via::Device::CPU>;
+extern template struct MeanImpl<via::Device::CPU>;
+extern template struct MaxImpl<via::Device::CPU>;
+extern template struct MinImpl<via::Device::CPU>;
+extern template struct ArgMaxImpl<via::Device::CPU>;
+extern template struct ArgMinImpl<via::Device::CPU>;
+extern template struct AllImpl<via::Device::CPU>;
+extern template struct AnyImpl<via::Device::CPU>;
 
 }  // namespace ops

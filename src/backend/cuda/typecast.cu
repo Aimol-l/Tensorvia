@@ -1,4 +1,5 @@
 #include "backend/cuda/ops/typecast.h"
+using namespace via;
 
 namespace ops {
 

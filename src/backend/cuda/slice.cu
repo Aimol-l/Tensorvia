@@ -1,4 +1,5 @@
 #include "backend/cuda/ops/slice.h"
+using namespace via;
 
 namespace ops {
 

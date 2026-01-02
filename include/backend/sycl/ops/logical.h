@@ -6,52 +6,52 @@ namespace ops {
 
 
 //************************************
-template <Device D> struct EqualImpl;
-template <Device D> struct NotEqualImpl;
-template <Device D> struct GreaterImpl;
-template <Device D> struct LessImpl;
-template <Device D> struct GreaterEqualImpl;
-template <Device D> struct LessEqualImpl;
-template <Device D> struct NonZeroImpl;
+template <via::Device D> struct EqualImpl;
+template <via::Device D> struct NotEqualImpl;
+template <via::Device D> struct GreaterImpl;
+template <via::Device D> struct LessImpl;
+template <via::Device D> struct GreaterEqualImpl;
+template <via::Device D> struct LessEqualImpl;
+template <via::Device D> struct NonZeroImpl;
 //************************************
 
 template <>
-struct EqualImpl<Device::SYCL> {
+struct EqualImpl<via::Device::SYCL> {
     static Tensor execute(const Tensor& a,const Tensor& b) ;
 };
 template <>
-struct NotEqualImpl<Device::SYCL> {
+struct NotEqualImpl<via::Device::SYCL> {
     static Tensor execute(const Tensor& a,const Tensor& b) ;
 
 };
 template <>
-struct GreaterImpl<Device::SYCL> {
+struct GreaterImpl<via::Device::SYCL> {
    static Tensor execute(const Tensor& a,const Tensor& b) ;
 };
 template <>
-struct LessImpl<Device::SYCL> {
+struct LessImpl<via::Device::SYCL> {
     static Tensor execute(const Tensor& a,const Tensor& b) ;
 };
 template <>
-struct GreaterEqualImpl<Device::SYCL> {
+struct GreaterEqualImpl<via::Device::SYCL> {
     static Tensor execute(const Tensor& a,const Tensor& b) ;
 };
 template <>
-struct LessEqualImpl<Device::SYCL> {
+struct LessEqualImpl<via::Device::SYCL> {
     static Tensor execute(const Tensor& a,const Tensor& b) ;
 };
 template <>
-struct NonZeroImpl<Device::SYCL> {
+struct NonZeroImpl<via::Device::SYCL> {
     static size_t execute(const Tensor& a) ;
 };
 
-extern template struct EqualImpl<Device::SYCL>;
-extern template struct NotEqualImpl<Device::SYCL>;
-extern template struct GreaterImpl<Device::SYCL>;
-extern template struct LessImpl<Device::SYCL>;
-extern template struct GreaterEqualImpl<Device::SYCL>;
-extern template struct LessEqualImpl<Device::SYCL>;
-extern template struct NonZeroImpl<Device::SYCL>;
+extern template struct EqualImpl<via::Device::SYCL>;
+extern template struct NotEqualImpl<via::Device::SYCL>;
+extern template struct GreaterImpl<via::Device::SYCL>;
+extern template struct LessImpl<via::Device::SYCL>;
+extern template struct GreaterEqualImpl<via::Device::SYCL>;
+extern template struct LessEqualImpl<via::Device::SYCL>;
+extern template struct NonZeroImpl<via::Device::SYCL>;
 
 
 }

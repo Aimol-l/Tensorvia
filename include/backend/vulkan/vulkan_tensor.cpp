@@ -1,5 +1,6 @@
 ﻿#include "vulkan_tensor.h"
 #include "ops/repack.h"
+using namespace via;
 
 VKTensor::~VKTensor() {
     if (m_buffer)   m_context->getDevice().destroyBuffer(m_buffer);

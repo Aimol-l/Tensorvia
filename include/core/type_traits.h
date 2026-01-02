@@ -10,7 +10,7 @@
 #include <chrono>
 #include <iomanip>
 #include <ctime>
-
+#include "types.h"
 
 // ANSI 颜色代码
 #define COLOR_RESET  "\033[0m"
@@ -43,6 +43,9 @@
         std::chrono::duration<double, std::milli> duration = end - start; \
         std::cout << "Execution time: " << duration.count() << "ms" << std::endl; \
     } while (0)
+
+
+namespace via{
 
 //**********************************************************
 enum class OpType {
@@ -294,4 +297,5 @@ inline size_t calc_numel(const std::vector<int64_t>& shape) {
         numel *= dim;
     }
     return numel;
+}
 }

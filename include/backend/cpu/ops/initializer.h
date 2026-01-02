@@ -5,42 +5,42 @@
 namespace ops { 
 
 //****************************** 声明 ***********************************
-template <Device D>
+template <via::Device D>
 struct ZerosImpl;
 
-template <Device D>
+template <via::Device D>
 struct OnesImpl;
 
-template <Device D>
+template <via::Device D>
 struct FillImpl;
 
-template <Device D>
+template <via::Device D>
 struct RandomImpl;
 
 //****************************** 特化 ***********************************
 
 template <>
-struct ZerosImpl<Device::CPU> {
-    static Tensor execute(const std::vector<int64_t>& shape, DataType dtype);
+struct ZerosImpl<via::Device::CPU> {
+    static Tensor execute(const std::vector<int64_t>& shape, via::DataType dtype);
 };
 
 template <>
-struct OnesImpl<Device::CPU> {
-    static Tensor execute(const std::vector<int64_t>& shape, DataType dtype);
+struct OnesImpl<via::Device::CPU> {
+    static Tensor execute(const std::vector<int64_t>& shape, via::DataType dtype);
 };
 
 template <>
-struct FillImpl<Device::CPU> {
-    static Tensor execute(const std::vector<int64_t>& shape, DataType dtype, float value);
+struct FillImpl<via::Device::CPU> {
+    static Tensor execute(const std::vector<int64_t>& shape, via::DataType dtype, float value);
 };
 
 template <>
-struct RandomImpl<Device::CPU> {
-    static Tensor execute(const std::vector<int64_t>& shape, DataType dtype, float min, float max);
+struct RandomImpl<via::Device::CPU> {
+    static Tensor execute(const std::vector<int64_t>& shape, via::DataType dtype, float min, float max);
 };
 
-extern template struct ZerosImpl<Device::CPU>;
-extern template struct OnesImpl<Device::CPU>;
-extern template struct FillImpl<Device::CPU>;
-extern template struct RandomImpl<Device::CPU>;
+extern template struct ZerosImpl<via::Device::CPU>;
+extern template struct OnesImpl<via::Device::CPU>;
+extern template struct FillImpl<via::Device::CPU>;
+extern template struct RandomImpl<via::Device::CPU>;
 }

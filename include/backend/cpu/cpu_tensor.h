@@ -15,15 +15,15 @@ struct FreeDeleter {
 };
 private:
     size_t m_numel;
-    DataType m_dtype;
+    via::DataType m_dtype;
     std::unique_ptr<void, FreeDeleter> m_data;
 
 public:
     ~CPUTensor(){};
 
-    CPUTensor(size_t numel, DataType dtype);
-    CPUTensor(void* ptr,size_t numel, DataType dtype);
-    void init(void* ptr,size_t numel, DataType dtype);
+    CPUTensor(size_t numel, via::DataType dtype);
+    CPUTensor(void* ptr,size_t numel, via::DataType dtype);
+    void init(void* ptr,size_t numel, via::DataType dtype);
     
     void* data() override {return m_data.get(); }
     const void* data() const override{ return m_data.get();}

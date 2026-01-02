@@ -1,4 +1,5 @@
 #include "backend/cuda/ops/repack.h"
+using namespace via;
 
 // CUDA kernel: 将任意布局张量拷贝为连续
 __global__ void repack_kernel(

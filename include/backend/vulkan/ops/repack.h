@@ -3,10 +3,10 @@
 #include "core/tensor.h"
 #include "vulkan_context.h" 
 
-template <Device D> struct RepackImpl;
+template <via::Device D> struct RepackImpl;
 
 template <>
-struct RepackImpl<Device::VULKAN> {
+struct RepackImpl<via::Device::VULKAN> {
     static void execute(const Metadata& meta,
         vk::Buffer input,
         vk::Buffer output,
@@ -15,4 +15,4 @@ struct RepackImpl<Device::VULKAN> {
 };
 
 // 显式实例化声明
-extern template struct RepackImpl<Device::VULKAN>;
+extern template struct RepackImpl<via::Device::VULKAN>;

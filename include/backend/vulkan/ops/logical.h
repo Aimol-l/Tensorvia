@@ -3,48 +3,48 @@
 
 namespace ops {
 
-template <Device D> struct EqualImpl;
-template <Device D> struct NotEqualImpl;
-template <Device D> struct GreaterImpl;
-template <Device D> struct LessImpl;
-template <Device D> struct GreaterEqualImpl;
-template <Device D> struct LessEqualImpl;
-template <Device D> struct NonZeroImpl;
+template <via::Device D> struct EqualImpl;
+template <via::Device D> struct NotEqualImpl;
+template <via::Device D> struct GreaterImpl;
+template <via::Device D> struct LessImpl;
+template <via::Device D> struct GreaterEqualImpl;
+template <via::Device D> struct LessEqualImpl;
+template <via::Device D> struct NonZeroImpl;
 
 template <>
-struct EqualImpl<Device::VULKAN> {
+struct EqualImpl<via::Device::VULKAN> {
     static Tensor execute(const Tensor& a,const Tensor& b);
 };
 template <>
-struct NotEqualImpl<Device::VULKAN> {
+struct NotEqualImpl<via::Device::VULKAN> {
     static Tensor execute(const Tensor& a,const Tensor& b);
 };
 template <>
-struct GreaterImpl<Device::VULKAN> {
+struct GreaterImpl<via::Device::VULKAN> {
     static Tensor execute(const Tensor& a,const Tensor& b);
 };
 template <>
-struct LessImpl<Device::VULKAN> {
+struct LessImpl<via::Device::VULKAN> {
     static Tensor execute(const Tensor& a,const Tensor& b);
 };
 template <>
-struct GreaterEqualImpl<Device::VULKAN> {
+struct GreaterEqualImpl<via::Device::VULKAN> {
     static Tensor execute(const Tensor& a,const Tensor& b);
 };
 template <>
-struct LessEqualImpl<Device::VULKAN> {
+struct LessEqualImpl<via::Device::VULKAN> {
     static Tensor execute(const Tensor& a,const Tensor& b);
 };
 template <>
-struct NonZeroImpl<Device::VULKAN> {
+struct NonZeroImpl<via::Device::VULKAN> {
     static size_t execute(const Tensor& a);
 };
 
-extern template struct EqualImpl<Device::VULKAN>;
-extern template struct NotEqualImpl<Device::VULKAN>;
-extern template struct GreaterImpl<Device::VULKAN>;
-extern template struct LessImpl<Device::VULKAN>;
-extern template struct GreaterEqualImpl<Device::VULKAN>;
-extern template struct LessEqualImpl<Device::VULKAN>;
-extern template struct NonZeroImpl<Device::VULKAN>;
+extern template struct EqualImpl<via::Device::VULKAN>;
+extern template struct NotEqualImpl<via::Device::VULKAN>;
+extern template struct GreaterImpl<via::Device::VULKAN>;
+extern template struct LessImpl<via::Device::VULKAN>;
+extern template struct GreaterEqualImpl<via::Device::VULKAN>;
+extern template struct LessEqualImpl<via::Device::VULKAN>;
+extern template struct NonZeroImpl<via::Device::VULKAN>;
 }

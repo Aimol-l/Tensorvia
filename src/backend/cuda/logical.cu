@@ -1,5 +1,6 @@
 #include "ops.h"
 #include "backend/cuda/ops/logical.h"
+using namespace via;
 
 namespace ops {
 

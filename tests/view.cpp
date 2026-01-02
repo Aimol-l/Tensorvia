@@ -1,5 +1,6 @@
 #include "ops.h"
 #include <print>
+using namespace via;
 
 
 int main() {

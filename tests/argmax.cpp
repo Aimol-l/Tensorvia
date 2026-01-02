@@ -4,6 +4,7 @@
 #include <iostream>
 #include "ops.h"
 #include <format>
+using namespace via;
 
 void test(int iter){
     for(int i=0;i<iter;i++){

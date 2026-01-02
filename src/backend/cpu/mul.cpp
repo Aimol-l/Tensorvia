@@ -1,7 +1,6 @@
 #include <omp.h>
 #include "backend/cpu/ops/mul.h"
-
-
+using namespace via;
 
 namespace ops {
 

@@ -1,6 +1,7 @@
 #include <print>
 #include <iostream>
 #include "ops.h"
+using namespace via;
 
 
 // 获取所有 DataType 值的函数

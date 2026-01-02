@@ -1,5 +1,6 @@
 #include "cpu_tensor.h"
 #include <print>
+using namespace via;
 
 size_t CPUTensor::numel() const{return m_numel;}
 std::shared_ptr<ContextImpl> CPUTensor::context() const{

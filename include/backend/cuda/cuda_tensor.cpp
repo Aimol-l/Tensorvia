@@ -5,6 +5,9 @@
 #include <numeric>
 #include "ops/repack.h"
 
+using namespace via;
+
+
 std::shared_ptr<ContextImpl> CUDATensor::context() const{
     return m_context;
 }
@@ -48,7 +51,7 @@ std::unique_ptr<TensorImpl> CUDATensor::clone() const {
 
 std::unique_ptr<TensorImpl> CUDATensor::clone_as_contiguous(const Metadata& meta) const{
     auto cloned = std::make_unique<CUDATensor>(meta.numel, this->m_dtype, this->m_context);
-    RepackImpl<Device::CUDA>::execute(meta,this->m_data.get(),cloned->m_data.get());
+    RepackImpl<via::Device::CUDA>::execute(meta,this->m_data.get(),cloned->m_data.get());
     return cloned;
 }
 

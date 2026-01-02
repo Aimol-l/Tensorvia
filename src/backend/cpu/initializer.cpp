@@ -1,4 +1,5 @@
 #include "backend/cpu/ops/initializer.h"
+using namespace via;
 
 #include <omp.h>
 

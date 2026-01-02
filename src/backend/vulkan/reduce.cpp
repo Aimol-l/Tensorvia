@@ -1,4 +1,5 @@
 #include "backend/vulkan/ops/reduce.h"
+using namespace via;
 
 namespace ops {
 

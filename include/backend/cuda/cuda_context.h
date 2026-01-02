@@ -2,7 +2,8 @@
 #include <memory>
 #include <cuda_runtime.h>
 #include "core/context.h"
-
+#include <iostream>
+#include <format>
 
 class CUDAContext : public ContextImpl {
 private:

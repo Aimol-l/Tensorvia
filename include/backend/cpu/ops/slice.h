@@ -4,13 +4,13 @@
 
 namespace ops {
 
-    template <Device D>
+    template <via::Device D>
     struct SliceImpl;
 
     template <>
-    struct SliceImpl<Device::CPU> {
+    struct SliceImpl<via::Device::CPU> {
         static Tensor execute(const Tensor& t, const std::vector<std::pair<int64_t, int64_t>>& ranges);
     };
 
-extern template struct SliceImpl<Device::CPU>;
+extern template struct SliceImpl<via::Device::CPU>;
 }

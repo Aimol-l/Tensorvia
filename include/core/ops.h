@@ -22,10 +22,10 @@ namespace ops{
     OPS_API void println(Tensor & a);
     OPS_API void println(Tensor && a);
 
-    OPS_API Tensor Ones(const std::vector<int64_t>& shape, DataType dtype);
-    OPS_API Tensor Zeros(const std::vector<int64_t>& shape, DataType dtype);
-    OPS_API Tensor Fill(const std::vector<int64_t>& shape, DataType dtype, float value);
-    OPS_API Tensor Random(const std::vector<int64_t>& shape, DataType dtype,float min,float max);
+    OPS_API Tensor Ones(const std::vector<int64_t>& shape, via::DataType dtype);
+    OPS_API Tensor Zeros(const std::vector<int64_t>& shape, via::DataType dtype);
+    OPS_API Tensor Fill(const std::vector<int64_t>& shape, via::DataType dtype, float value);
+    OPS_API Tensor Random(const std::vector<int64_t>& shape, via::DataType dtype,float min,float max);
     
     OPS_API Tensor Slice(const Tensor& t, const std::vector<std::pair<int64_t, int64_t>>& ranges);
     
@@ -96,8 +96,8 @@ namespace ops{
     OPS_API Tensor Max(const Tensor& a,int axis);
     OPS_API Tensor Mean(const Tensor& a,int axis);
 
-    OPS_API void Typecast(Tensor& a,DataType dst_type);
-    OPS_API Tensor Typecast(const Tensor& a,DataType dst_type);
+    OPS_API void Typecast(Tensor& a,via::DataType dst_type);
+    OPS_API Tensor Typecast(const Tensor& a,via::DataType dst_type);
     OPS_API Tensor Concat(const std::vector<Tensor> &tensors, int dim);
 
     OPS_API void Transpose(Tensor& a); // for 2-d (inplace)

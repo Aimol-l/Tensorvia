@@ -7,12 +7,12 @@ namespace ops {
 
 
 //*********************************************
-template <Device D> struct SliceImpl;
+template <via::Device D> struct SliceImpl;
 //*********************************************
 
 template <>
-struct SliceImpl<Device::SYCL>{
+struct SliceImpl<via::Device::SYCL>{
     static Tensor execute(const Tensor& t, const std::vector<std::pair<int64_t, int64_t>>& ranges);
 };
-extern template struct SliceImpl<Device::SYCL>;
+extern template struct SliceImpl<via::Device::SYCL>;
 }

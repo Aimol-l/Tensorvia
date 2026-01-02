@@ -1,5 +1,6 @@
 #include "ops.h"
 #include <print>
+using namespace via;
 
 int main() {
     Tensor a = Tensor::Random({1,7,7},0,10,DataType::FLOAT32); // 0

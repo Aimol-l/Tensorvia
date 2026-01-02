@@ -1,6 +1,7 @@
 #include "factory.h"
 #include "core/type_traits.h"
 #include "backend/cpu/ops/typecast.h"
+using namespace via;
 
 namespace ops {
 

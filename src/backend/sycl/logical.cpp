@@ -1,4 +1,5 @@
 #include "backend/sycl/ops/logical.h"
+using namespace via;
 
 namespace ops {
 

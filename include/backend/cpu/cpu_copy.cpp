@@ -1,6 +1,8 @@
 ﻿
 #include "core/factory.h"
 
+using namespace via;
+
 
 #ifdef BACKEND_CPU // 默认指用gcc13+ 编译,msvc似乎还不支持浮点数扩展
 

@@ -5,6 +5,7 @@
 #include <print>
 
 #include "ops.h"
+using namespace via;
 
 namespace ops {
 template <typename T>

@@ -1,4 +1,6 @@
+#include <immintrin.h>
 #include "backend/cpu/ops/arithmetic.h"
+using namespace via;
 
 
 namespace ops {
@@ -10,6 +12,35 @@ void add_kernel(const T* RESTRICT a, const T* RESTRICT b, T* RESTRICT out, size_
         out[i] = a[i] + b[i];
     }
 }
+//AVX2-float32 特化版本
+void add_kernel(const float* RESTRICT a, const float* RESTRICT b, float* RESTRICT out, size_t size) {
+    size_t i = 0;
+    for( ; i + 8 <= size; i += 8) {
+        __m256 vec_a = _mm256_loadu_ps(&a[i]);
+        __m256 vec_b = _mm256_loadu_ps(&b[i]);
+        __m256 vec_out = _mm256_add_ps(vec_a, vec_b);
+        _mm256_storeu_ps(&out[i], vec_out);
+    }
+    // 处理剩余元素
+    for ( ; i < size; ++i) {
+        out[i] = a[i] + b[i];
+    }
+}
+// AVX2-float64 特化版本
+void add_kernel(const double* RESTRICT a, const double* RESTRICT b, double* RESTRICT out, size_t size) {
+    size_t i = 0;
+    for( ; i + 4 <= size; i += 4) {
+        __m256d vec_a = _mm256_loadu_pd(&a[i]);
+        __m256d vec_b = _mm256_loadu_pd(&b[i]);
+        __m256d vec_out = _mm256_add_pd(vec_a, vec_b);
+        _mm256_storeu_pd(&out[i], vec_out);
+    }
+    // 处理剩余元素
+    for ( ; i < size; ++i) {
+        out[i] = a[i] + b[i];
+    }
+}
+
 template <typename T> // T = int8_t ~ int64_t ,float16 ~ float64,bfloat16
 void add_kernel(T* a, float b, size_t size) {
     const T b_cast = static_cast<T>(b); // 注意类型转换
@@ -19,12 +50,40 @@ void add_kernel(T* a, float b, size_t size) {
     }
 }
 template <typename T>
-void sub_kernel(const T* a, const T* b, T* out, size_t size) {
-    #pragma omp parallel for
+void sub_kernel(const T* RESTRICT a, const T* RESTRICT b, T* RESTRICT out, size_t size) {
     for (size_t i = 0; i < size; ++i) {
         out[i] = static_cast<T>(a[i] - b[i]);  // 注意类型转换
     }
 }
+//AVX2-float32 特化版本
+void sub_kernel(const float* RESTRICT a, const float* RESTRICT b, float* RESTRICT out, size_t size) {
+    size_t i = 0;
+    for( ; i + 8 <= size; i += 8) {
+        __m256 vec_a = _mm256_loadu_ps(&a[i]);
+        __m256 vec_b = _mm256_loadu_ps(&b[i]);
+        __m256 vec_out = _mm256_sub_ps(vec_a, vec_b);
+        _mm256_storeu_ps(&out[i], vec_out);
+    }
+    // 处理剩余元素
+    for ( ; i < size; ++i) {
+        out[i] = a[i] - b[i];
+    }
+}
+// AVX2-float64 特化版本
+void sub_kernel(const double* RESTRICT a, const double* RESTRICT b, double* RESTRICT out, size_t size) {
+    size_t i = 0;
+    for( ; i + 4 <= size; i += 4) {
+        __m256d vec_a = _mm256_loadu_pd(&a[i]);
+        __m256d vec_b = _mm256_loadu_pd(&b[i]);
+        __m256d vec_out = _mm256_sub_pd(vec_a, vec_b);
+        _mm256_storeu_pd(&out[i], vec_out);
+    }
+    // 处理剩余元素
+    for ( ; i < size; ++i) {
+        out[i] = a[i] - b[i];
+    }
+}
+
 template <typename T>
 void sub_kernel(T* a, float b, size_t size) {
     const T b_cast = static_cast<T>(b); // 注意类型转换
@@ -33,12 +92,40 @@ void sub_kernel(T* a, float b, size_t size) {
     }
 }
 template <typename T>
-void dot_kernel(const T* a, const T* b, T* out, size_t size) {
-    #pragma omp parallel for
+void dot_kernel(const T* RESTRICT a, const T* RESTRICT b, T* RESTRICT out, size_t size) {
     for (size_t i = 0; i < size; ++i) {
         out[i] = static_cast<T>(a[i] * b[i]);  // 注意类型转换
     }
 }
+//AVX2-float32 特化版本
+void dot_kernel(const float* RESTRICT a, const float* RESTRICT b, float* RESTRICT out, size_t size) {
+    size_t i = 0;
+    for( ; i + 8 <= size; i += 8) {
+        __m256 vec_a = _mm256_loadu_ps(&a[i]);
+        __m256 vec_b = _mm256_loadu_ps(&b[i]);
+        __m256 vec_out = _mm256_mul_ps(vec_a, vec_b);
+        _mm256_storeu_ps(&out[i], vec_out);
+    }
+    // 处理剩余元素
+    for ( ; i < size; ++i) {
+        out[i] = a[i] * b[i];
+    }
+}
+// AVX2-float64 特化版本
+void dot_kernel(const double* RESTRICT a, const double* RESTRICT b, double* RESTRICT out, size_t size) {
+    size_t i = 0;
+    for( ; i + 4 <= size; i += 4) {
+        __m256d vec_a = _mm256_loadu_pd(&a[i]);
+        __m256d vec_b = _mm256_loadu_pd(&b[i]);
+        __m256d vec_out = _mm256_mul_pd(vec_a, vec_b);
+        _mm256_storeu_pd(&out[i], vec_out);
+    }
+    // 处理剩余元素
+    for ( ; i < size; ++i) {
+        out[i] = a[i] * b[i];
+    }
+}
+
 template <typename T>
 void dot_kernel(T* a, float b, size_t size) {
     const T b_cast = static_cast<T>(b); // 注意类型转换
@@ -47,13 +134,40 @@ void dot_kernel(T* a, float b, size_t size) {
     }
 }
 template <typename T>
-void div_kernel(const T* a, const T* b, T* out, size_t size) {
-    #pragma omp parallel for
+void div_kernel(const T* RESTRICT a, const T* RESTRICT b, T* RESTRICT out, size_t size) {
     for (size_t i = 0; i < size; ++i) {
         if (b[i] != T(0))
             out[i] = static_cast<T>(a[i] / b[i]);  // 注意类型转换
         else
             out[i] = std::numeric_limits<T>::quiet_NaN();
+    }
+}
+//AVX2-float32 特化版本
+void div_kernel(const float* RESTRICT a, const float* RESTRICT b, float* RESTRICT out, size_t size) {
+    size_t i = 0;
+    for( ; i + 8 <= size; i += 8) {
+        __m256 vec_a = _mm256_loadu_ps(&a[i]);
+        __m256 vec_b = _mm256_loadu_ps(&b[i]);
+        __m256 vec_out = _mm256_div_ps(vec_a, vec_b);
+        _mm256_storeu_ps(&out[i], vec_out);
+    }
+    // 处理剩余元素
+    for ( ; i < size; ++i) {
+        out[i] = a[i] / b[i];
+    }
+}
+// AVX2-float64 特化版本
+void div_kernel(const double* RESTRICT a, const double* RESTRICT b, double* RESTRICT out, size_t size) {
+    size_t i = 0;
+    for( ; i + 4 <= size; i += 4) {
+        __m256d vec_a = _mm256_loadu_pd(&a[i]);
+        __m256d vec_b = _mm256_loadu_pd(&b[i]);
+        __m256d vec_out = _mm256_div_pd(vec_a, vec_b);
+        _mm256_storeu_pd(&out[i], vec_out);
+    }
+    // 处理剩余元素
+    for ( ; i < size; ++i) {
+        out[i] = a[i] / b[i];
     }
 }
 template <typename T>
@@ -191,152 +305,6 @@ void DivImpl<Device::CPU>::execute(Tensor& a, float b) {
     });
 }
 // ========================================================================
-Tensor AddImpl<Device::CPU>::execute(const Tensor& a, float b) {
-    Tensor t = a.clone();
-    ops::Add(t,b);
-    return t;
-}
-Tensor SubImpl<Device::CPU>::execute(const Tensor& a, float b) {
-    Tensor t = a.clone();
-    ops::Sub(t,b);
-    return t;
-}
-Tensor DotImpl<Device::CPU>::execute(const Tensor& a, float b) {
-    Tensor t = a.clone();
-    ops::Dot(t,b);
-    return t;
-}
-Tensor DivImpl<Device::CPU>::execute(const Tensor& a, float b) {
-    Tensor t = a.clone();
-    ops::Div(t,b);
-    return t;
-}
-// ========================================================================
-Tensor AddImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
-    // 避免自加修改：a + a 返回新 tensor
-    if (&a == &b) return ops::Add(a.clone(), b.clone());
-    // 快速路径：相同类型且无需转换
-    if (a.dtype() == b.dtype()) {
-        Tensor result(a.shape(), a.dtype(), Device::CPU);
-        dispatch_dtype(a.dtype(), [&](auto type_id) {
-            using T = typename decltype(type_id)::type;
-            add_kernel<T>(
-                static_cast<const T*>(a.data()),
-                static_cast<const T*>(b.data()),
-                static_cast<T*>(result.data()),
-                a.numel()
-            );
-        });
-        return result;
-    }
-    // 慢速路径：类型不同，需要 Typecast
-    DataType res_type = compute_type(a.dtype(), b.dtype());
-    const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a, res_type);
-    const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b, res_type);
-    Tensor result(a.shape(), res_type, Device::CPU);
-    dispatch_dtype(a.dtype(), [&](auto type_id) {
-        using T = typename decltype(type_id)::type;
-        const T* a_ptr = static_cast<const T*>(A.data());
-        const T* b_ptr = static_cast<const T*>(B.data());
-        T* res_ptr = static_cast<T*>(result.data());
-        add_kernel<T>(a_ptr,b_ptr,res_ptr,a.numel());
-    });
-    return result;
-}
-Tensor SubImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
-    // 避免自加修改：a + a 返回新 tensor
-    if (&a == &b) return ops::Sub(a.clone(), b.clone());
-    // 快速路径：相同类型且无需转换
-    if (a.dtype() == b.dtype()) {
-        Tensor result(a.shape(), a.dtype(), Device::CPU);
-        dispatch_dtype(a.dtype(), [&](auto type_id) {
-            using T = typename decltype(type_id)::type;
-            sub_kernel<T>(
-                static_cast<const T*>(a.data()),
-                static_cast<const T*>(b.data()),
-                static_cast<T*>(result.data()),
-                a.numel()
-            );
-        });
-        return result;
-    }
-    // 慢速路径：类型不同，需要 Typecast
-    DataType res_type = compute_type(a.dtype(), b.dtype());
-    const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a, res_type);
-    const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b, res_type);
-    Tensor result(a.shape(), res_type, Device::CPU);
-    (a.dtype(), [&](auto type_id) {
-        using T = typename decltype(type_id)::type;
-        const T* a_ptr = static_cast<const T*>(A.data());
-        const T* b_ptr = static_cast<const T*>(B.data());
-        T* res_ptr = static_cast<T*>(result.data());
-        sub_kernel<T>(a_ptr,b_ptr,res_ptr,a.numel());
-    });
-    return result;
-}
-Tensor DotImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
-    // 避免自加修改：a + a 返回新 tensor
-    if (&a == &b) return ops::Dot(a.clone(), b.clone());
-    // 快速路径：相同类型且无需转换
-    if (a.dtype() == b.dtype()) {
-        Tensor result(a.shape(), a.dtype(), Device::CPU);
-        dispatch_dtype(a.dtype(), [&](auto type_id) {
-            using T = typename decltype(type_id)::type;
-            dot_kernel<T>(
-                static_cast<const T*>(a.data()),
-                static_cast<const T*>(b.data()),
-                static_cast<T*>(result.data()),
-                a.numel()
-            );
-        });
-        return result;
-    }
-    // 慢速路径：类型不同，需要 Typecast
-    DataType res_type = compute_type(a.dtype(), b.dtype());
-    const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a, res_type);
-    const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b, res_type);
-    Tensor result(a.shape(), res_type, Device::CPU);
-    dispatch_dtype(a.dtype(), [&](auto type_id) {
-        using T = typename decltype(type_id)::type;
-        const T* a_ptr = static_cast<const T*>(A.data());
-        const T* b_ptr = static_cast<const T*>(B.data());
-        T* res_ptr = static_cast<T*>(result.data());
-        dot_kernel<T>(a_ptr,b_ptr,res_ptr,a.numel());
-    });
-    return result;
-}
-Tensor DivImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
-    // 避免自加修改：a + a 返回新 tensor
-    if (&a == &b) return ops::Div(a.clone(), b.clone());
-    // 快速路径：相同类型且无需转换
-    if (a.dtype() == b.dtype()) {
-        Tensor result(a.shape(), a.dtype(), Device::CPU);
-        dispatch_dtype(a.dtype(), [&](auto type_id) {
-            using T = typename decltype(type_id)::type;
-            div_kernel<T>(
-                static_cast<const T*>(a.data()),
-                static_cast<const T*>(b.data()),
-                static_cast<T*>(result.data()),
-                a.numel()
-            );
-        });
-        return result;
-    }
-    // 慢速路径：类型不同，需要 Typecast
-    DataType res_type = compute_type(a.dtype(), b.dtype());
-    const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a, res_type);
-    const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b, res_type);
-    Tensor result(a.shape(), res_type, Device::CPU);
-    dispatch_dtype(a.dtype(), [&](auto type_id) {
-        using T = typename decltype(type_id)::type;
-        const T* a_ptr = static_cast<const T*>(A.data());
-        const T* b_ptr = static_cast<const T*>(B.data());
-        T* res_ptr = static_cast<T*>(result.data());
-        div_kernel<T>(a_ptr,b_ptr,res_ptr,a.numel());
-    });
-    return result;
-}
-// ========================================================================
 void AddImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b,Tensor& dst) {
     DataType res_type = compute_type(a.dtype(),b.dtype());
     if(dst.dtype() != res_type){
@@ -453,6 +421,153 @@ void DivImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b,Tensor& dst)
         div_kernel<T>(a_ptr,b_ptr,res_ptr,a.numel());
     });
 }
+// ========================================================================
+Tensor AddImpl<Device::CPU>::execute(const Tensor& a, float b) {
+    Tensor t = a.clone();
+    ops::Add(t,b);
+    return t;
+}
+Tensor SubImpl<Device::CPU>::execute(const Tensor& a, float b) {
+    Tensor t = a.clone();
+    ops::Sub(t,b);
+    return t;
+}
+Tensor DotImpl<Device::CPU>::execute(const Tensor& a, float b) {
+    Tensor t = a.clone();
+    ops::Dot(t,b);
+    return t;
+}
+Tensor DivImpl<Device::CPU>::execute(const Tensor& a, float b) {
+    Tensor t = a.clone();
+    ops::Div(t,b);
+    return t;
+}
+// ========================================================================
+Tensor AddImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
+    // 避免自加修改：a + a 返回新 tensor
+    if (&a == &b) return ops::Add(a.clone(), b.clone());
+    // 快速路径：相同类型且无需转换
+    if (a.dtype() == b.dtype()) {
+        Tensor result(a.shape(), a.dtype(), Device::CPU);
+        dispatch_dtype(a.dtype(), [&](auto type_id) {
+            using T = typename decltype(type_id)::type;
+            add_kernel<T>(
+                static_cast<const T*>(a.data()),
+                static_cast<const T*>(b.data()),
+                static_cast<T*>(result.data()),
+                a.numel()
+            );
+        });
+        return result;
+    }
+    // 慢速路径：类型不同，需要 Typecast
+    DataType res_type = compute_type(a.dtype(), b.dtype());
+    const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a, res_type);
+    const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b, res_type);
+    Tensor result(a.shape(), res_type, Device::CPU);
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        const T* a_ptr = static_cast<const T*>(A.data());
+        const T* b_ptr = static_cast<const T*>(B.data());
+        T* res_ptr = static_cast<T*>(result.data());
+        add_kernel<T>(a_ptr,b_ptr,res_ptr,a.numel());
+    });
+    return result;
+}
+Tensor SubImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
+    // 避免自加修改：a + a 返回新 tensor
+    if (&a == &b) return ops::Sub(a.clone(), b.clone());
+    // 快速路径：相同类型且无需转换
+    if (a.dtype() == b.dtype()) {
+        Tensor result(a.shape(), a.dtype(), Device::CPU);
+        dispatch_dtype(a.dtype(), [&](auto type_id) {
+            using T = typename decltype(type_id)::type;
+            sub_kernel<T>(
+                static_cast<const T*>(a.data()),
+                static_cast<const T*>(b.data()),
+                static_cast<T*>(result.data()),
+                a.numel()
+            );
+        });
+        return result;
+    }
+    // 慢速路径：类型不同，需要 Typecast
+    DataType res_type = compute_type(a.dtype(), b.dtype());
+    const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a, res_type);
+    const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b, res_type);
+    Tensor result(a.shape(), res_type, Device::CPU);
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        const T* a_ptr = static_cast<const T*>(A.data());
+        const T* b_ptr = static_cast<const T*>(B.data());
+        T* res_ptr = static_cast<T*>(result.data());
+        sub_kernel<T>(a_ptr,b_ptr,res_ptr,a.numel());
+    });
+    return result;
+}
+Tensor DotImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
+    // 避免自加修改：a + a 返回新 tensor
+    if (&a == &b) return ops::Dot(a.clone(), b.clone());
+    // 快速路径：相同类型且无需转换
+    if (a.dtype() == b.dtype()) {
+        Tensor result(a.shape(), a.dtype(), Device::CPU);
+        dispatch_dtype(a.dtype(), [&](auto type_id) {
+            using T = typename decltype(type_id)::type;
+            dot_kernel<T>(
+                static_cast<const T*>(a.data()),
+                static_cast<const T*>(b.data()),
+                static_cast<T*>(result.data()),
+                a.numel()
+            );
+        });
+        return result;
+    }
+    // 慢速路径：类型不同，需要 Typecast
+    DataType res_type = compute_type(a.dtype(), b.dtype());
+    const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a, res_type);
+    const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b, res_type);
+    Tensor result(a.shape(), res_type, Device::CPU);
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        const T* a_ptr = static_cast<const T*>(A.data());
+        const T* b_ptr = static_cast<const T*>(B.data());
+        T* res_ptr = static_cast<T*>(result.data());
+        dot_kernel<T>(a_ptr,b_ptr,res_ptr,a.numel());
+    });
+    return result;
+}
+Tensor DivImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
+    // 避免自加修改：a + a 返回新 tensor
+    if (&a == &b) return ops::Div(a.clone(), b.clone());
+    // 快速路径：相同类型且无需转换
+    if (a.dtype() == b.dtype()) {
+        Tensor result(a.shape(), a.dtype(), Device::CPU);
+        dispatch_dtype(a.dtype(), [&](auto type_id) {
+            using T = typename decltype(type_id)::type;
+            div_kernel<T>(
+                static_cast<const T*>(a.data()),
+                static_cast<const T*>(b.data()),
+                static_cast<T*>(result.data()),
+                a.numel()
+            );
+        });
+        return result;
+    }
+    // 慢速路径：类型不同，需要 Typecast
+    DataType res_type = compute_type(a.dtype(), b.dtype());
+    const Tensor& A = a.dtype() == res_type ? a : ops::Typecast(a, res_type);
+    const Tensor& B = b.dtype() == res_type ? b : ops::Typecast(b, res_type);
+    Tensor result(a.shape(), res_type, Device::CPU);
+    dispatch_dtype(a.dtype(), [&](auto type_id) {
+        using T = typename decltype(type_id)::type;
+        const T* a_ptr = static_cast<const T*>(A.data());
+        const T* b_ptr = static_cast<const T*>(B.data());
+        T* res_ptr = static_cast<T*>(result.data());
+        div_kernel<T>(a_ptr,b_ptr,res_ptr,a.numel());
+    });
+    return result;
+}
+// ========================================================================
 // ========================================================================
 Tensor AbsImpl<Device::CPU>::execute(const Tensor& a) {
     Tensor b = a.clone();

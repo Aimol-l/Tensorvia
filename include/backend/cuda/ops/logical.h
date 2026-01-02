@@ -3,48 +3,48 @@
 
 namespace ops {
 
-template <Device D> struct EqualImpl;
-template <Device D> struct NotEqualImpl;
-template <Device D> struct GreaterImpl;
-template <Device D> struct LessImpl;
-template <Device D> struct GreaterEqualImpl;
-template <Device D> struct LessEqualImpl;
-template <Device D> struct NonZeroImpl;
+template <via::Device D> struct EqualImpl;
+template <via::Device D> struct NotEqualImpl;
+template <via::Device D> struct GreaterImpl;
+template <via::Device D> struct LessImpl;
+template <via::Device D> struct GreaterEqualImpl;
+template <via::Device D> struct LessEqualImpl;
+template <via::Device D> struct NonZeroImpl;
 
 template <>
-struct EqualImpl<Device::CUDA> {
+struct EqualImpl<via::Device::CUDA> {
     static Tensor execute(const Tensor& a,const Tensor& b);
 };
 template <>
-struct NotEqualImpl<Device::CUDA> {
+struct NotEqualImpl<via::Device::CUDA> {
     static Tensor execute(const Tensor& a,const Tensor& b);
 };
 template <>
-struct GreaterImpl<Device::CUDA> {
+struct GreaterImpl<via::Device::CUDA> {
     static Tensor execute(const Tensor& a,const Tensor& b);
 };
 template <>
-struct LessImpl<Device::CUDA> {
+struct LessImpl<via::Device::CUDA> {
     static Tensor execute(const Tensor& a,const Tensor& b);
 };
 template <>
-struct GreaterEqualImpl<Device::CUDA> {
+struct GreaterEqualImpl<via::Device::CUDA> {
     static Tensor execute(const Tensor& a,const Tensor& b);
 };
 template <>
-struct LessEqualImpl<Device::CUDA> {
+struct LessEqualImpl<via::Device::CUDA> {
     static Tensor execute(const Tensor& a,const Tensor& b);
 };
 template <>
-struct NonZeroImpl<Device::CUDA> {
+struct NonZeroImpl<via::Device::CUDA> {
     static size_t execute(const Tensor& a);
 };
 
-extern template struct EqualImpl<Device::CUDA>;
-extern template struct NotEqualImpl<Device::CUDA>;
-extern template struct GreaterImpl<Device::CUDA>;
-extern template struct LessImpl<Device::CUDA>;
-extern template struct GreaterEqualImpl<Device::CUDA>;
-extern template struct LessEqualImpl<Device::CUDA>;
-extern template struct NonZeroImpl<Device::CUDA>;
+extern template struct EqualImpl<via::Device::CUDA>;
+extern template struct NotEqualImpl<via::Device::CUDA>;
+extern template struct GreaterImpl<via::Device::CUDA>;
+extern template struct LessImpl<via::Device::CUDA>;
+extern template struct GreaterEqualImpl<via::Device::CUDA>;
+extern template struct LessEqualImpl<via::Device::CUDA>;
+extern template struct NonZeroImpl<via::Device::CUDA>;
 }

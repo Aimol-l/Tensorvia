@@ -4,13 +4,13 @@
 
 namespace ops {
 
-template <Device D>
+template <via::Device D>
 struct MulImpl;
 
 template <>
-struct MulImpl<Device::CPU> {
+struct MulImpl<via::Device::CPU> {
     static Tensor execute(const Tensor &a, const Tensor &b);
 };
 
-extern template struct MulImpl<Device::CPU>;
+extern template struct MulImpl<via::Device::CPU>;
 }  // namespace ops

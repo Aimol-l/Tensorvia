@@ -1,5 +1,6 @@
 #include "backend/vulkan/ops/logical.h"
 #include "backend/vulkan/ops/reduce.h"
+using namespace via;
 
 namespace ops {
 Tensor EqualImpl<Device::VULKAN>::execute(const Tensor& a,const Tensor& b) {

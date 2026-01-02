@@ -1,5 +1,6 @@
 #include <cmath>
 #include "backend/cuda/ops/activate.h"
+using namespace via;
 
 namespace ops {
 

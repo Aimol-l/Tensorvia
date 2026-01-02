@@ -3,65 +3,65 @@
 
 namespace ops {
 
-template <Device D> struct SumImpl;
-template <Device D> struct MeanImpl;
-template <Device D> struct MinImpl;
-template <Device D> struct MaxImpl;
-template <Device D> struct ArgMaxImpl;
-template <Device D> struct ArgMinImpl;
-template <Device D> struct AllImpl;
-template <Device D> struct AnyImpl;
+template <via::Device D> struct SumImpl;
+template <via::Device D> struct MeanImpl;
+template <via::Device D> struct MinImpl;
+template <via::Device D> struct MaxImpl;
+template <via::Device D> struct ArgMaxImpl;
+template <via::Device D> struct ArgMinImpl;
+template <via::Device D> struct AllImpl;
+template <via::Device D> struct AnyImpl;
 
 template <>
-struct SumImpl<Device::VULKAN> {
+struct SumImpl<via::Device::VULKAN> {
     static float execute(const Tensor& a);
     static Tensor execute(const Tensor& a,int axis);
 };
 
 template <>
-struct MinImpl<Device::VULKAN> {
+struct MinImpl<via::Device::VULKAN> {
     static float execute(const Tensor& a);
     static Tensor execute(const Tensor& a,int axis);
 };
 
 template <>
-struct MaxImpl<Device::VULKAN> {
+struct MaxImpl<via::Device::VULKAN> {
     static float execute(const Tensor& a);
     static Tensor execute(const Tensor& a, int axis);
 };
 
 template <>
-struct MeanImpl<Device::VULKAN> {
+struct MeanImpl<via::Device::VULKAN> {
     static float execute(const Tensor& a);
     static Tensor execute(const Tensor& a,int axis);
 };
 
 template <>
-struct ArgMaxImpl<Device::VULKAN> {
+struct ArgMaxImpl<via::Device::VULKAN> {
    static Tensor execute(const Tensor& a, int axis);
 };
 
 template <>
-struct ArgMinImpl<Device::VULKAN> {
+struct ArgMinImpl<via::Device::VULKAN> {
     static Tensor execute(const Tensor& a, int axis);
 };
 template <>
-struct AnyImpl<Device::VULKAN> {
+struct AnyImpl<via::Device::VULKAN> {
     static bool execute(const Tensor& a,float val);
 };
 
 template <>
-struct AllImpl<Device::VULKAN> {
+struct AllImpl<via::Device::VULKAN> {
     static bool execute(const Tensor& a,float val);
 };
 
-extern template struct SumImpl<Device::VULKAN>;
-extern template struct MinImpl<Device::VULKAN>;
-extern template struct MaxImpl<Device::VULKAN>;   
-extern template struct MeanImpl<Device::VULKAN>;
-extern template struct ArgMaxImpl<Device::VULKAN>;
-extern template struct ArgMinImpl<Device::VULKAN>;
-extern template struct AnyImpl<Device::VULKAN>;
-extern template struct AllImpl<Device::VULKAN>;
+extern template struct SumImpl<via::Device::VULKAN>;
+extern template struct MinImpl<via::Device::VULKAN>;
+extern template struct MaxImpl<via::Device::VULKAN>;   
+extern template struct MeanImpl<via::Device::VULKAN>;
+extern template struct ArgMaxImpl<via::Device::VULKAN>;
+extern template struct ArgMinImpl<via::Device::VULKAN>;
+extern template struct AnyImpl<via::Device::VULKAN>;
+extern template struct AllImpl<via::Device::VULKAN>;
 
 }

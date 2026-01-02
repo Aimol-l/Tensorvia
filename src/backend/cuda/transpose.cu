@@ -1,4 +1,5 @@
 ﻿#include "backend/cuda/ops/transpose.h"
+using namespace via;
 
 
 namespace ops {

@@ -1,5 +1,6 @@
 ﻿#include "backend/sycl/ops/mul.h"
 
+using namespace via;
 
 namespace ops {
     template <typename T, typename R, typename S, int TILE = 32>

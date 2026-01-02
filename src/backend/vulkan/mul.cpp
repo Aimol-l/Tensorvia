@@ -1,5 +1,6 @@
 ﻿#include "ops.h"
 #include "backend/vulkan/ops/mul.h"
+using namespace via;
 
 
 namespace ops {

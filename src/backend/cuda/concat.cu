@@ -1,4 +1,5 @@
 #include "backend/cuda/ops/concat.h"
+using namespace via;
 
 namespace ops {
 

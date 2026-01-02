@@ -1,7 +1,7 @@
+#include <cmath>
 #include "backend/cpu/ops/activate.h"
 
-
-#include <cmath>
+using namespace via;
 
 namespace ops {
 
@@ -80,11 +80,6 @@ void softmax_kernel(const T* src, R* res_ptr, size_t outer_size, size_t axis_siz
 }
 // ================================================================
 void ReluImpl<Device::CPU>::execute(Tensor& a) {
-    // auto A = data_as_const_variant(a.dtype(), a.data());
-    // std::visit([&](auto ptr_A) {
-    //     using AType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_A)>>;
-    //     relu_kernel<AType>(ptr_A, static_cast<AType*>(a.data()), a.numel());
-    // },A);
     dispatch_dtype(a.dtype(), [&](auto type_id) {
         using T = typename decltype(type_id)::type;
         T* a_ptr = static_cast<T*>(a.data());
@@ -96,24 +91,21 @@ void SiluImpl<Device::CPU>::execute(Tensor& a) {
     std::visit([&](auto ptr_A) {
         using AType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_A)>>;
         silu_kernel<AType>(static_cast<AType*>(a.data()), static_cast<AType*>(a.data()), a.numel());
-    },
-               A);
+    },A);
 }
 void TanhImpl<Device::CPU>::execute(Tensor& a) {
     auto A = data_as_const_variant(a.dtype(), a.data());
     std::visit([&](auto ptr_A) {
         using AType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_A)>>;
         tanh_kernel<AType>(static_cast<AType*>(a.data()), static_cast<AType*>(a.data()), a.numel());
-    },
-               A);
+    },A);
 }
 void SigmoidImpl<Device::CPU>::execute(Tensor& a) {
     auto A = data_as_const_variant(a.dtype(), a.data());
     std::visit([&](auto ptr_A) {
         using AType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_A)>>;
         sigmoid_kernel<AType>(static_cast<AType*>(a.data()), static_cast<AType*>(a.data()), a.numel());
-    },
-               A);
+    }, A);
 }
 // ================================================================
 Tensor ReluImpl<Device::CPU>::execute(const Tensor& a) {
@@ -157,8 +149,7 @@ Tensor TanhImpl<Device::CPU>::execute(const Tensor& a) {
         using AType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_A)>>;      // const T* --> const T --> T
         using ResType = std::remove_cv_t<std::remove_pointer_t<decltype(ptr_res)>>;  // const R* --> const R --> R
         tanh_kernel<AType>(ptr_A, static_cast<ResType*>(res.data()), a.numel());
-    },
-               A, Res);
+    },A, Res);
 
     return res;
 }

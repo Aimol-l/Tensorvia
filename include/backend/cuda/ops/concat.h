@@ -3,12 +3,12 @@
 
 namespace ops {
 
-template <Device D>
-struct ConcatImpl;
+template <via::Device D> struct ConcatImpl;
+
 template <>
-struct ConcatImpl<Device::CUDA> {
+struct ConcatImpl<via::Device::CUDA> {
     static Tensor execute(const std::vector<Tensor> &tensors, int dim);
 };
 
-extern template struct ConcatImpl<Device::CUDA>;
+extern template struct ConcatImpl<via::Device::CUDA>;
 }

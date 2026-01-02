@@ -4,13 +4,13 @@
 
 namespace ops{
     
-    template <Device D>
+    template <via::Device D>
     struct PrintlnImpl;
 
     template <>
-    struct PrintlnImpl<Device::CPU> {
+    struct PrintlnImpl<via::Device::CPU> {
         static void execute(const Tensor& a);
     };
 
-    extern template struct PrintlnImpl<Device::CPU>;
+    extern template struct PrintlnImpl<via::Device::CPU>;
 }

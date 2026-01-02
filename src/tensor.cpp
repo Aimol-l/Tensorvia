@@ -4,6 +4,8 @@
 #include <utility>
 #include <print>
 #include <algorithm>
+#include <core/context.h>
+using namespace via;
 
 Tensor::Tensor(){
     this->m_meta.numel = 0;

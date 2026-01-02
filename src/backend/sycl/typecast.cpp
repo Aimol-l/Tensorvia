@@ -1,15 +1,16 @@
 #include "backend/sycl/ops/typecast.h"
+using namespace via;
 
 namespace ops {
 
-    template <typename TSrc, typename TDst>
-    void cast_sycl(const TSrc* src, TDst* dst, size_t size, sycl::queue& q) {
-        q.submit([&](sycl::handler& h) {
-            h.parallel_for(sycl::range<1>(size), [=](sycl::id<1> i) {
-                dst[i] = static_cast<TDst>(src[i]);
-            });
-        }).wait();
-    }
+template <typename TSrc, typename TDst>
+void cast_sycl(const TSrc* src, TDst* dst, size_t size, sycl::queue& q) {
+    q.submit([&](sycl::handler& h) {
+        h.parallel_for(sycl::range<1>(size), [=](sycl::id<1> i) {
+            dst[i] = static_cast<TDst>(src[i]);
+        });
+    }).wait();
+}
 
 
 Tensor TypecastImpl<Device::SYCL>::execute(const Tensor& a, DataType dst_type) {

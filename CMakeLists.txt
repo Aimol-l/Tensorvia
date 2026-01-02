@@ -1,21 +1,11 @@
 cmake_minimum_required(VERSION 3.25)# 项目信息
-project(
-    tensorvia
-    LANGUAGES CXX C CUDA    #编程语言
-    DESCRIPTION "多后端 Tensor 加速计算库"
-    VERSION 0.1.0
-)
 
 # ------------------------- 设置 C++ 标准 -------------------------
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_BUILD_TYPE "Release")
-set(CMAKE_BUILD_PARALLEL_LEVEL 6)
 
-# 设置输出目录到构建目录下
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
+
 
 # ------------------------- 后端选项定义 -------------------------
 option(BUILD_TEST      "build test file with ./tests/*.cpp" OFF)
@@ -30,23 +20,11 @@ if(NOT BACKEND_CPU AND NOT BACKEND_CUDA AND NOT BACKEND_SYCL AND NOT BACKEND_VUL
     set(BACKEND_CPU ON)
 endif()
 
-# 检测平台和架构
-include(CheckLanguage)
-if(BACKEND_SYCL)
-    check_language(SYCL)
-    if(NOT CMAKE_SYCL_COMPILER)
-        message(FATAL_ERROR "SYCL backend enabled but no SYCL compiler found")
-    endif()
-endif()
-
 # 编译器配置
 if(BACKEND_CPU)
-    add_definitions(-DBACKEND_CPU)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
     find_package(OpenMP REQUIRED)
-    if(OpenMP_CXX_FOUND)
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fopenmp")
-    endif()
+    add_definitions(-DBACKEND_CPU)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -mavx2 -mfma -fopenmp")
 endif()
 
 if(BACKEND_CUDA)
@@ -56,42 +34,42 @@ if(BACKEND_CUDA)
     set(CMAKE_CUDA_STANDARD_REQUIRED ON)
     set(CMAKE_CUDA_EXTENSIONS OFF)
     
-    # 不再硬编码CUDA编译器路径，使用CMake自动检测
     find_package(OpenMP REQUIRED)
     find_package(CUDAToolkit REQUIRED)
     
-    # 设置CUDA架构（自动检测或默认值）
-    if(NOT CMAKE_CUDA_ARCHITECTURES)
-        set(CMAKE_CUDA_ARCHITECTURES "75;80;86;89;90")  # 常见现代GPU架构
-    endif()
+    set(CMAKE_CUDA_ARCHITECTURES "native")  # 常见现代GPU架构
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -mavx2 -mfma -fopenmp")
 endif()
 
 if(BACKEND_SYCL)
     add_definitions(-DBACKEND_SYCL)
-    enable_language(SYCL)
-    find_program(DPCPP_COMPILER "icpx" PATHS ENV PATH)
-    if(DPCPP_COMPILER)
-        set(CMAKE_CXX_COMPILER ${DPCPP_COMPILER})
-        set(CMAKE_C_COMPILER "icx")
-    endif()
-    
-    # 检查SYCL支持
-    find_package(IntelSYCL QUIET)
-    if(NOT TARGET SYCL::sycl)
-        message(STATUS "SYCL support not found, trying to set SYCL flags manually")
-    endif()
+    set(CMAKE_C_COMPILER "/opt/intel/oneapi/compiler/latest/bin/icx")
+    set(CMAKE_CXX_COMPILER "/opt/intel/oneapi/compiler/latest/bin/icpx")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsycl -O2 -fiopenmp -mavx2 -mfma -fsycl-targets=nvptx64-nvidia-cuda,spir64_x86_64")
 endif()
 
 if(BACKEND_VULKAN)
     add_definitions(-DBACKEND_VULKAN)
     find_package(Vulkan REQUIRED)
+    find_package(OpenMP REQUIRED)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -mavx2 -mfma -fopenmp")
 endif()
+
+project(
+    tensorvia
+    LANGUAGES CXX C CUDA    #编程语言
+    DESCRIPTION "多后端 Tensor 加速计算库"
+    VERSION 0.1.0
+)
+# 设置输出目录到构建目录下
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
 # ------------------------- 头文件目录 -------------------------
 include_directories(
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/include/core
 )
-
 # 后端头文件目录
 if(BACKEND_CPU)
     include_directories(${PROJECT_SOURCE_DIR}/include/backend/cpu)
@@ -102,12 +80,14 @@ if(BACKEND_CUDA)
     include_directories(${PROJECT_SOURCE_DIR}/include/backend/cuda)
 endif()
 if(BACKEND_SYCL)
+    find_package(IntelSYCL REQUIRED)
     include_directories(${CMAKE_SOURCE_DIR}/include/backend/cpu)
     include_directories(${PROJECT_SOURCE_DIR}/include/backend/sycl)
 endif()
 if(BACKEND_VULKAN)
     include_directories(${CMAKE_SOURCE_DIR}/include/backend/cpu)
     include_directories(${PROJECT_SOURCE_DIR}/include/backend/vulkan)
+
 endif()
 
 # ------------------------- 源文件收集 -------------------------
@@ -168,12 +148,10 @@ if(BACKEND_CUDA AND CUDAToolkit_FOUND)
 endif()
 
 if(BACKEND_SYCL AND CMAKE_SYCL_ENABLED)
-    target_compile_options(${PROJECT_NAME} PRIVATE -fsycl -O2 -fiopenmp -fsycl-targets=nvptx64-nvidia-cuda,spir64_x86_64)
     target_link_libraries(${PROJECT_NAME} PRIVATE ${IntelSYCL_LIBRARIES})
 endif()
 
 if(BACKEND_VULKAN AND Vulkan_FOUND)
-    target_include_directories(${PROJECT_NAME} PRIVATE ${Vulkan_INCLUDE_DIRS})
     target_link_libraries(${PROJECT_NAME} PRIVATE ${Vulkan_LIBRARIES})
     target_link_libraries(${PROJECT_NAME} PRIVATE OpenMP::OpenMP_CXX)
 endif()
@@ -196,7 +174,9 @@ install(TARGETS ${PROJECT_NAME}
 install(
     FILES
         ${PROJECT_SOURCE_DIR}/include/core/ops.h
+        ${PROJECT_SOURCE_DIR}/include/core/types.h
         ${PROJECT_SOURCE_DIR}/include/core/tensor.h
+        ${PROJECT_SOURCE_DIR}/include/core/type_traits.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/tensorvia
 )
 
@@ -231,14 +211,13 @@ if(BUILD_TEST)
         add_executable(${test_name} ${test_file})
         target_link_libraries(${test_name} PRIVATE ${PROJECT_NAME})
         target_include_directories(${test_name} PRIVATE ${INCLUDE_DIRS})
-        target_compile_definitions(${test_name} PRIVATE ${BACKEND_MACROS})
         
         # 为测试目标添加后端定义
         if(BACKEND_CPU)
            target_link_libraries(${test_name} PRIVATE OpenMP::OpenMP_CXX)
         endif()
         if(BACKEND_SYCL)
-            target_compile_options(${test_name} PRIVATE -fsycl -O2 -fiopenmp -fsycl-targets=nvptx64-nvidia-cuda,spir64_x86_64)
+            target_compile_options(${test_name} PRIVATE -fsycl -O2 -fiopenmp -mavx2 -mfma -fsycl-targets=nvptx64-nvidia-cuda,spir64_x86_64)
             target_link_libraries(${test_name} PRIVATE ${IntelSYCL_LIBRARIES})
         endif()
         if(BACKEND_CUDA)

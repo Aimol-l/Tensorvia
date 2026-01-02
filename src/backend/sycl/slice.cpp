@@ -1,55 +1,55 @@
 
 #include "backend/sycl/ops/slice.h"
+using namespace via;
 
 namespace ops {
 
-    template <typename T, int MAX_DIMS = 8>
-    void slice_sycl(Tensor& output, const Tensor& input, const std::vector<std::pair<int64_t, int64_t>>& ranges, sycl::queue& q) {
-        const T* in_data = static_cast<const T*>(input.data());
-        T* out_data = static_cast<T*>(output.data());
+template <typename T, int MAX_DIMS = 8>
+void slice_sycl(Tensor& output, const Tensor& input, const std::vector<std::pair<int64_t, int64_t>>& ranges, sycl::queue& q) {
+    const T* in_data = static_cast<const T*>(input.data());
+    T* out_data = static_cast<T*>(output.data());
 
-        const int ndim = static_cast<int>(input.shape().size());
+    const int ndim = static_cast<int>(input.shape().size());
 
-        // 用 sycl::malloc_shared 分配 POD 数组
-        int* in_shape = sycl::malloc_shared<int>(MAX_DIMS, q);
-        int* out_shape = sycl::malloc_shared<int>(MAX_DIMS, q);
-        int* in_strides = sycl::malloc_shared<int>(MAX_DIMS, q);
-        int* start_idx = sycl::malloc_shared<int>(MAX_DIMS, q);
+    // 用 sycl::malloc_shared 分配 POD 数组
+    int* in_shape = sycl::malloc_shared<int>(MAX_DIMS, q);
+    int* out_shape = sycl::malloc_shared<int>(MAX_DIMS, q);
+    int* in_strides = sycl::malloc_shared<int>(MAX_DIMS, q);
+    int* start_idx = sycl::malloc_shared<int>(MAX_DIMS, q);
 
-        for (int i = 0; i < ndim; ++i) {
-            in_shape[i] = input.shape(i);
-            out_shape[i] = output.shape(i);
-            start_idx[i] = ranges[i].first;
-        }
-        in_strides[ndim - 1] = 1;
-        for (int i = ndim - 2; i >= 0; --i) {
-            in_strides[i] = in_strides[i + 1] * in_shape[i + 1];
-        }
-        size_t numel = output.numel();
-        q.submit([=](sycl::handler& h) {
-            h.parallel_for(sycl::range<1>(numel), [=](sycl::id<1> idx) {
-                size_t linear_idx = idx[0];
-                int out_coords[MAX_DIMS];
-                for (int i = ndim - 1; i >= 0; --i) {
-                    out_coords[i] = linear_idx % out_shape[i];
-                    linear_idx /= out_shape[i];
-                }
-                size_t in_linear_idx = 0;
-                for (int i = 0; i < ndim; ++i) {
-                    int in_coord = out_coords[i] + start_idx[i];
-                    in_linear_idx += in_coord * in_strides[i];
-                }
-                out_data[idx[0]] = in_data[in_linear_idx];
-            });
-        }).wait();
-
-        // 释放共享内存
-        sycl::free(in_shape, q);
-        sycl::free(out_shape, q);
-        sycl::free(in_strides, q);
-        sycl::free(start_idx, q);
+    for (int i = 0; i < ndim; ++i) {
+        in_shape[i] = input.shape(i);
+        out_shape[i] = output.shape(i);
+        start_idx[i] = ranges[i].first;
     }
+    in_strides[ndim - 1] = 1;
+    for (int i = ndim - 2; i >= 0; --i) {
+        in_strides[i] = in_strides[i + 1] * in_shape[i + 1];
+    }
+    size_t numel = output.numel();
+    q.submit([=](sycl::handler& h) {
+        h.parallel_for(sycl::range<1>(numel), [=](sycl::id<1> idx) {
+            size_t linear_idx = idx[0];
+            int out_coords[MAX_DIMS];
+            for (int i = ndim - 1; i >= 0; --i) {
+                out_coords[i] = linear_idx % out_shape[i];
+                linear_idx /= out_shape[i];
+            }
+            size_t in_linear_idx = 0;
+            for (int i = 0; i < ndim; ++i) {
+                int in_coord = out_coords[i] + start_idx[i];
+                in_linear_idx += in_coord * in_strides[i];
+            }
+            out_data[idx[0]] = in_data[in_linear_idx];
+        });
+    }).wait();
 
+    // 释放共享内存
+    sycl::free(in_shape, q);
+    sycl::free(out_shape, q);
+    sycl::free(in_strides, q);
+    sycl::free(start_idx, q);
+}
 
 Tensor SliceImpl<Device::SYCL>::execute(const Tensor& t, const std::vector<std::pair<int64_t, int64_t>>& ranges){
         // 计算新的shape
@@ -80,5 +80,4 @@ Tensor SliceImpl<Device::SYCL>::execute(const Tensor& t, const std::vector<std::
     }
 
 template struct SliceImpl<Device::SYCL>;
-
 }

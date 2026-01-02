@@ -6,6 +6,8 @@
 #include "cpu_tensor.h"
 #include "core/factory.h"
 
+using namespace via;
+
 
 // sycl --> cpu
 void copy_device_to_host(std::shared_ptr<TensorImpl> src,std::shared_ptr<TensorImpl> dst,DataType dtype) {

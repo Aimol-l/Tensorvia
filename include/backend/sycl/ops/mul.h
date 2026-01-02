@@ -7,15 +7,15 @@
 namespace ops {
 
 //***************************************
-template <Device D> struct MulImpl;
+template <via::Device D> struct MulImpl;
 //***************************************
 
 template <>
-struct MulImpl<Device::SYCL> {
+struct MulImpl<via::Device::SYCL> {
     // [w,h] @ [h,w] --> [w,w]
     // [b,w,h] @ [b,h,w] --> [b,w,w]
     static Tensor execute(const Tensor& a, const Tensor& b);
 };
 
-extern template struct MulImpl<Device::SYCL>;
+extern template struct MulImpl<via::Device::SYCL>;
 }

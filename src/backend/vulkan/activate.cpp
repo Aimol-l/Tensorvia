@@ -1,5 +1,6 @@
 
 #include "backend/vulkan/ops/activate.h"
+using namespace via;
 
 namespace ops {
 

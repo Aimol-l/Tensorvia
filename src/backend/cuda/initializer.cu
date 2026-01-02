@@ -8,6 +8,7 @@
 #include <curand_kernel.h>
 #include "cuda_context.h" 
 #include "backend/cuda/ops/initializer.h"
+using namespace via;
 
 namespace ops { 
 

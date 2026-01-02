@@ -5,6 +5,7 @@
 #include "core/tensor.h"
 #include "core/types.h"
 #include "backend/cpu/ops/reduce.h"
+using namespace via;
 
 namespace ops {
 template <typename T>

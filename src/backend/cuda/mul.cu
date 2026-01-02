@@ -1,4 +1,5 @@
 ﻿#include "backend/cuda/ops/mul.h"
+using namespace via;
 
 namespace ops {
 

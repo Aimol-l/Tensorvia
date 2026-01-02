@@ -1,6 +1,7 @@
 #include "backend/vulkan/ops/repack.h"
 #include "backend/vulkan/vulkan_constant.h"
 
+using namespace via;
 
 void RepackImpl<Device::VULKAN>::execute(
     const Metadata& meta,

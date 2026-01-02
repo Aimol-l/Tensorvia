@@ -1,6 +1,4 @@
 ﻿#pragma once
-#include "types.h"
-#include "type_traits.h"
 
 class ContextImpl {
 public:

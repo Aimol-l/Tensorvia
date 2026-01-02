@@ -1,4 +1,5 @@
 #include "backend/cuda/ops/reduce.h"
+using namespace via;
 
 namespace ops {
 
@@ -32,38 +33,6 @@ __global__ void sum_cuda(const T* a_ptr, float* res, size_t numel) {
 
     if (tid == 0) 
         res[blockIdx.x] = sum_sdata[0]; // 最后在外部对res进行求和就行
-}
-
-float SumImpl<Device::CUDA>::execute(const Tensor& a) { 
-    size_t numel = a.numel();
-    constexpr size_t threads = 256;
-    size_t blocks = (numel + threads - 1) / threads;
-
-    float* res;
-    // 在设备上分配结果内存
-    cudaMallocManaged(&res, sizeof(float) * blocks);
-    cudaMemset(res, 0, sizeof(float) * blocks);
-    auto src_impl =  std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
-    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_impl->context());
-    auto A = data_as_const_variant(a.dtype(), a.data());
-    std::visit([&](auto a_ptr){
-        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(a_ptr)>>;
-        if constexpr (std::is_same_v<AType, float16>) {
-            sum_cuda<__half><<<blocks, threads, threads * sizeof(float), ctx_impl->stream()>>>(static_cast<const __half*>(a.data()), res, numel);
-        }else if constexpr (std::is_same_v<AType, bfloat16>) {
-            sum_cuda<__nv_bfloat16><<<blocks, threads, threads * sizeof(float), ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()), res, numel);
-        }else{
-            sum_cuda<AType><<<blocks, threads, threads * sizeof(float), ctx_impl->stream()>>>(static_cast<const AType*>(a.data()), res, numel);
-        }
-    }, A);
-    ctx_impl->wait();
-    float sum = 0;
-
-    for (size_t i = 0; i < blocks; ++i) {
-        sum += res[i];
-    }
-    cudaFree(res);
-    return sum;
 }
 
 // kernel: 累加 axis 上的和，输入类型 T，累加/输出类型 R
@@ -135,49 +104,6 @@ __global__ void sum_reduce_cuda(
     }
     out_ptr[id] = acc;
 }
-
-
-Tensor SumImpl<Device::CUDA>::execute(const Tensor& a, int axis) {
-    std::vector<int64_t> new_shape;
-    for (int i = 0; i < a.shape().size(); ++i) {
-        if (i != axis)  new_shape.push_back(a.shape(i));
-    }
-    auto a_shape = a.shape();
-    int dim = a_shape.size();
-
-    
-    size_t outer_size = 1;
-    for(int i = 0; i < axis; ++i) outer_size *= a_shape[i];
-    size_t axis_size = a.shape()[axis];
-    size_t inner_size = 1;
-    for(int i = axis+1; i < dim; ++i) inner_size *= a_shape[i];
-    
-    Tensor result(new_shape, a.dtype(), Device::CUDA);
-    auto src_ptr = std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
-    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_ptr->context());
-    size_t numel = a.numel();
-    constexpr size_t threads = 256;
-    size_t blocks = (numel + threads - 1) / threads;
-
-    auto A = data_as_const_variant(a.dtype(), a.data());
-    auto B = data_as_const_variant(result.dtype(), result.data());
-    std::visit([&](auto a_ptr) {
-        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(a_ptr)>>;
-        if constexpr (std::is_same_v<AType, float16>) {
-            sum_reduce_cuda<__half><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __half*>(a.data()), static_cast<__half*>(result.data()), axis_size, inner_size, numel);
-        }else if constexpr (std::is_same_v<AType, bfloat16>) {
-            sum_reduce_cuda<__nv_bfloat16><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()), static_cast<__nv_bfloat16*>(result.data()), axis_size, inner_size, numel);
-        }else{
-            sum_reduce_cuda<AType><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const AType*>(a.data()), static_cast<AType*>(result.data()), axis_size, inner_size, numel);
-        }
-    }, A);
-
-    ctx_impl->wait();
-
-    return result;
-}
-
-
 template<typename T>
 __global__ void min_cuda(const T* a_ptr, float* partial, size_t size) {
     extern __shared__ float min_sdata[];
@@ -232,38 +158,6 @@ __global__ void min_cuda(const T* a_ptr, float* partial, size_t size) {
         partial[blockIdx.x] = min_sdata[0];
     }
 }
-
-float MinImpl<Device::CUDA>::execute(const Tensor& a) { 
-    size_t numel = a.numel();
-    constexpr size_t threads = 256;
-    size_t blocks = (numel + threads - 1) / threads;
-
-    auto src_ptr = std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
-    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_ptr->context());
-    auto A = data_as_const_variant(a.dtype(), a.data());
-    float* partial;
-    cudaMallocManaged(&partial, blocks * sizeof(float));
-    std::visit([&](auto a_ptr) {
-        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(a_ptr)>>;
-        if constexpr (std::is_same_v<AType, float16>) {
-            min_cuda<__half><<<blocks, threads, threads * sizeof(__half), ctx_impl->stream()>>>(static_cast<const __half*>(a.data()), partial, numel);
-        }else if constexpr (std::is_same_v<AType, bfloat16>) {
-            min_cuda<__nv_bfloat16><<<blocks, threads, threads * sizeof(__nv_bfloat16), ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()), partial, numel);
-        }else{
-            min_cuda<AType><<<blocks, threads, threads * sizeof(AType), ctx_impl->stream()>>>(static_cast<const AType*>(a.data()), partial, numel);
-        }
-    }, A);
-    ctx_impl->wait();
-
-    float min_val = std::numeric_limits<float>::max();
-    for (size_t i = 0; i < blocks; ++i) {
-        min_val = std::min(min_val, partial[i]);
-    }
-    cudaFree(partial);
-
-    return min_val;
-}
-
 template <typename T>
 __global__ void min_reduce_cuda(
     const T* a_ptr,
@@ -307,46 +201,6 @@ __global__ void min_reduce_cuda(
         out_ptr[id] = m;
     }
 }
-
-Tensor MinImpl<Device::CUDA>::execute(const Tensor& a, int axis) {
-    std::vector<int64_t> new_shape;
-    for (int i = 0; i < a.shape().size(); ++i) {
-        if (i != axis)  new_shape.push_back(a.shape(i));
-    }
-    auto a_shape = a.shape();
-    int dim = a_shape.size();
-    
-    size_t outer_size = 1;
-    for(int i = 0; i < axis; ++i) outer_size *= a_shape[i];
-    size_t axis_size = a.shape()[axis];
-    size_t inner_size = 1;
-    for(int i = axis+1; i < dim; ++i) inner_size *= a_shape[i];
-    
-    Tensor result(new_shape, a.dtype(), Device::CUDA);
-    auto src_ptr = std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
-    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_ptr->context());
-    size_t numel = a.numel();
-    constexpr size_t threads = 256;
-    size_t blocks = (numel + threads - 1) / threads;
-
-    auto A = data_as_const_variant(a.dtype(), a.data());
-    auto B = data_as_const_variant(result.dtype(), result.data());
-    std::visit([&](auto a_ptr) {
-        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(a_ptr)>>;
-        if constexpr (std::is_same_v<AType, float16>) {
-            min_reduce_cuda<__half><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __half*>(a.data()), static_cast<__half*>(result.data()), axis_size, inner_size, numel);
-        }else if constexpr (std::is_same_v<AType, bfloat16>) {
-            min_reduce_cuda<__nv_bfloat16><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()), static_cast<__nv_bfloat16*>(result.data()), axis_size, inner_size, numel);
-        }else{
-            min_reduce_cuda<AType><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const AType*>(a.data()), static_cast<AType*>(result.data()), axis_size, inner_size, numel);
-        }
-    }, A);
-
-    ctx_impl->wait();
-
-    return result;
-}
-
 template<typename T>
 __global__ void max_cuda(const T* a_ptr, float* partial, size_t size) {
     extern __shared__ float max_sdata[];
@@ -399,38 +253,6 @@ __global__ void max_cuda(const T* a_ptr, float* partial, size_t size) {
         partial[blockIdx.x] = max_sdata[0];
     }
 }
-
-float MaxImpl<Device::CUDA>::execute(const Tensor& a) { 
-    size_t numel = a.numel();
-    constexpr size_t threads = 256;
-    size_t blocks = (numel + threads - 1) / threads;
-
-    auto src_ptr = std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
-    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_ptr->context());
-    auto A = data_as_const_variant(a.dtype(), a.data());
-    float* partial;
-    cudaMallocManaged(&partial, blocks * sizeof(float));
-    std::visit([&](auto a_ptr) {
-        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(a_ptr)>>;
-        if constexpr (std::is_same_v<AType, float16>) {
-            max_cuda<__half><<<blocks, threads, threads * sizeof(__half), ctx_impl->stream()>>>(static_cast<const __half*>(a.data()), partial, numel);
-        }else if constexpr (std::is_same_v<AType, bfloat16>) {
-            max_cuda<__nv_bfloat16><<<blocks, threads, threads * sizeof(__nv_bfloat16), ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()), partial, numel);
-        }else{
-            max_cuda<AType><<<blocks, threads, threads * sizeof(AType), ctx_impl->stream()>>>(static_cast<const AType*>(a.data()), partial, numel);
-        }
-    }, A);
-    ctx_impl->wait();
-
-    float max_val = std::numeric_limits<float>::min();
-    for (size_t i = 0; i < blocks; ++i) {
-        max_val = std::max(max_val, partial[i]);
-    }
-    cudaFree(partial);
-
-    return max_val;
-}
-
 template <typename T>
 __global__ void max_reduce_cuda(
     const T* a_ptr,
@@ -474,52 +296,6 @@ __global__ void max_reduce_cuda(
         out_ptr[id] = m;
     }
 }
-
-Tensor MaxImpl<Device::CUDA>::execute(const Tensor& a, int axis) {
-    std::vector<int64_t> new_shape;
-    for (int i = 0; i < a.shape().size(); ++i) {
-        if (i != axis)  new_shape.push_back(a.shape(i));
-    }
-    auto a_shape = a.shape();
-    int dim = a_shape.size();
-    
-    size_t outer_size = 1;
-    for(int i = 0; i < axis; ++i) outer_size *= a_shape[i];
-    size_t axis_size = a.shape()[axis];
-    size_t inner_size = 1;
-    for(int i = axis+1; i < dim; ++i) inner_size *= a_shape[i];
-    
-    Tensor result(new_shape, a.dtype(), Device::CUDA);
-    auto src_ptr = std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
-    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_ptr->context());
-    size_t numel = a.numel();
-    constexpr size_t threads = 256;
-    size_t blocks = (numel + threads - 1) / threads;
-
-    auto A = data_as_const_variant(a.dtype(), a.data());
-    auto B = data_as_const_variant(result.dtype(), result.data());
-    std::visit([&](auto a_ptr) {
-        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(a_ptr)>>;
-        if constexpr (std::is_same_v<AType, float16>) {
-            max_reduce_cuda<__half><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __half*>(a.data()), static_cast<__half*>(result.data()), axis_size, inner_size, numel);
-        }else if constexpr (std::is_same_v<AType, bfloat16>) {
-            max_reduce_cuda<__nv_bfloat16><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()), static_cast<__nv_bfloat16*>(result.data()), axis_size, inner_size, numel);
-        }else{
-            max_reduce_cuda<AType><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const AType*>(a.data()), static_cast<AType*>(result.data()), axis_size, inner_size, numel);
-        }
-    }, A);
-
-    ctx_impl->wait();
-
-    return result;
-}
-
-
-float MeanImpl<Device::CUDA>::execute(const Tensor& a) { 
-    Tensor a_copy = a.clone();
-    return SumImpl<Device::CUDA>::execute(a_copy) / a_copy.numel(); // 直接复用
-}
-
 template <typename T, typename R = T>
 __global__ void mean_reduce_cuda(
     const T* a_ptr,
@@ -568,46 +344,6 @@ __global__ void mean_reduce_cuda(
         out_ptr[id] = sum / static_cast<R>(axis_size);
     }
 }
-
-Tensor MeanImpl<Device::CUDA>::execute(const Tensor& a, int axis) {
-    std::vector<int64_t> new_shape;
-    for (int i = 0; i < a.shape().size(); ++i) {
-        if (i != axis)  new_shape.push_back(a.shape(i));
-    }
-    auto a_shape = a.shape();
-    int dim = a_shape.size();
-    
-    size_t outer_size = 1;
-    for(int i = 0; i < axis; ++i) outer_size *= a_shape[i];
-    size_t axis_size = a.shape()[axis];
-    size_t inner_size = 1;
-    for(int i = axis+1; i < dim; ++i) inner_size *= a_shape[i];
-    
-    Tensor result(new_shape, a.dtype(), Device::CUDA);
-    auto src_ptr = std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
-    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_ptr->context());
-    size_t numel = a.numel();
-    constexpr size_t threads = 256;
-    size_t blocks = (numel + threads - 1) / threads;
-
-    auto A = data_as_const_variant(a.dtype(), a.data());
-    auto B = data_as_const_variant(result.dtype(), result.data());
-    std::visit([&](auto a_ptr) {
-        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(a_ptr)>>;
-        if constexpr (std::is_same_v<AType, float16>) {
-            mean_reduce_cuda<__half><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __half*>(a.data()), static_cast<__half*>(result.data()), axis_size, inner_size, numel);
-        }else if constexpr (std::is_same_v<AType, bfloat16>) {
-            mean_reduce_cuda<__nv_bfloat16><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()), static_cast<__nv_bfloat16*>(result.data()), axis_size, inner_size, numel);
-        }else{
-            mean_reduce_cuda<AType><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const AType*>(a.data()), static_cast<AType*>(result.data()), axis_size, inner_size, numel);
-        }
-    }, A);
-
-    ctx_impl->wait();
-
-    return result;
-}
-
 template <typename T>
 __global__ void argmax_cuda(
     const T* a_ptr,
@@ -634,47 +370,6 @@ __global__ void argmax_cuda(
     }
     out_ptr[id] = max_idx;
 }
-
-Tensor ArgMaxImpl<Device::CUDA>::execute(const Tensor& a, int axis) {
-    std::vector<int64_t> new_shape;
-    for (int i = 0; i < a.shape().size(); ++i) {
-        if (i != axis)  new_shape.push_back(a.shape(i));
-    }
-    auto a_shape = a.shape();
-    int dim = a_shape.size();
-    
-    size_t outer_size = 1;
-    for(int i = 0; i < axis; ++i) outer_size *= a_shape[i];
-    size_t axis_size = a.shape()[axis];
-    size_t inner_size = 1;
-    for(int i = axis+1; i < dim; ++i) inner_size *= a_shape[i];
-    
-    Tensor result(new_shape, DataType::INT32, Device::CUDA);
-    auto src_ptr = std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
-    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_ptr->context());
-    size_t numel = a.numel();
-    constexpr size_t threads = 256;
-    size_t blocks = (numel + threads - 1) / threads;
-
-    auto A = data_as_const_variant(a.dtype(), a.data());
-    auto B = data_as_const_variant(result.dtype(), result.data());
-    std::visit([&](auto a_ptr) {
-        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(a_ptr)>>;
-        if constexpr (std::is_same_v<AType, float16>) {
-            argmax_cuda<__half><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __half*>(a.data()), static_cast<int32_t*>(result.data()), axis_size, inner_size, numel);
-        }else if constexpr (std::is_same_v<AType, bfloat16>) {
-            argmax_cuda<__nv_bfloat16><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()), static_cast<int32_t*>(result.data()), axis_size, inner_size, numel);
-        }else{
-            argmax_cuda<AType><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const AType*>(a.data()), static_cast<int32_t*>(result.data()), axis_size, inner_size, numel);
-        }
-    }, A);
-
-    ctx_impl->wait();
-
-    return result;
-}
-
-
 template <typename T>
 __global__ void argmin_cuda(
     const T* a_ptr,
@@ -701,46 +396,6 @@ __global__ void argmin_cuda(
     }
     out_ptr[id] = min_idx;
 }
-
-Tensor ArgMinImpl<Device::CUDA>::execute(const Tensor& a, int axis) {
-    std::vector<int64_t> new_shape;
-    for (int i = 0; i < a.shape().size(); ++i) {
-        if (i != axis)  new_shape.push_back(a.shape(i));
-    }
-    auto a_shape = a.shape();
-    int dim = a_shape.size();
-    
-    size_t outer_size = 1;
-    for(int i = 0; i < axis; ++i) outer_size *= a_shape[i];
-    size_t axis_size = a.shape()[axis];
-    size_t inner_size = 1;
-    for(int i = axis+1; i < dim; ++i) inner_size *= a_shape[i];
-    
-    Tensor result(new_shape, DataType::INT32, Device::CUDA);
-    auto src_ptr = std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
-    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_ptr->context());
-    size_t numel = a.numel();
-    constexpr size_t threads = 256;
-    size_t blocks = (numel + threads - 1) / threads;
-
-    auto A = data_as_const_variant(a.dtype(), a.data());
-    auto B = data_as_const_variant(result.dtype(), result.data());
-    std::visit([&](auto a_ptr) {
-        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(a_ptr)>>;
-        if constexpr (std::is_same_v<AType, float16>) {
-            argmin_cuda<__half><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __half*>(a.data()), static_cast<int32_t*>(result.data()), axis_size, inner_size, numel);
-        }else if constexpr (std::is_same_v<AType, bfloat16>) {
-            argmin_cuda<__nv_bfloat16><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()), static_cast<int32_t*>(result.data()), axis_size, inner_size, numel);
-        }else{
-            argmin_cuda<AType><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const AType*>(a.data()), static_cast<int32_t*>(result.data()), axis_size, inner_size, numel);
-        }
-    }, A);
-
-    ctx_impl->wait();
-
-    return result;
-}
-
 template <typename T>
 __global__ void any_cuda(const T* a_ptr, float val, size_t size, int* result) {
     // 声明共享内存：用于存放每个线程的比较结果
@@ -781,38 +436,6 @@ __global__ void any_cuda(const T* a_ptr, float val, size_t size, int* result) {
         atomicExch((int*)result, 1);  // 原子地设置 result = true
     }
 }
-
-bool AnyImpl<Device::CUDA>::execute(const Tensor& a, float val) {
-    size_t numel = a.numel();
-    constexpr size_t threads = 256;
-    size_t blocks = (numel + threads - 1) / threads;
-
-    auto src_ptr = std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
-    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_ptr->context());
-    
-    // 没有bool指针的情况下，使用int指针代替
-    int* res;
-    cudaMallocManaged(&res, sizeof(int));
-    *res = 0;
-
-    auto A = data_as_const_variant(a.dtype(), a.data());
-    std::visit([&](auto a_ptr) {
-        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(a_ptr)>>;
-        if constexpr (std::is_same_v<AType, float16>) {
-            any_cuda<__half><<<blocks, threads, threads * sizeof(int), ctx_impl->stream()>>>(static_cast<const __half*>(a.data()), val, numel, res);
-        }else if constexpr (std::is_same_v<AType, bfloat16>) {
-            any_cuda<__nv_bfloat16><<<blocks, threads, threads * sizeof(int), ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()), val, numel, res);
-        }else{
-            any_cuda<AType><<<blocks, threads, threads * sizeof(int), ctx_impl->stream()>>>(static_cast<const AType*>(a.data()), val, numel, res);
-        }
-    }, A);
-    ctx_impl->wait();
-    bool result = *res;
-    cudaFree(res);
-    return result;
-
-}
-
 template <typename T>
 __global__ void all_cuda(const T* a_ptr, float val, size_t size, int* result) {
     // 声明共享内存（用于 block 内规约）
@@ -858,7 +481,363 @@ __global__ void all_cuda(const T* a_ptr, float val, size_t size, int* result) {
         // 注意：我们不处理 any_sdata[0] == true 的情况，因为 result 初始应为 1
     }
 }
+//**************************************************
+float SumImpl<Device::CUDA>::execute(const Tensor& a) { 
+    size_t numel = a.numel();
+    constexpr size_t threads = 256;
+    size_t blocks = (numel + threads - 1) / threads;
 
+    float* res;
+    // 在设备上分配结果内存
+    cudaMallocManaged(&res, sizeof(float) * blocks);
+    cudaMemset(res, 0, sizeof(float) * blocks);
+    auto src_impl =  std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_impl->context());
+    auto A = data_as_const_variant(a.dtype(), a.data());
+    std::visit([&](auto a_ptr){
+        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(a_ptr)>>;
+        if constexpr (std::is_same_v<AType, float16>) {
+            sum_cuda<__half><<<blocks, threads, threads * sizeof(float), ctx_impl->stream()>>>(static_cast<const __half*>(a.data()), res, numel);
+        }else if constexpr (std::is_same_v<AType, bfloat16>) {
+            sum_cuda<__nv_bfloat16><<<blocks, threads, threads * sizeof(float), ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()), res, numel);
+        }else{
+            sum_cuda<AType><<<blocks, threads, threads * sizeof(float), ctx_impl->stream()>>>(static_cast<const AType*>(a.data()), res, numel);
+        }
+    }, A);
+    ctx_impl->wait();
+    float sum = 0;
+
+    for (size_t i = 0; i < blocks; ++i) {
+        sum += res[i];
+    }
+    cudaFree(res);
+    return sum;
+}
+float MinImpl<Device::CUDA>::execute(const Tensor& a) { 
+    size_t numel = a.numel();
+    constexpr size_t threads = 256;
+    size_t blocks = (numel + threads - 1) / threads;
+
+    auto src_ptr = std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_ptr->context());
+    auto A = data_as_const_variant(a.dtype(), a.data());
+    float* partial;
+    cudaMallocManaged(&partial, blocks * sizeof(float));
+    std::visit([&](auto a_ptr) {
+        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(a_ptr)>>;
+        if constexpr (std::is_same_v<AType, float16>) {
+            min_cuda<__half><<<blocks, threads, threads * sizeof(__half), ctx_impl->stream()>>>(static_cast<const __half*>(a.data()), partial, numel);
+        }else if constexpr (std::is_same_v<AType, bfloat16>) {
+            min_cuda<__nv_bfloat16><<<blocks, threads, threads * sizeof(__nv_bfloat16), ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()), partial, numel);
+        }else{
+            min_cuda<AType><<<blocks, threads, threads * sizeof(AType), ctx_impl->stream()>>>(static_cast<const AType*>(a.data()), partial, numel);
+        }
+    }, A);
+    ctx_impl->wait();
+
+    float min_val = std::numeric_limits<float>::max();
+    for (size_t i = 0; i < blocks; ++i) {
+        min_val = std::min(min_val, partial[i]);
+    }
+    cudaFree(partial);
+
+    return min_val;
+}
+float MaxImpl<Device::CUDA>::execute(const Tensor& a) { 
+    size_t numel = a.numel();
+    constexpr size_t threads = 256;
+    size_t blocks = (numel + threads - 1) / threads;
+
+    auto src_ptr = std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_ptr->context());
+    auto A = data_as_const_variant(a.dtype(), a.data());
+    float* partial;
+    cudaMallocManaged(&partial, blocks * sizeof(float));
+    std::visit([&](auto a_ptr) {
+        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(a_ptr)>>;
+        if constexpr (std::is_same_v<AType, float16>) {
+            max_cuda<__half><<<blocks, threads, threads * sizeof(__half), ctx_impl->stream()>>>(static_cast<const __half*>(a.data()), partial, numel);
+        }else if constexpr (std::is_same_v<AType, bfloat16>) {
+            max_cuda<__nv_bfloat16><<<blocks, threads, threads * sizeof(__nv_bfloat16), ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()), partial, numel);
+        }else{
+            max_cuda<AType><<<blocks, threads, threads * sizeof(AType), ctx_impl->stream()>>>(static_cast<const AType*>(a.data()), partial, numel);
+        }
+    }, A);
+    ctx_impl->wait();
+
+    float max_val = std::numeric_limits<float>::min();
+    for (size_t i = 0; i < blocks; ++i) {
+        max_val = std::max(max_val, partial[i]);
+    }
+    cudaFree(partial);
+
+    return max_val;
+}
+float MeanImpl<Device::CUDA>::execute(const Tensor& a) { 
+    Tensor a_copy = a.clone();
+    return SumImpl<Device::CUDA>::execute(a_copy) / a_copy.numel(); // 直接复用
+}
+//**************************************************
+Tensor SumImpl<Device::CUDA>::execute(const Tensor& a, int axis) {
+    std::vector<int64_t> new_shape;
+    for (int i = 0; i < a.shape().size(); ++i) {
+        if (i != axis)  new_shape.push_back(a.shape(i));
+    }
+    auto a_shape = a.shape();
+    int dim = a_shape.size();
+
+    
+    size_t outer_size = 1;
+    for(int i = 0; i < axis; ++i) outer_size *= a_shape[i];
+    size_t axis_size = a.shape()[axis];
+    size_t inner_size = 1;
+    for(int i = axis+1; i < dim; ++i) inner_size *= a_shape[i];
+    
+    Tensor result(new_shape, a.dtype(), Device::CUDA);
+    auto src_ptr = std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_ptr->context());
+    size_t numel = a.numel();
+    constexpr size_t threads = 256;
+    size_t blocks = (numel + threads - 1) / threads;
+
+    auto A = data_as_const_variant(a.dtype(), a.data());
+    auto B = data_as_const_variant(result.dtype(), result.data());
+    std::visit([&](auto a_ptr) {
+        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(a_ptr)>>;
+        if constexpr (std::is_same_v<AType, float16>) {
+            sum_reduce_cuda<__half><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __half*>(a.data()), static_cast<__half*>(result.data()), axis_size, inner_size, numel);
+        }else if constexpr (std::is_same_v<AType, bfloat16>) {
+            sum_reduce_cuda<__nv_bfloat16><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()), static_cast<__nv_bfloat16*>(result.data()), axis_size, inner_size, numel);
+        }else{
+            sum_reduce_cuda<AType><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const AType*>(a.data()), static_cast<AType*>(result.data()), axis_size, inner_size, numel);
+        }
+    }, A);
+
+    ctx_impl->wait();
+
+    return result;
+}
+Tensor MinImpl<Device::CUDA>::execute(const Tensor& a, int axis) {
+    std::vector<int64_t> new_shape;
+    for (int i = 0; i < a.shape().size(); ++i) {
+        if (i != axis)  new_shape.push_back(a.shape(i));
+    }
+    auto a_shape = a.shape();
+    int dim = a_shape.size();
+    
+    size_t outer_size = 1;
+    for(int i = 0; i < axis; ++i) outer_size *= a_shape[i];
+    size_t axis_size = a.shape()[axis];
+    size_t inner_size = 1;
+    for(int i = axis+1; i < dim; ++i) inner_size *= a_shape[i];
+    
+    Tensor result(new_shape, a.dtype(), Device::CUDA);
+    auto src_ptr = std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_ptr->context());
+    size_t numel = a.numel();
+    constexpr size_t threads = 256;
+    size_t blocks = (numel + threads - 1) / threads;
+
+    auto A = data_as_const_variant(a.dtype(), a.data());
+    auto B = data_as_const_variant(result.dtype(), result.data());
+    std::visit([&](auto a_ptr) {
+        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(a_ptr)>>;
+        if constexpr (std::is_same_v<AType, float16>) {
+            min_reduce_cuda<__half><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __half*>(a.data()), static_cast<__half*>(result.data()), axis_size, inner_size, numel);
+        }else if constexpr (std::is_same_v<AType, bfloat16>) {
+            min_reduce_cuda<__nv_bfloat16><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()), static_cast<__nv_bfloat16*>(result.data()), axis_size, inner_size, numel);
+        }else{
+            min_reduce_cuda<AType><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const AType*>(a.data()), static_cast<AType*>(result.data()), axis_size, inner_size, numel);
+        }
+    }, A);
+
+    ctx_impl->wait();
+
+    return result;
+}
+Tensor MaxImpl<Device::CUDA>::execute(const Tensor& a, int axis) {
+    std::vector<int64_t> new_shape;
+    for (int i = 0; i < a.shape().size(); ++i) {
+        if (i != axis)  new_shape.push_back(a.shape(i));
+    }
+    auto a_shape = a.shape();
+    int dim = a_shape.size();
+    
+    size_t outer_size = 1;
+    for(int i = 0; i < axis; ++i) outer_size *= a_shape[i];
+    size_t axis_size = a.shape()[axis];
+    size_t inner_size = 1;
+    for(int i = axis+1; i < dim; ++i) inner_size *= a_shape[i];
+    
+    Tensor result(new_shape, a.dtype(), Device::CUDA);
+    auto src_ptr = std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_ptr->context());
+    size_t numel = a.numel();
+    constexpr size_t threads = 256;
+    size_t blocks = (numel + threads - 1) / threads;
+
+    auto A = data_as_const_variant(a.dtype(), a.data());
+    auto B = data_as_const_variant(result.dtype(), result.data());
+    std::visit([&](auto a_ptr) {
+        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(a_ptr)>>;
+        if constexpr (std::is_same_v<AType, float16>) {
+            max_reduce_cuda<__half><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __half*>(a.data()), static_cast<__half*>(result.data()), axis_size, inner_size, numel);
+        }else if constexpr (std::is_same_v<AType, bfloat16>) {
+            max_reduce_cuda<__nv_bfloat16><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()), static_cast<__nv_bfloat16*>(result.data()), axis_size, inner_size, numel);
+        }else{
+            max_reduce_cuda<AType><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const AType*>(a.data()), static_cast<AType*>(result.data()), axis_size, inner_size, numel);
+        }
+    }, A);
+
+    ctx_impl->wait();
+
+    return result;
+}
+Tensor MeanImpl<Device::CUDA>::execute(const Tensor& a, int axis) {
+    std::vector<int64_t> new_shape;
+    for (int i = 0; i < a.shape().size(); ++i) {
+        if (i != axis)  new_shape.push_back(a.shape(i));
+    }
+    auto a_shape = a.shape();
+    int dim = a_shape.size();
+    
+    size_t outer_size = 1;
+    for(int i = 0; i < axis; ++i) outer_size *= a_shape[i];
+    size_t axis_size = a.shape()[axis];
+    size_t inner_size = 1;
+    for(int i = axis+1; i < dim; ++i) inner_size *= a_shape[i];
+    
+    Tensor result(new_shape, a.dtype(), Device::CUDA);
+    auto src_ptr = std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_ptr->context());
+    size_t numel = a.numel();
+    constexpr size_t threads = 256;
+    size_t blocks = (numel + threads - 1) / threads;
+
+    auto A = data_as_const_variant(a.dtype(), a.data());
+    auto B = data_as_const_variant(result.dtype(), result.data());
+    std::visit([&](auto a_ptr) {
+        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(a_ptr)>>;
+        if constexpr (std::is_same_v<AType, float16>) {
+            mean_reduce_cuda<__half><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __half*>(a.data()), static_cast<__half*>(result.data()), axis_size, inner_size, numel);
+        }else if constexpr (std::is_same_v<AType, bfloat16>) {
+            mean_reduce_cuda<__nv_bfloat16><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()), static_cast<__nv_bfloat16*>(result.data()), axis_size, inner_size, numel);
+        }else{
+            mean_reduce_cuda<AType><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const AType*>(a.data()), static_cast<AType*>(result.data()), axis_size, inner_size, numel);
+        }
+    }, A);
+
+    ctx_impl->wait();
+
+    return result;
+}
+Tensor ArgMaxImpl<Device::CUDA>::execute(const Tensor& a, int axis) {
+    std::vector<int64_t> new_shape;
+    for (int i = 0; i < a.shape().size(); ++i) {
+        if (i != axis)  new_shape.push_back(a.shape(i));
+    }
+    auto a_shape = a.shape();
+    int dim = a_shape.size();
+    
+    size_t outer_size = 1;
+    for(int i = 0; i < axis; ++i) outer_size *= a_shape[i];
+    size_t axis_size = a.shape()[axis];
+    size_t inner_size = 1;
+    for(int i = axis+1; i < dim; ++i) inner_size *= a_shape[i];
+    
+    Tensor result(new_shape, DataType::INT32, Device::CUDA);
+    auto src_ptr = std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_ptr->context());
+    size_t numel = a.numel();
+    constexpr size_t threads = 256;
+    size_t blocks = (numel + threads - 1) / threads;
+
+    auto A = data_as_const_variant(a.dtype(), a.data());
+    auto B = data_as_const_variant(result.dtype(), result.data());
+    std::visit([&](auto a_ptr) {
+        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(a_ptr)>>;
+        if constexpr (std::is_same_v<AType, float16>) {
+            argmax_cuda<__half><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __half*>(a.data()), static_cast<int32_t*>(result.data()), axis_size, inner_size, numel);
+        }else if constexpr (std::is_same_v<AType, bfloat16>) {
+            argmax_cuda<__nv_bfloat16><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()), static_cast<int32_t*>(result.data()), axis_size, inner_size, numel);
+        }else{
+            argmax_cuda<AType><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const AType*>(a.data()), static_cast<int32_t*>(result.data()), axis_size, inner_size, numel);
+        }
+    }, A);
+
+    ctx_impl->wait();
+
+    return result;
+}
+Tensor ArgMinImpl<Device::CUDA>::execute(const Tensor& a, int axis) {
+    std::vector<int64_t> new_shape;
+    for (int i = 0; i < a.shape().size(); ++i) {
+        if (i != axis)  new_shape.push_back(a.shape(i));
+    }
+    auto a_shape = a.shape();
+    int dim = a_shape.size();
+    
+    size_t outer_size = 1;
+    for(int i = 0; i < axis; ++i) outer_size *= a_shape[i];
+    size_t axis_size = a.shape()[axis];
+    size_t inner_size = 1;
+    for(int i = axis+1; i < dim; ++i) inner_size *= a_shape[i];
+    
+    Tensor result(new_shape, DataType::INT32, Device::CUDA);
+    auto src_ptr = std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_ptr->context());
+    size_t numel = a.numel();
+    constexpr size_t threads = 256;
+    size_t blocks = (numel + threads - 1) / threads;
+
+    auto A = data_as_const_variant(a.dtype(), a.data());
+    auto B = data_as_const_variant(result.dtype(), result.data());
+    std::visit([&](auto a_ptr) {
+        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(a_ptr)>>;
+        if constexpr (std::is_same_v<AType, float16>) {
+            argmin_cuda<__half><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __half*>(a.data()), static_cast<int32_t*>(result.data()), axis_size, inner_size, numel);
+        }else if constexpr (std::is_same_v<AType, bfloat16>) {
+            argmin_cuda<__nv_bfloat16><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()), static_cast<int32_t*>(result.data()), axis_size, inner_size, numel);
+        }else{
+            argmin_cuda<AType><<<blocks, threads, 0, ctx_impl->stream()>>>(static_cast<const AType*>(a.data()), static_cast<int32_t*>(result.data()), axis_size, inner_size, numel);
+        }
+    }, A);
+
+    ctx_impl->wait();
+
+    return result;
+}
+//**************************************************
+bool AnyImpl<Device::CUDA>::execute(const Tensor& a, float val) {
+    size_t numel = a.numel();
+    constexpr size_t threads = 256;
+    size_t blocks = (numel + threads - 1) / threads;
+
+    auto src_ptr = std::dynamic_pointer_cast<CUDATensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<CUDAContext>(src_ptr->context());
+    
+    // 没有bool指针的情况下，使用int指针代替
+    int* res;
+    cudaMallocManaged(&res, sizeof(int));
+    *res = 0;
+
+    auto A = data_as_const_variant(a.dtype(), a.data());
+    std::visit([&](auto a_ptr) {
+        using AType = std::remove_cv_t<std::remove_pointer_t<decltype(a_ptr)>>;
+        if constexpr (std::is_same_v<AType, float16>) {
+            any_cuda<__half><<<blocks, threads, threads * sizeof(int), ctx_impl->stream()>>>(static_cast<const __half*>(a.data()), val, numel, res);
+        }else if constexpr (std::is_same_v<AType, bfloat16>) {
+            any_cuda<__nv_bfloat16><<<blocks, threads, threads * sizeof(int), ctx_impl->stream()>>>(static_cast<const __nv_bfloat16*>(a.data()), val, numel, res);
+        }else{
+            any_cuda<AType><<<blocks, threads, threads * sizeof(int), ctx_impl->stream()>>>(static_cast<const AType*>(a.data()), val, numel, res);
+        }
+    }, A);
+    ctx_impl->wait();
+    bool result = *res;
+    cudaFree(res);
+    return result;
+
+}
 bool AllImpl<Device::CUDA>::execute(const Tensor& a, float val) {
     size_t numel = a.numel();
     constexpr size_t threads = 256;
@@ -888,8 +867,7 @@ bool AllImpl<Device::CUDA>::execute(const Tensor& a, float val) {
     cudaFree(res);
     return result;
 }
-
-
+//**************************************************
 template struct SumImpl<Device::CUDA>;
 template struct MinImpl<Device::CUDA>;
 template struct MaxImpl<Device::CUDA>;   
@@ -898,5 +876,4 @@ template struct ArgMaxImpl<Device::CUDA>;
 template struct ArgMinImpl<Device::CUDA>;
 template struct AnyImpl<Device::CUDA>;
 template struct AllImpl<Device::CUDA>;
-
 }

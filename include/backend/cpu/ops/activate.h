@@ -4,53 +4,53 @@
 
 namespace ops {
 
-template <Device D>
+template <via::Device D>
 struct ReluImpl;
 
-template <Device D>
+template <via::Device D>
 struct SiluImpl;
 
-template <Device D>
+template <via::Device D>
 struct TanhImpl;
 
-template <Device D>
+template <via::Device D>
 struct SigmoidImpl;
 
-template <Device D>
+template <via::Device D>
 struct SoftmaxImpl;
 
 template <>
-struct ReluImpl<Device::CPU> {
+struct ReluImpl<via::Device::CPU> {
     static void execute(Tensor& a);
     static Tensor execute(const Tensor& a);
 };
 
 template <>
-struct SiluImpl<Device::CPU> {
+struct SiluImpl<via::Device::CPU> {
     static void execute(Tensor& a);
     static Tensor execute(const Tensor& a) ;
 };
 
 template <>
-struct TanhImpl<Device::CPU> {
+struct TanhImpl<via::Device::CPU> {
     static void execute(Tensor& a) ;
     static Tensor execute(const Tensor& a);
 };
     
 template <>
-struct SigmoidImpl<Device::CPU> {
+struct SigmoidImpl<via::Device::CPU> {
     static void execute(Tensor& a) ;
     static Tensor execute(const Tensor& a);
 };
 template <>
-struct SoftmaxImpl<Device::CPU> {
+struct SoftmaxImpl<via::Device::CPU> {
     static Tensor execute(const Tensor& a, int axis);
 };
 
-extern template struct ReluImpl<Device::CPU>;
-extern template struct SiluImpl<Device::CPU>;
-extern template struct TanhImpl<Device::CPU>;
-extern template struct SigmoidImpl<Device::CPU>;
-extern template struct SoftmaxImpl<Device::CPU>;
+extern template struct ReluImpl<via::Device::CPU>;
+extern template struct SiluImpl<via::Device::CPU>;
+extern template struct TanhImpl<via::Device::CPU>;
+extern template struct SigmoidImpl<via::Device::CPU>;
+extern template struct SoftmaxImpl<via::Device::CPU>;
 
 }

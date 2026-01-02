@@ -1,6 +1,8 @@
 #include "core/factory.h"
-#include "backend/cpu/cpu_tensor.h"
 #include "type_traits.h"
+#include "backend/cpu/cpu_tensor.h"
+
+using namespace via;
 
 #ifdef BACKEND_CPU
 struct CPURegistrar {
@@ -8,6 +10,7 @@ struct CPURegistrar {
         register_tensor_impl(Device::CPU, [](void* ptr,int64_t numel, DataType dtype) {
             return std::make_shared<CPUTensor>(ptr,numel, dtype);
         });
+        std::println("*************************************************************");
     }
 } cpu_registrar;
 #endif
@@ -21,15 +24,13 @@ struct CUDARegistrar {
         register_tensor_impl(Device::CUDA, [&](void* ptr,int64_t numel, DataType dtype) {
             return std::make_shared<CUDATensor>(ptr,numel, dtype,ctx);
         });
-    }
-}cuda_registrar;
-struct CPURegistrar {
-    CPURegistrar() {
         register_tensor_impl(Device::CPU, [](void* ptr,int64_t numel, DataType dtype) {
             return std::make_shared<CPUTensor>(ptr,numel, dtype);
         });
+        std::println("*************************************************************");
+
     }
-}cpu_registrar;
+}cuda_registrar;
 #endif
 
 #ifdef BACKEND_SYCL // 需要同时使用cpu和sycl
@@ -41,15 +42,13 @@ struct SYCLRegistrar {
         register_tensor_impl(Device::SYCL, [&](void* ptr,int64_t numel, DataType dtype) {
             return std::make_shared<SYCLTensor>(ptr,numel, dtype,ctx);
         });
-    }
-} sycl_registrar;
-struct CPURegistrar {
-    CPURegistrar() {
         register_tensor_impl(Device::CPU, [](void* ptr,int64_t numel, DataType dtype) {
             return std::make_shared<CPUTensor>(ptr,numel, dtype);
         });
+        std::println("*************************************************************");
+
     }
-} cpu_registrar;
+} sycl_registrar;
 #endif
 
 
@@ -140,14 +139,11 @@ struct VulkanRegistrar {
         register_tensor_impl(Device::VULKAN, [&](void* ptr,int64_t numel, DataType dtype) {
             return std::make_shared<VKTensor>(ptr,numel, dtype,ctx);
         });
-    }
-} vulkan_registrar;
-struct CPURegistrar {
-    CPURegistrar() {
         register_tensor_impl(Device::CPU, [](void* ptr,int64_t numel, DataType dtype) {
             return std::make_shared<CPUTensor>(ptr,numel, dtype);
         });
-    }
-} cpu_registrar;
+        std::println("*************************************************************");
 
+    }
+} vulkan_registrar;
 #endif

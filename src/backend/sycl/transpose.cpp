@@ -1,5 +1,6 @@
 ﻿
 #include "backend/sycl/ops/transpose.h"
+using namespace via;
 
 namespace ops {
 
@@ -24,9 +25,9 @@ void transpose_sycl(Tensor& a,sycl::queue& q) {
 }
 
 template <typename T>
-void transpose_sycl(Tensor& result,Tensor& a,std::vector<int64_t> axes,sycl::queue& q) {
+void transpose_sycl(Tensor& result,const Tensor& a,std::vector<int64_t> axes,sycl::queue& q) {
     int dim = a.shape().size();
-    T* src_data = static_cast<T*>(a.data());
+    const T* src_data = static_cast<const T*>(a.data());
     T* dst_data = static_cast<T*>(result.data());
     int* axes_v = sycl::malloc_shared<int>(dim,q);
     int* in_strides = sycl::malloc_shared<int>(dim,q);
@@ -68,7 +69,6 @@ void transpose_sycl(Tensor& result,Tensor& a,std::vector<int64_t> axes,sycl::que
     sycl::free(out_strides,q);
 }
 
-
 void TransposeImpl<Device::SYCL>::execute(Tensor& a){
     auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
     auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
@@ -87,7 +87,7 @@ void TransposeImpl<Device::SYCL>::execute(Tensor& a){
     a.reshape(shape);
 
 }
-Tensor TransposeImpl<Device::SYCL>::execute(Tensor& a,std::initializer_list<int64_t> axes){
+Tensor TransposeImpl<Device::SYCL>::execute(const Tensor& a,std::initializer_list<int64_t> axes){
     // 创建结果张量
     std::vector<int64_t> new_shape;
     std::vector<int64_t> axes_v(axes);
@@ -111,6 +111,11 @@ Tensor TransposeImpl<Device::SYCL>::execute(Tensor& a,std::initializer_list<int6
 }
 
 void TransposeImpl<Device::SYCL>::execute(const Tensor& a,Tensor& dst,std::initializer_list<int64_t> axes){
+    // 创建结果张量
+    std::vector<int64_t> new_shape;
+    std::vector<int64_t> axes_v(axes);
+    for(auto axe:axes)  new_shape.push_back(a.shape(axe));
+    Tensor result(new_shape,a.dtype(),Device::SYCL);
     auto src_impl =  std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
     auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
     auto& q = ctx_impl->get_queue();

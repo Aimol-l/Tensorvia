@@ -1,4 +1,5 @@
 #include "backend/sycl/ops/reduce.h"
+using namespace via;
 
 namespace ops {
 
@@ -441,7 +442,6 @@ bool all_sycl(const Tensor& a,float val,size_t size, sycl::queue& q) {
 
 //**************************************************
 
-//**************************************************
 float SumImpl<Device::SYCL>::execute(const Tensor& a){
     auto src_impl = std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
     auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
@@ -454,6 +454,58 @@ float SumImpl<Device::SYCL>::execute(const Tensor& a){
     },A);
     return res;
 }
+float MeanImpl<Device::SYCL>::execute(const Tensor& a) {
+    auto src_impl = std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
+    auto& q = ctx_impl->get_queue();
+
+    float sum_val = 0.0f;
+    switch (a.dtype()) {
+        case DataType::INT8:     sum_val =  sum_sycl<int8_t>(a, q);
+        case DataType::INT16:    sum_val =  sum_sycl<int16_t>(a, q);
+        case DataType::INT32:    sum_val =  sum_sycl<int32_t>(a, q);
+        case DataType::INT64:    sum_val =  sum_sycl<int64_t>(a, q);
+        case DataType::FLOAT16:  sum_val =  sum_sycl<float16>(a, q);
+        case DataType::BFLOAT16: sum_val =  sum_sycl<bfloat16>(a, q);
+        case DataType::FLOAT32:  sum_val =  sum_sycl<float32>(a, q);
+        case DataType::FLOAT64:  sum_val =  sum_sycl<float64>(a, q);
+        default: throw std::runtime_error("mean: unsupported data type");
+    }
+    return sum_val / a.numel();
+}
+float MinImpl<Device::SYCL>::execute(const Tensor& a){
+    auto src_impl = std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
+    auto& q = ctx_impl->get_queue();
+    switch (a.dtype()) {
+        case DataType::INT8:     return min_sycl<int8_t>(a, q);
+        case DataType::INT16:    return min_sycl<int16_t>(a, q);
+        case DataType::INT32:    return min_sycl<int32_t>(a, q);
+        case DataType::INT64:    return min_sycl<int64_t>(a, q);
+        case DataType::FLOAT16:  return min_sycl<float16>(a, q);
+        case DataType::BFLOAT16: return min_sycl<bfloat16>(a, q);
+        case DataType::FLOAT32:  return min_sycl<float>(a, q);
+        case DataType::FLOAT64:  return min_sycl<float64>(a, q);
+        default: throw std::runtime_error("min: unsupported data type");
+    }
+}
+float MaxImpl<Device::SYCL>::execute(const Tensor& a){
+    auto src_impl = std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
+    auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
+    auto& q = ctx_impl->get_queue();
+    switch (a.dtype()) {
+        case DataType::INT8:     return max_sycl<int8_t>(a, q);
+        case DataType::INT16:    return max_sycl<int16_t>(a, q);
+        case DataType::INT32:    return max_sycl<int32_t>(a, q);
+        case DataType::INT64:    return max_sycl<int64_t>(a, q);
+        case DataType::FLOAT16:  return max_sycl<float16>(a, q);
+        case DataType::BFLOAT16: return max_sycl<bfloat16>(a, q);
+        case DataType::FLOAT32:  return max_sycl<float>(a, q);
+        case DataType::FLOAT64:  return max_sycl<float64>(a, q);
+        default: throw std::runtime_error("max: unsupported data type");
+    }
+}
+//**************************************************
 Tensor SumImpl<Device::SYCL>::execute(const Tensor& a,int axis){
     auto src_impl = std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
     auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
@@ -476,25 +528,6 @@ Tensor SumImpl<Device::SYCL>::execute(const Tensor& a,int axis){
         default: throw std::runtime_error("sum: unsupported data type");
     }
     return result;
-}
-float MeanImpl<Device::SYCL>::execute(const Tensor& a) {
-    auto src_impl = std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
-    auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
-    auto& q = ctx_impl->get_queue();
-
-    float sum_val = 0.0f;
-    switch (a.dtype()) {
-        case DataType::INT8:     sum_val =  sum_sycl<int8_t>(a, q);
-        case DataType::INT16:    sum_val =  sum_sycl<int16_t>(a, q);
-        case DataType::INT32:    sum_val =  sum_sycl<int32_t>(a, q);
-        case DataType::INT64:    sum_val =  sum_sycl<int64_t>(a, q);
-        case DataType::FLOAT16:  sum_val =  sum_sycl<float16>(a, q);
-        case DataType::BFLOAT16: sum_val =  sum_sycl<bfloat16>(a, q);
-        case DataType::FLOAT32:  sum_val =  sum_sycl<float32>(a, q);
-        case DataType::FLOAT64:  sum_val =  sum_sycl<float64>(a, q);
-        default: throw std::runtime_error("mean: unsupported data type");
-    }
-    return sum_val / a.numel();
 }
 Tensor MeanImpl<Device::SYCL>::execute(const Tensor& a,int axis){
     auto src_impl = std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
@@ -519,22 +552,6 @@ Tensor MeanImpl<Device::SYCL>::execute(const Tensor& a,int axis){
     }
     return result;
 }
-float MinImpl<Device::SYCL>::execute(const Tensor& a){
-    auto src_impl = std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
-    auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
-    auto& q = ctx_impl->get_queue();
-    switch (a.dtype()) {
-        case DataType::INT8:     return min_sycl<int8_t>(a, q);
-        case DataType::INT16:    return min_sycl<int16_t>(a, q);
-        case DataType::INT32:    return min_sycl<int32_t>(a, q);
-        case DataType::INT64:    return min_sycl<int64_t>(a, q);
-        case DataType::FLOAT16:  return min_sycl<float16>(a, q);
-        case DataType::BFLOAT16: return min_sycl<bfloat16>(a, q);
-        case DataType::FLOAT32:  return min_sycl<float>(a, q);
-        case DataType::FLOAT64:  return min_sycl<float64>(a, q);
-        default: throw std::runtime_error("min: unsupported data type");
-    }
-}
 Tensor MinImpl<Device::SYCL>::execute(const Tensor& a,int axis){
     auto src_impl = std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
     auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
@@ -557,22 +574,6 @@ Tensor MinImpl<Device::SYCL>::execute(const Tensor& a,int axis){
         default: throw std::runtime_error("Min: unsupported data type");
     }
     return result;
-}
-float MaxImpl<Device::SYCL>::execute(const Tensor& a){
-    auto src_impl = std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
-    auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
-    auto& q = ctx_impl->get_queue();
-    switch (a.dtype()) {
-        case DataType::INT8:     return max_sycl<int8_t>(a, q);
-        case DataType::INT16:    return max_sycl<int16_t>(a, q);
-        case DataType::INT32:    return max_sycl<int32_t>(a, q);
-        case DataType::INT64:    return max_sycl<int64_t>(a, q);
-        case DataType::FLOAT16:  return max_sycl<float16>(a, q);
-        case DataType::BFLOAT16: return max_sycl<bfloat16>(a, q);
-        case DataType::FLOAT32:  return max_sycl<float>(a, q);
-        case DataType::FLOAT64:  return max_sycl<float64>(a, q);
-        default: throw std::runtime_error("max: unsupported data type");
-    }
 }
 Tensor MaxImpl<Device::SYCL>::execute(const Tensor& a,int axis){
     auto src_impl = std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
@@ -597,7 +598,6 @@ Tensor MaxImpl<Device::SYCL>::execute(const Tensor& a,int axis){
     }
     return result;
 }
-
 Tensor ArgMaxImpl<Device::SYCL>::execute(const Tensor &a, int axis){
     auto src_impl = std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
     auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
@@ -621,7 +621,6 @@ Tensor ArgMaxImpl<Device::SYCL>::execute(const Tensor &a, int axis){
     }
     return result;
 }
-
 Tensor ArgMinImpl<Device::SYCL>::execute(const Tensor &a, int axis) {
     auto src_impl = std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
     auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
@@ -644,6 +643,7 @@ Tensor ArgMinImpl<Device::SYCL>::execute(const Tensor &a, int axis) {
     }
     return result;
 }
+//**************************************************
 bool AnyImpl<Device::SYCL>::execute(const Tensor& a,float val) {
         auto src_impl = std::dynamic_pointer_cast<SYCLTensor>(a.get_impl());
         auto ctx_impl = std::dynamic_pointer_cast<SYCLContext>(src_impl->context());
@@ -680,14 +680,13 @@ bool AllImpl<Device::SYCL>::execute(const Tensor& a,float val) {
         default: throw std::runtime_error("all: unsupported dtype");
     }
 }
-
- template struct SumImpl<Device::SYCL>;
- template struct MeanImpl<Device::SYCL>;
- template struct MinImpl<Device::SYCL>;
- template struct MaxImpl<Device::SYCL>;
- template struct ArgMaxImpl<Device::SYCL>;
- template struct ArgMinImpl<Device::SYCL>;
- template struct AnyImpl<Device::SYCL>;
- template struct AllImpl<Device::SYCL>;
-
+//*************************************************
+template struct SumImpl<Device::SYCL>;
+template struct MeanImpl<Device::SYCL>;
+template struct MinImpl<Device::SYCL>;
+template struct MaxImpl<Device::SYCL>;
+template struct ArgMaxImpl<Device::SYCL>;
+template struct ArgMinImpl<Device::SYCL>;
+template struct AnyImpl<Device::SYCL>;
+template struct AllImpl<Device::SYCL>;
 }

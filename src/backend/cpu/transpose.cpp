@@ -1,5 +1,6 @@
 ﻿#include "backend/cpu/ops/transpose.h"
 
+using namespace via;
 
 
 namespace ops {

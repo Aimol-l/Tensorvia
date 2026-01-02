@@ -4,70 +4,70 @@
 namespace ops {
 
 // 前向声明模板
-template <Device D> struct ReluImpl;
-template <Device D> struct SiluImpl;
-template <Device D> struct TanhImpl;
-template <Device D> struct SigmoidImpl;
-template <Device D> struct SoftmaxImpl;
+template <via::Device D> struct ReluImpl;
+template <via::Device D> struct SiluImpl;
+template <via::Device D> struct TanhImpl;
+template <via::Device D> struct SigmoidImpl;
+template <via::Device D> struct SoftmaxImpl;
 
 // 2. 特化声明（但不包含实现）
 template <>
-struct ReluImpl<Device::VULKAN> {
+struct ReluImpl<via::Device::VULKAN> {
     static void execute(Tensor& a);
     static Tensor execute(const Tensor& a);
 };
 template <>
-struct SiluImpl<Device::VULKAN> {
+struct SiluImpl<via::Device::VULKAN> {
     static void execute(Tensor& a);
     static Tensor execute(const Tensor& a);
 };
 template <>
-struct TanhImpl<Device::VULKAN> {
+struct TanhImpl<via::Device::VULKAN> {
     static void execute(Tensor& a);
     static Tensor execute(const Tensor& a);
 };
 template <>
-struct SigmoidImpl<Device::VULKAN> {
+struct SigmoidImpl<via::Device::VULKAN> {
     static void execute(Tensor& a);
     static Tensor execute(const Tensor& a);
 };
 template <>
-struct SoftmaxImpl<Device::VULKAN> {
+struct SoftmaxImpl<via::Device::VULKAN> {
     static Tensor execute(const Tensor& a, int axis);
 };
 
 // 显式实例化声明
-extern template struct ReluImpl<Device::VULKAN>;
-extern template struct SiluImpl<Device::VULKAN>;
-extern template struct TanhImpl<Device::VULKAN>;
-extern template struct SigmoidImpl<Device::VULKAN>;
-extern template struct SoftmaxImpl<Device::VULKAN>;
+extern template struct ReluImpl<via::Device::VULKAN>;
+extern template struct SiluImpl<via::Device::VULKAN>;
+extern template struct TanhImpl<via::Device::VULKAN>;
+extern template struct SigmoidImpl<via::Device::VULKAN>;
+extern template struct SoftmaxImpl<via::Device::VULKAN>;
 
 
 // template <>
-// struct ReluImpl<Device::VULKAN> {
+// struct ReluImpl<via::Device::VULKAN> {
 //     static void execute(Tensor& a);
 //     static Tensor execute(const Tensor& a);
 // };
 // template <>
-// struct SiluImpl<Device::VULKAN> {
-//     static void execute(Tensor& a);
-//     static Tensor execute(const Tensor& a);
-// };
-
-// template <>
-// struct TanhImpl<Device::VULKAN> {
-//     static void execute(Tensor& a);
-//     static Tensor execute(const Tensor& a);
-// };
-// template <>
-// struct SigmoidImpl<Device::VULKAN> {
+// struct SiluImpl<via::Device::VULKAN> {
 //     static void execute(Tensor& a);
 //     static Tensor execute(const Tensor& a);
 // };
 
 // template <>
-// struct SoftmaxImpl<Device::VULKAN> {
+// struct TanhImpl<via::Device::VULKAN> {
+//     static void execute(Tensor& a);
+//     static Tensor execute(const Tensor& a);
+// };
+// template <>
+// struct SigmoidImpl<via::Device::VULKAN> {
+//     static void execute(Tensor& a);
+//     static Tensor execute(const Tensor& a);
+// };
+
+// template <>
+// struct SoftmaxImpl<via::Device::VULKAN> {
 //     static Tensor execute(const Tensor& a,int axis);
 // };
 
