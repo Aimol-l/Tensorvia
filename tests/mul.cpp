@@ -14,11 +14,19 @@ std::vector<DataType> GetAllDataTypes() {
 
 
 int main() {
-    for(auto& dtype : GetAllDataTypes()) {
-        Tensor a = Tensor::Random({10,1024,1024},-10,10,dtype);
-        Tensor b = Tensor::Random({10,1024,1024},-10,10,dtype);
+    Tensor a = Tensor::Random({2592,2048},-10,10,DataType::FLOAT32);
+    Tensor b = Tensor::Random({2048,4096},-10,10,DataType::FLOAT32);
+
+    auto start = std::chrono::high_resolution_clock::now();
+
+    for(int i = 0; i < 100; i++){
         RUNNING_TIME(ops::Mul(a,b));
-        LOG_INFO("Mul(a,b)");
     }
+    auto end = std::chrono::high_resolution_clock::now();
+
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() / 100;
+
+    std::println("avg times = {}ms",duration);
+
     return 0;
 }

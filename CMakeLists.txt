@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.25)# 项目信息
 
 # ------------------------- 设置 C++ 标准 -------------------------
+
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_BUILD_TYPE "Release")
-
-
 
 # ------------------------- 后端选项定义 -------------------------
 option(BUILD_TEST      "build test file with ./tests/*.cpp" OFF)
@@ -20,6 +20,19 @@ if(NOT BACKEND_CPU AND NOT BACKEND_CUDA AND NOT BACKEND_SYCL AND NOT BACKEND_VUL
     set(BACKEND_CPU ON)
 endif()
 
+if(BACKEND_SYCL)
+    add_definitions(-DBACKEND_SYCL)
+    set(CMAKE_C_COMPILER "/opt/intel/oneapi/compiler/latest/bin/icx")
+    set(CMAKE_CXX_COMPILER "/opt/intel/oneapi/compiler/latest/bin/icpx")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsycl -O2 -fiopenmp -mavx2 -mfma -fsycl-targets=nvptx64-nvidia-cuda,spir64_x86_64")
+endif()
+
+project(
+    tensorvia
+    LANGUAGES CXX C CUDA    #编程语言
+    DESCRIPTION "多后端 Tensor 加速计算库"
+    VERSION 0.1.0
+)
 # 编译器配置
 if(BACKEND_CPU)
     find_package(OpenMP REQUIRED)
@@ -41,13 +54,6 @@ if(BACKEND_CUDA)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -mavx2 -mfma -fopenmp")
 endif()
 
-if(BACKEND_SYCL)
-    add_definitions(-DBACKEND_SYCL)
-    set(CMAKE_C_COMPILER "/opt/intel/oneapi/compiler/latest/bin/icx")
-    set(CMAKE_CXX_COMPILER "/opt/intel/oneapi/compiler/latest/bin/icpx")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsycl -O2 -fiopenmp -mavx2 -mfma -fsycl-targets=nvptx64-nvidia-cuda,spir64_x86_64")
-endif()
-
 if(BACKEND_VULKAN)
     add_definitions(-DBACKEND_VULKAN)
     find_package(Vulkan REQUIRED)
@@ -55,12 +61,7 @@ if(BACKEND_VULKAN)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -mavx2 -mfma -fopenmp")
 endif()
 
-project(
-    tensorvia
-    LANGUAGES CXX C CUDA    #编程语言
-    DESCRIPTION "多后端 Tensor 加速计算库"
-    VERSION 0.1.0
-)
+
 # 设置输出目录到构建目录下
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)

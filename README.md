@@ -75,11 +75,22 @@ cmake -B build -DBACKEND_SYCL=ON -DCMAKE_BUILD_TYPE=Release && cmake --build bui
 
 ## 🚀 Quick Start
 
+### CMAKE
+```sh
+find_package(Tensorvia REQUIRED)
+
+add_executable(main main.cpp)
+
+target_link_libraries(${CMAKE_PROJECT_NAME} Tensorvia::tensorvia)
+```
+
 ### Basic Tensor Operations
 
+
+
 ```cpp
-#include "tensorvia/tensor.h"
-#include "tensorvia/ops.h"
+#include <tensorvia/tensor.h>
+#include <tensorvia/ops.h>
 
 int main() {
     // Create tensors with different data types
@@ -107,11 +118,14 @@ int main() {
 }
 ```
 
+
+
+
 ### Advanced Operations
 
 ```cpp
-#include "tensorvia/tensor.h"
-#include "tensorvia/ops.h"
+#include <tensorvia/tensor.h>
+#include <tensorvia/ops.h>
 
 int main() {
     // Create tensors
@@ -138,14 +152,14 @@ int main() {
 
 ## 📊 Performance Benchmarks
 
-### Matrix Multiplication (1024x1024 @ 1024x1024, fp32)
+### Matrix Multiplication (2592x2048 @ 2048x4096, fp32)
 
-| Backend | Time (ms) | Speedup |
+| Backend | Avg Time | Speedup |
 |---------|-----------|---------|
-| CPU (OpenMP) | 370 ms | 1x |
-| CUDA | 8 ms | 46x |
-| SYCL | 10 ms | 37x |
-| VULKAN | 9999 ms | 0.04x |
+| CPU (OpenMP) | 716 ms | 1x |
+| CUDA | 19 ms | 37.6x |
+| SYCL | 20 ms | 35.8x |
+| VULKAN | 27 ms | 26.5x |
 
 > Note: Vulkan backend performance needs optimization and is currently experimental.
 
