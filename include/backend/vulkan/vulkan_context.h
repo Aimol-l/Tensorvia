@@ -37,7 +37,7 @@ private:
     // ✔️可复用,只是资源结构，不包含 dtype 信息
     std::unordered_map<std::string, vk::DescriptorSetLayout> m_descriptor_set_layouts; 
 
-    bool m_enableValidationLayers = true;
+    bool m_enableValidationLayers = false;
     VkDebugUtilsMessengerEXT m_debugMessenger;
     PFN_vkDestroyDebugUtilsMessengerEXT pfnDestroyDebugUtilsMessengerEXT = nullptr;
     const std::vector<const char*> m_validationLayers = {"VK_LAYER_KHRONOS_validation"};

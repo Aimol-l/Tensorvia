@@ -149,9 +149,10 @@ void VulkanContext::createInstance(){
         instanceExtensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
     }
     vk::InstanceCreateInfo createInfo;
-    createInfo.setPApplicationInfo(&appInfo)
-        .setPEnabledLayerNames(m_validationLayers)
-        .setPEnabledExtensionNames(instanceExtensions);
+    if(m_enableValidationLayers){
+        createInfo.setPApplicationInfo(&appInfo).setPEnabledLayerNames(m_validationLayers);
+    }
+    createInfo.setPApplicationInfo(&appInfo).setPEnabledExtensionNames(instanceExtensions);
     this->m_instance = vk::createInstance(createInfo);
 }
 
