@@ -111,3 +111,8 @@ struct RepackParams {
     uint32_t shape[6];
     uint32_t strides[6];
 };
+
+struct TempParams {
+    uint32_t M;
+    uint32_t N;
+};

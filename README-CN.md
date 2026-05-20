@@ -24,8 +24,8 @@
 |---------|----------|--------------|--------------|----------------|---------|
 | **CPU** | GCC/Clang | C++23 | OpenMP/SIMD | 多核CPU | ✅ 正常 |
 | **CUDA** | NVCC | C++23 | CUDA Toolkit | NVIDIA GPU | ✅ 正常 |
-| **SYCL** | ICPX | C++23 | DPC++ | Intel/NVIDIA GPU | ⚠️ 实验性 |
-| **Vulkan** | GCC/Clang | C++23 | Vulkan API | GPU | ⚠️ 实验性 |
+| **SYCL** | ICPX | C++23 | DPC++ | Intel/NVIDIA GPU | ✅ 正常 |
+| **Vulkan** | GCC/Clang | C++23 | Vulkan API | GPU | ✅ 正常 |
 
 ## 📦 安装
 
@@ -156,7 +156,46 @@ int main() {
 | SYCL | 20 ms | 35.8x |
 | VULKAN | 27 ms | 26.5x |
 
-> 注意: Vulkan后端性能需要优化，目前处于实验阶段。
+复现基准测试：
+
+```bash
+# 构建并启用 benchmark
+cmake -B build -DBACKEND_CPU=ON -DBUILD_BENCHMARK=ON -DCMAKE_BUILD_TYPE=Release && cmake --build build --parallel
+
+# 运行
+./build/bin/benchmark
+```
+
+## 🏗 架构设计
+
+Tensorvia 采用四层分离架构，通过设计模式实现后端可扩展，新增后端无需修改核心代码。
+
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│                       用户 API 层                                │
+│  Tensor (外观类) · ops:: 命名空间 · 运算符重载                      │
+├─────────────────────────────────────────────────────────────────┤
+│                        分发层                                    │
+│  ops.cpp · #ifdef 编译期分发 · dispatch_dtype<> 类型分派           │
+├─────────────────────────────────────────────────────────────────┤
+│                       抽象层                                     │
+│  TensorImpl (Bridge) · ContextImpl · Metadata (值类型)           │
+│  自注册工厂 · std::variant 类型擦除                                │
+├──────────┬──────────┬───────────────────┬───────────────────────┤
+│  CPU     │  CUDA    │  SYCL             │  Vulkan               │
+│ OpenMP/  │ CUDA     │ DPC++/            │ Vulkan Compute        │
+│ AVX2     │ Kernels  │ oneAPI            │ SPIR-V Shaders        │
+└──────────┴──────────┴───────────────────┴───────────────────────┘
+```
+
+完整交互式架构图见 [架构设计图](docs/architecture-cn.html)（[English](docs/architecture.html)）。
+
+**核心设计模式：**
+
+- **Bridge 模式**：`Tensor` 持有 `shared_ptr<TensorImpl>`（多态存储）+ `Metadata`（栈上值类型）。View 操作（slice/permute/reshape）零拷贝 — 共享同一 `TensorImpl`，仅修改 shape/stride/offset。
+- **自注册工厂**：每个后端定义全局 `Registrar` 对象，在静态初始化期自动注册到单例工厂映射表。新增后端无需修改核心代码。
+- **模板特化分发**：每个算子为 `template<Device D> struct XxxImpl;`，各后端提供完整特化。`#ifdef` 在编译期选择唯一后端，零虚函数开销。
+- **`dispatch_dtype` + `std::type_identity`**：将运行时 `DataType` 枚举通过 switch + lambda 转为编译期模板参数，为 8 种数据类型生成全特化 kernel。
 
 ## 🧪 测试
 
@@ -182,12 +221,10 @@ cd build && make test
 
 以下部分提供Tensorvia不同方面的详细文档:
 
-- [API参考](docs/api.md) - 详细的API文档
-- [后端指南](docs/backends.md) - 如何使用不同的后端
-- [性能提示](docs/performance.md) - 优化策略
-- [从源码构建](docs/building.md) - 详细的构建说明
-- [示例](examples/) - 完整的示例项目
-- [贡献](docs/contributing.md) - 如何为项目做贡献
+- [架构设计图](docs/architecture-cn.html) - 交互式架构图（[English](docs/architecture.html)）
+- [API参考](docs/api.md) - 详细的API文档 *(即将推出)*
+- [后端指南](docs/backends.md) - 如何使用不同的后端 *(即将推出)*
+- [示例](examples/) - 完整的示例项目 *(即将推出)*
 
 ## 🐛 故障排除
 

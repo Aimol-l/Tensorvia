@@ -146,3 +146,108 @@ Tensor MulImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
 
 template struct MulImpl<Device::CPU>;
 }  // namespace ops
+
+
+
+#include <immintrin.h>
+#include <algorithm>
+#include <cstdint>
+
+// float16_t 通常是 uint16_t 的别名 (存储half precision)
+using float16_t = uint16_t;
+
+// ========== F16C 辅助函数 ==========
+
+// 加载8个float16 -> 转换为8个float32 (__m256)
+static inline __m256 load_f16x8_as_f32(const float16_t* ptr) {
+    __m128i f16x8 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(ptr));
+    return _mm256_cvtph_ps(f16x8);  // F16C: half -> float
+}
+
+// 存储8个float32 (__m256) -> 转换为8个float16
+static inline void store_f32x8_as_f16(float16_t* ptr, __m256 v) {
+    __m128i f16x8 = _mm256_cvtps_ph(v, 
+        _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+    _mm_storeu_si128(reinterpret_cast<__m128i*>(ptr), f16x8);
+}
+
+// 广播单个float16 -> 8个相同的float32 (__m256)
+static inline __m256 broadcast_f16_as_f32(float16_t val) {
+    __m128i f16x8 = _mm_set1_epi16(val);  // 16个lane都填val
+    return _mm256_cvtph_ps(f16x8);         // 取低8个转换
+}
+
+// ========== 主算子 ==========
+void linear(
+    float16_t* __restrict__ out,
+    const float16_t* __restrict__ x,      // [rows, common], row-major
+    const float16_t* __restrict__ w,      // [common, cols], row-major
+    int64_t rows,
+    int64_t common,
+    int64_t cols,
+    const float16_t* __restrict__ bias    // [cols]
+) {
+    constexpr int64_t MR = 8;    // Micro-kernel行分块 (寄存器级)
+    constexpr int64_t NR = 8;    // Micro-kernel列分块 (8×float32=256bit)
+    constexpr int64_t KR = 256;  // K维度缓存分块
+    // ===== 输出矩阵分块 =====
+    for (int64_t i0 = 0; i0 < rows; i0 += MR) {
+        const int64_t i1 = std::min(i0 + MR, rows);
+        const int64_t mr = i1 - i0;  // 当前块实际行数
+        for (int64_t j0 = 0; j0 < cols; j0 += NR) {
+            const int64_t j1 = std::min(j0 + NR, cols);
+            const int64_t nr = j1 - j0;  // 当前块实际列数
+            const int64_t nr_vec = (nr + 7) / 8;  // 需要的__m256向量数
+            // ===== 寄存器累加器 (关键优化!) =====
+            // acc[r][v] 存储 out[i0+r][j0+v*8 : j0+(v+1)*8] 的float32累加值
+            __m256 acc[MR][1];  // NR=8 => 每行只需1个__m256
+            for (int64_t r = 0; r < mr; ++r) {
+                acc[r][0] = _mm256_setzero_ps();
+            }
+            // ===== K维度分块 (reduction维度) =====
+            for (int64_t k0 = 0; k0 < common; k0 += KR) {
+                const int64_t k1 = std::min(k0 + KR, common);
+                // 预取: 提前加载w的下一块到缓存
+                if (k1 < common) {
+                    _mm_prefetch((const char*)(w + k1 * cols + j0), _MM_HINT_T0);
+                }
+                for (int64_t k = k0; k < k1; ++k) {
+                    // 1. 加载 w[k][j0:j0+nr] -> __m256
+                    float16_t w_tile[8] = {0};  // 边界填充0
+                    for (int64_t c = 0; c < nr; ++c) {
+                        w_tile[c] = w[k * cols + j0 + c];
+                    }
+                    __m256 w_vec = load_f16x8_as_f32(w_tile);
+                    // 2. 对每个输出行做FMA (关键循环!)
+                    #pragma unroll
+                    for (int64_t r = 0; r < mr; ++r) {
+                        const int64_t i = i0 + r;
+                        // 加载 x[i][k] 并广播到8个lane
+                        __m256 x_vec = broadcast_f16_as_f32(x[i * common + k]);
+                        // FMA: acc = x * w + acc (单指令完成乘加!)
+                        acc[r][0] = _mm256_fmadd_ps(x_vec, w_vec, acc[r][0]);
+                    }
+                }
+            }
+            // ===== 加bias并写回 =====
+            float16_t bias_tile[8] = {0};
+            for (int64_t c = 0; c < nr; ++c) {
+                bias_tile[c] = bias[j0 + c];
+            }
+            __m256 bias_vec = load_f16x8_as_f32(bias_tile);
+            
+            for (int64_t r = 0; r < mr; ++r) {
+                const int64_t i = i0 + r;
+                // acc + bias
+                __m256 result = _mm256_add_ps(acc[r][0], bias_vec);
+                // float32 -> float16 并存储
+                float16_t out_tile[8];
+                store_f32x8_as_f16(out_tile, result);
+                // 处理边界列
+                for (int64_t c = 0; c < nr; ++c) {
+                    out[i * cols + j0 + c] = out_tile[c];
+                }
+            }
+        }
+    }
+}

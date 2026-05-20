@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tensorvia Architecture</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --surface: #f8f9fb;
+    --surface2: #f0f2f5;
+    --border: #dde1e8;
+    --text: #1f2328;
+    --text-dim: #656d76;
+    --accent-cpu: #2563eb;
+    --accent-cuda: #4d8c00;
+    --accent-sycl: #0060a9;
+    --accent-vulkan: #c93d20;
+    --accent-api: #7c3aed;
+    --accent-dispatch: #d97706;
+    --accent-abstract: #0891b2;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Inter', 'SF Pro Display', -apple-system, system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  .lang-switch {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    display: flex;
+    gap: 4px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 4px;
+    z-index: 100;
+  }
+  .lang-switch a {
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: 0.78rem;
+    text-decoration: none;
+    color: var(--text-dim);
+    transition: all 0.2s;
+  }
+  .lang-switch a.active {
+    background: var(--accent-api);
+    color: #fff;
+  }
+  .lang-switch a:hover:not(.active) {
+    color: var(--text);
+  }
+  h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+    background: linear-gradient(135deg, #7c3aed, #0891b2);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .subtitle { color: var(--text-dim); font-size: 0.95rem; margin-bottom: 2.5rem; }
+
+  /* Four-layer stack */
+  .layer-stack { display: flex; flex-direction: column; gap: 2px; margin-bottom: 3rem; }
+  .layer {
+    border-radius: 12px;
+    padding: 1.5rem 2rem;
+    position: relative;
+  }
+  .layer-label {
+    position: absolute;
+    top: -12px;
+    left: 1.5rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    padding: 2px 10px;
+    border-radius: 4px;
+  }
+  .layer-api        { background: rgba(124,58,237,0.06); border: 1px solid rgba(124,58,237,0.2); }
+  .layer-api .layer-label { background: var(--accent-api); color: #fff; }
+  .layer-dispatch   { background: rgba(217,119,6,0.06); border: 1px solid rgba(217,119,6,0.2); }
+  .layer-dispatch .layer-label { background: var(--accent-dispatch); color: #fff; }
+  .layer-abstract   { background: rgba(8,145,178,0.06); border: 1px solid rgba(8,145,178,0.2); }
+  .layer-abstract .layer-label { background: var(--accent-abstract); color: #fff; }
+  .layer-backends   {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 2rem 1.5rem 1.5rem;
+  }
+  .layer-backends .layer-label { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+
+  .layer h3 { font-size: 1rem; font-weight: 600; margin-bottom: 0.5rem; }
+  .layer p  { font-size: 0.85rem; color: var(--text-dim); }
+  .layer code {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.8rem;
+    background: rgba(0,0,0,0.05);
+    padding: 1px 6px;
+    border-radius: 4px;
+  }
+
+  /* Backend cards */
+  .backend-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-top: 1rem;
+  }
+  .backend-card {
+    border-radius: 10px;
+    padding: 1.2rem;
+    text-align: center;
+  }
+  .backend-card h4 { font-size: 0.9rem; margin-bottom: 0.3rem; }
+  .backend-card .tech { font-size: 0.75rem; color: var(--text-dim); }
+  .backend-card .chip {
+    display: inline-block;
+    font-size: 0.65rem;
+    margin-top: 0.6rem;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-weight: 600;
+  }
+  .bk-cpu    { background: rgba(37,99,235,0.06); border: 1px solid rgba(37,99,235,0.25); }
+  .bk-cpu h4 { color: var(--accent-cpu); }
+  .bk-cuda   { background: rgba(77,140,0,0.06); border: 1px solid rgba(77,140,0,0.25); }
+  .bk-cuda h4 { color: var(--accent-cuda); }
+  .bk-sycl   { background: rgba(0,96,169,0.06); border: 1px solid rgba(0,96,169,0.25); }
+  .bk-sycl h4 { color: var(--accent-sycl); }
+  .bk-vulkan { background: rgba(201,61,32,0.06); border: 1px solid rgba(201,61,32,0.25); }
+  .bk-vulkan h4 { color: var(--accent-vulkan); }
+
+  /* Arrow connectors */
+  .arrow-down {
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 1.5rem;
+    line-height: 1;
+    padding: 0.3rem 0;
+    opacity: 0.5;
+  }
+
+  /* Section headings */
+  .section-title {
+    font-size: 1.3rem;
+    font-weight: 700;
+    margin: 3rem 0 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+  .section-title::before {
+    content: '';
+    width: 4px;
+    height: 1.3rem;
+    border-radius: 2px;
+  }
+  .section-title.st-purple::before  { background: var(--accent-api); }
+  .section-title.st-cyan::before    { background: var(--accent-abstract); }
+  .section-title.st-amber::before   { background: var(--accent-dispatch); }
+  .section-title.st-green::before   { background: var(--accent-cuda); }
+
+  /* Pattern cards */
+  .pattern-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .pattern-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+  }
+  .pattern-card h4 { font-size: 0.95rem; margin-bottom: 0.5rem; }
+  .pattern-card p  { font-size: 0.82rem; color: var(--text-dim); line-height: 1.7; }
+  .pattern-card code { font-size: 0.78rem; }
+
+  /* Class hierarchy */
+  .hierarchy {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 2rem;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.82rem;
+    line-height: 1.8;
+    overflow-x: auto;
+  }
+  .hierarchy .cls { color: #2563eb; }
+  .hierarchy .base { color: #9333ea; }
+  .hierarchy .member { color: var(--text-dim); padding-left: 1rem; }
+  .hierarchy .impl { color: #059669; }
+  .hierarchy .arrow { color: var(--text-dim); }
+
+  /* Flow diagram */
+  .flow {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin: 1rem 0;
+  }
+  .flow-node {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.6rem 1.2rem;
+    font-size: 0.82rem;
+    text-align: center;
+    min-width: 120px;
+  }
+  .flow-node strong { display: block; font-size: 0.75rem; color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+  .flow-arrow {
+    font-size: 1.2rem;
+    color: var(--text-dim);
+    padding: 0 0.5rem;
+    opacity: 0.6;
+  }
+
+  /* Factory flow */
+  .factory-flow {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 2rem;
+    margin-top: 1rem;
+  }
+  .factory-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+  .factory-step:last-child { margin-bottom: 0; }
+  .step-num {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--accent-dispatch);
+    color: #000;
+    font-weight: 700;
+    font-size: 0.8rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .step-content h5 { font-size: 0.88rem; margin-bottom: 0.2rem; }
+  .step-content p  { font-size: 0.8rem; color: var(--text-dim); }
+
+  footer {
+    margin-top: 4rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+    text-align: center;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+  }
+
+  @media (max-width: 768px) {
+    .backend-grid { grid-template-columns: repeat(2, 1fr); }
+    .pattern-grid { grid-template-columns: 1fr; }
+    body { padding: 1rem; }
+  }
+</style>
+</head>
+<body>
+
+<div class="lang-switch">
+  <a href="architecture.html" class="active">EN</a>
+  <a href="architecture-cn.html">中文</a>
+</div>
+
+<h1>Tensorvia Architecture</h1>
+<p class="subtitle">Cross-platform multi-backend tensor acceleration library &mdash; four-layer architecture with Bridge, Self-Registration Factory, and compile-time template specialization dispatch.</p>
+
+<!-- ====== FOUR-LAYER STACK ====== -->
+<div class="layer-stack">
+  <div class="layer layer-api">
+    <span class="layer-label">User API Layer</span>
+    <h3><code>Tensor</code> facade &amp; <code>ops::</code> namespace</h3>
+    <p>
+      User-facing entry point. <code>Tensor</code> provides static factories (<code>Zeros</code>, <code>Ones</code>, <code>Random</code>),
+      operator overloads (<code>+ - * /</code>), view methods (<code>.view()</code>, <code>.slice()</code>, <code>.t()</code>, <code>.permute()</code>),
+      and device transfer (<code>.to_host()</code>, <code>.to_device()</code>).
+      All <code>ops::</code> functions (arithmetic, matmul, activations, reductions, etc.) live here.
+    </p>
+  </div>
+
+  <div class="arrow-down">&#x25BC;</div>
+
+  <div class="layer layer-dispatch">
+    <span class="layer-label">Dispatch Layer</span>
+    <h3>Compile-time backend selection + runtime type resolution</h3>
+    <p>
+      <code>src/ops.cpp</code> uses <code>#ifdef BACKEND_XXX</code> to select exactly one backend at compile time.
+      Inside each backend, <code>dispatch_dtype()</code> converts the runtime <code>DataType</code> enum to compile-time type via
+      <code>std::type_identity&lt;T&gt;</code> + lambda, generating fully specialized kernel code for all 8 data types.
+    </p>
+  </div>
+
+  <div class="arrow-down">&#x25BC;</div>
+
+  <div class="layer layer-abstract">
+    <span class="layer-label">Abstraction Layer</span>
+    <h3><code>TensorImpl</code> (Bridge) &middot; <code>ContextImpl</code> &middot; <code>Metadata</code> &middot; Factory</h3>
+    <p>
+      <code>Tensor</code> holds <code>shared_ptr&lt;TensorImpl&gt;</code> (polymorphic storage) + <code>Metadata</code> (stack value type: shape, strides, dtype, device, offset).
+      View operations are zero-copy &mdash; they share the same <code>TensorImpl</code> with modified metadata.
+      The self-registration factory maps <code>Device</code> &rarr; factory function, populated at static init by each backend's <code>Registrar</code>.
+    </p>
+  </div>
+
+  <div class="arrow-down">&#x25BC;</div>
+
+  <div class="layer layer-backends">
+    <span class="layer-label">Backend Layer</span>
+    <h3>Per-backend specialized implementations</h3>
+    <p>Each backend provides: a <code>TensorImpl</code> subclass, a <code>ContextImpl</code> subclass (except CPU), and template-specialized operation structs.</p>
+    <div class="backend-grid">
+      <div class="backend-card bk-cpu">
+        <h4>CPU</h4>
+        <div class="tech">OpenMP + AVX2/FMA SIMD</div>
+        <div class="tech">Multi-core x86</div>
+        <div class="chip" style="background:rgba(37,99,235,0.1);color:var(--accent-cpu)">CPUTensor</div>
+      </div>
+      <div class="backend-card bk-cuda">
+        <h4>CUDA</h4>
+        <div class="tech">CUDA Toolkit / NVCC</div>
+        <div class="tech">NVIDIA GPUs</div>
+        <div class="chip" style="background:rgba(77,140,0,0.1);color:var(--accent-cuda)">CUDATensor</div>
+      </div>
+      <div class="backend-card bk-sycl">
+        <h4>SYCL</h4>
+        <div class="tech">Intel oneAPI / DPC++</div>
+        <div class="tech">Intel &amp; NVIDIA GPUs</div>
+        <div class="chip" style="background:rgba(0,96,169,0.1);color:var(--accent-sycl)">SYCLTensor</div>
+      </div>
+      <div class="backend-card bk-vulkan">
+        <h4>Vulkan</h4>
+        <div class="tech">Vulkan Compute / SPIR-V</div>
+        <div class="tech">Any GPU (VK 1.4)</div>
+        <div class="chip" style="background:rgba(201,61,32,0.1);color:var(--accent-vulkan)">VKTensor</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ====== DESIGN PATTERNS ====== -->
+<h2 class="section-title st-purple">Design Patterns</h2>
+<div class="pattern-grid">
+  <div class="pattern-card">
+    <h4>Bridge Pattern &mdash; Storage Abstraction</h4>
+    <p>
+      <code>Tensor</code> holds <code>shared_ptr&lt;TensorImpl&gt;</code> + stack-allocated <code>Metadata</code>.
+      <br>Copy constructor deep-copies via <code>TensorImpl::clone()</code>.
+      <br>View operations (<code>.slice()</code>, <code>.view()</code>, <code>.permute()</code>) share the same <code>shared_ptr&lt;TensorImpl&gt;</code> &mdash; zero-copy, reference-counted lifetime.
+      <br><code>Metadata</code> tracks <code>shape</code>, <code>strides</code>, <code>dtype</code>, <code>device</code>, and <code>offset</code> as a plain struct.
+    </p>
+  </div>
+  <div class="pattern-card">
+    <h4>Self-Registration Factory</h4>
+    <p>
+      Each backend defines a global <code>struct XxxRegistrar</code> whose constructor calls
+      <code>register_tensor_impl(Device::XXX, factory_fn)</code>.
+      <br>Registrars are global objects &mdash; their constructors run before <code>main()</code>.
+      <br>The factory is a Meyers' singleton: <code>static unordered_map&lt;Device, function&gt;</code>.
+      <br><strong>Adding a new backend requires zero changes to core code.</strong>
+    </p>
+  </div>
+  <div class="pattern-card">
+    <h4>Template Specialization Dispatch</h4>
+    <p>
+      Each operation is declared as:<br>
+      <code>template&lt;Device D&gt; struct AddImpl;</code> <span style="color:var(--text-dim)">(incomplete primary template)</span><br>
+      Each backend provides a full specialization:<br>
+      <code>template&lt;&gt; struct AddImpl&lt;Device::CUDA&gt;</code><br>
+      <code>src/ops.cpp</code> uses <code>#ifdef BACKEND_XXX</code> &mdash; only one backend is compiled into the binary.
+      <br><strong>Zero virtual-call overhead for operation dispatch.</strong>
+    </p>
+  </div>
+  <div class="pattern-card">
+    <h4>Type Dispatch via <code>std::type_identity</code></h4>
+    <p>
+      <code>dispatch_dtype(DataType, lambda)</code> converts the runtime enum to compile-time type:
+      <br><code>case FLOAT32: f(std::type_identity&lt;float&gt;{});</code>
+      <br>The lambda receives <code>type_identity&lt;T&gt;</code> and deduces <code>T</code> to instantiate type-specific kernels.
+      <br><code>compute_type_t&lt;T&gt;</code> maps <code>float16</code>/<code>bfloat16</code> &rarr; <code>float</code> for safe intermediate arithmetic.
+    </p>
+  </div>
+</div>
+
+<!-- ====== CLASS HIERARCHY ====== -->
+<h2 class="section-title st-cyan">Class Hierarchy</h2>
+<div class="hierarchy">
+  <span class="cls">class</span> <span class="base">TensorImpl</span> {                          <span class="member">// abstract interface</span><br>
+  &nbsp;&nbsp;<span class="member">virtual void* data() = 0;</span><br>
+  &nbsp;&nbsp;<span class="member">virtual unique_ptr&lt;TensorImpl&gt; clone() = 0;</span><br>
+  &nbsp;&nbsp;<span class="member">virtual void copy_to(shared_ptr&lt;TensorImpl&gt;) = 0;</span><br>
+  &nbsp;&nbsp;<span class="member">virtual shared_ptr&lt;ContextImpl&gt; context() = 0;</span><br>
+  }<br><br>
+  <span class="cls">class</span> <span class="impl">CPUTensor</span>      <span class="arrow">&mdash;&rarr;</span> <span class="base">TensorImpl</span> &nbsp; (<code>std::malloc</code> / <code>std::free</code>)<br>
+  <span class="cls">class</span> <span class="impl">CUDATensor</span>     <span class="arrow">&mdash;&rarr;</span> <span class="base">TensorImpl</span> &nbsp; (<code>cudaMalloc</code> / <code>cudaFree</code>)<br>
+  <span class="cls">class</span> <span class="impl">SYCLTensor</span>     <span class="arrow">&mdash;&rarr;</span> <span class="base">TensorImpl</span> &nbsp; (<code>sycl::malloc</code> / <code>sycl::free</code>)<br>
+  <span class="cls">class</span> <span class="impl">VKTensor</span>       <span class="arrow">&mdash;&rarr;</span> <span class="base">TensorImpl</span> &nbsp; (<code>vk::Buffer</code> + <code>vk::DeviceMemory</code>)<br><br>
+  <span class="cls">class</span> <span class="base">ContextImpl</span> {                              <span class="member">// abstract interface</span><br>
+  &nbsp;&nbsp;<span class="member">virtual void* ctx_raw_ptr() = 0;</span><br>
+  }<br><br>
+  <span class="cls">class</span> <span class="impl">CUDAContext</span>    <span class="arrow">&mdash;&rarr;</span> <span class="base">ContextImpl</span> &nbsp; (holds <code>cudaStream_t</code>)<br>
+  <span class="cls">class</span> <span class="impl">SYCLContext</span>    <span class="arrow">&mdash;&rarr;</span> <span class="base">ContextImpl</span> &nbsp; (holds <code>sycl::queue</code>)<br>
+  <span class="cls">class</span> <span class="impl">VulkanContext</span>  <span class="arrow">&mdash;&rarr;</span> <span class="base">ContextImpl</span> &nbsp; (holds <code>vk::Device</code>, pipeline cache)<br><br>
+  <span class="cls">struct</span> <span class="base">Metadata</span> {                                <span class="member">// plain value type, stack-allocated</span><br>
+  &nbsp;&nbsp;<span class="member">vector&lt;int64_t&gt; shape, strides;</span><br>
+  &nbsp;&nbsp;<span class="member">size_t numel; int64_t offset;</span><br>
+  &nbsp;&nbsp;<span class="member">Device device; DataType dtype;</span><br>
+  }<br><br>
+  <span class="cls">class</span> <span class="base">Tensor</span> {                                   <span class="member">// user-facing facade</span><br>
+  &nbsp;&nbsp;<span class="member">Metadata m_meta;</span><br>
+  &nbsp;&nbsp;<span class="member">shared_ptr&lt;TensorImpl&gt; m_impl;</span><br>
+  }
+</div>
+
+<!-- ====== OPERATION DISPATCH FLOW ====== -->
+<h2 class="section-title st-amber">Operation Dispatch Flow</h2>
+<div class="flow">
+  <div class="flow-node"><strong>User Call</strong><code>ops::Add(a, b)</code></div>
+  <span class="flow-arrow">&#x2192;</span>
+  <div class="flow-node"><strong>ops.cpp</strong><code>#ifdef BACKEND_XXX</code></div>
+  <span class="flow-arrow">&#x2192;</span>
+  <div class="flow-node"><strong>Backend Impl</strong><code>AddImpl&lt;Device::CUDA&gt;</code></div>
+  <span class="flow-arrow">&#x2192;</span>
+  <div class="flow-node"><strong>Type Resolve</strong><code>dispatch_dtype()</code></div>
+  <span class="flow-arrow">&#x2192;</span>
+  <div class="flow-node"><strong>Kernel</strong><code>add_kernel&lt;float&gt;()</code></div>
+</div>
+
+<!-- ====== FACTORY REGISTRATION FLOW ====== -->
+<h2 class="section-title st-green">Factory Registration Flow</h2>
+<div class="factory-flow">
+  <div class="factory-step">
+    <span class="step-num">1</span>
+    <div class="step-content">
+      <h5>Static Initialization</h5>
+      <p>Global <code>struct XxxRegistrar</code> objects have constructors that run before <code>main()</code>.</p>
+    </div>
+  </div>
+  <div class="factory-step">
+    <span class="step-num">2</span>
+    <div class="step-content">
+      <h5>Register Factory Function</h5>
+      <p>Constructor calls <code>register_tensor_impl(Device::XXX, [](void* ptr, size_t numel, DataType dtype) { return make_shared&lt;XxxTensor&gt;(...); })</code></p>
+    </div>
+  </div>
+  <div class="factory-step">
+    <span class="step-num">3</span>
+    <div class="step-content">
+      <h5>Singleton Map Populated</h5>
+      <p><code>static unordered_map&lt;Device, TensorImplFactory&gt;</code> stores the mapping. Meyers' singleton avoids static init order issues.</p>
+    </div>
+  </div>
+  <div class="factory-step">
+    <span class="step-num">4</span>
+    <div class="step-content">
+      <h5>Runtime Tensor Creation</h5>
+      <p><code>Tensor::Random({1024, 1024}, ...)</code> calls <code>create_tensor_impl(device, ptr, numel, dtype)</code> which dispatches to the correct factory.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ====== VIEW SEMANTICS ====== -->
+<h2 class="section-title st-cyan">Zero-Copy View Semantics</h2>
+<div class="flow">
+  <div class="flow-node"><strong>Original</strong><code>Tensor A</code></div>
+  <span class="flow-arrow">&#x2192;</span>
+  <div class="flow-node"><strong>View</strong><code>B = A.slice(...)</code></div>
+  <span class="flow-arrow">&#x2192;</span>
+  <div class="flow-node" style="border-color:var(--accent-cuda)">
+    <strong>Shared Storage</strong>
+    <code>shared_ptr&lt;TensorImpl&gt;</code><br>
+    <span style="font-size:0.7rem;color:var(--accent-cuda)">ref_count++</span>
+  </div>
+  <span class="flow-arrow">&#x2192;</span>
+  <div class="flow-node"><strong>Modified Metadata</strong>
+    <code>shape / strides / offset</code><br>
+    <span style="font-size:0.7rem;color:var(--text-dim)">stack-allocated, O(1)</span>
+  </div>
+</div>
+
+<footer>
+  Tensorvia &mdash; Bridging the gap between hardware and performance<br>
+  <a href="https://github.com/Aimol-l/Tensorvia" style="color:var(--accent-api);text-decoration:none">GitHub</a>
+</footer>
+
+</body>
+</html>

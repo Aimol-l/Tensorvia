@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tensorvia 架构设计</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --surface: #f8f9fb;
+    --surface2: #f0f2f5;
+    --border: #dde1e8;
+    --text: #1f2328;
+    --text-dim: #656d76;
+    --accent-cpu: #2563eb;
+    --accent-cuda: #4d8c00;
+    --accent-sycl: #0060a9;
+    --accent-vulkan: #c93d20;
+    --accent-api: #7c3aed;
+    --accent-dispatch: #d97706;
+    --accent-abstract: #0891b2;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Inter', 'SF Pro Display', -apple-system, system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+    background: linear-gradient(135deg, #7c3aed, #0891b2);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .subtitle { color: var(--text-dim); font-size: 0.95rem; margin-bottom: 2.5rem; }
+
+  .layer-stack { display: flex; flex-direction: column; gap: 2px; margin-bottom: 3rem; }
+  .layer {
+    border-radius: 12px;
+    padding: 1.5rem 2rem;
+    position: relative;
+  }
+  .layer-label {
+    position: absolute;
+    top: -12px;
+    left: 1.5rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    padding: 2px 10px;
+    border-radius: 4px;
+  }
+  .layer-api        { background: rgba(124,58,237,0.06); border: 1px solid rgba(124,58,237,0.2); }
+  .layer-api .layer-label { background: var(--accent-api); color: #fff; }
+  .layer-dispatch   { background: rgba(217,119,6,0.06); border: 1px solid rgba(217,119,6,0.2); }
+  .layer-dispatch .layer-label { background: var(--accent-dispatch); color: #fff; }
+  .layer-abstract   { background: rgba(8,145,178,0.06); border: 1px solid rgba(8,145,178,0.2); }
+  .layer-abstract .layer-label { background: var(--accent-abstract); color: #fff; }
+  .layer-backends   {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 2rem 1.5rem 1.5rem;
+  }
+  .layer-backends .layer-label { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+
+  .layer h3 { font-size: 1rem; font-weight: 600; margin-bottom: 0.5rem; }
+  .layer p  { font-size: 0.85rem; color: var(--text-dim); }
+  .layer code {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.8rem;
+    background: rgba(0,0,0,0.05);
+    padding: 1px 6px;
+    border-radius: 4px;
+  }
+
+  .backend-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-top: 1rem;
+  }
+  .backend-card {
+    border-radius: 10px;
+    padding: 1.2rem;
+    text-align: center;
+  }
+  .backend-card h4 { font-size: 0.9rem; margin-bottom: 0.3rem; }
+  .backend-card .tech { font-size: 0.75rem; color: var(--text-dim); }
+  .backend-card .chip {
+    display: inline-block;
+    font-size: 0.65rem;
+    margin-top: 0.6rem;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-weight: 600;
+  }
+  .bk-cpu    { background: rgba(37,99,235,0.06); border: 1px solid rgba(37,99,235,0.25); }
+  .bk-cpu h4 { color: var(--accent-cpu); }
+  .bk-cuda   { background: rgba(77,140,0,0.06); border: 1px solid rgba(77,140,0,0.25); }
+  .bk-cuda h4 { color: var(--accent-cuda); }
+  .bk-sycl   { background: rgba(0,96,169,0.06); border: 1px solid rgba(0,96,169,0.25); }
+  .bk-sycl h4 { color: var(--accent-sycl); }
+  .bk-vulkan { background: rgba(201,61,32,0.06); border: 1px solid rgba(201,61,32,0.25); }
+  .bk-vulkan h4 { color: var(--accent-vulkan); }
+
+  .arrow-down {
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 1.5rem;
+    line-height: 1;
+    padding: 0.3rem 0;
+    opacity: 0.5;
+  }
+
+  .section-title {
+    font-size: 1.3rem;
+    font-weight: 700;
+    margin: 3rem 0 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+  .section-title::before {
+    content: '';
+    width: 4px;
+    height: 1.3rem;
+    border-radius: 2px;
+  }
+  .section-title.st-purple::before  { background: var(--accent-api); }
+  .section-title.st-cyan::before    { background: var(--accent-abstract); }
+  .section-title.st-amber::before   { background: var(--accent-dispatch); }
+  .section-title.st-green::before   { background: var(--accent-cuda); }
+
+  .pattern-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .pattern-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+  }
+  .pattern-card h4 { font-size: 0.95rem; margin-bottom: 0.5rem; }
+  .pattern-card p  { font-size: 0.82rem; color: var(--text-dim); line-height: 1.7; }
+  .pattern-card code { font-size: 0.78rem; }
+
+  .hierarchy {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 2rem;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.82rem;
+    line-height: 1.8;
+    overflow-x: auto;
+  }
+  .hierarchy .cls { color: #2563eb; }
+  .hierarchy .base { color: #9333ea; }
+  .hierarchy .member { color: var(--text-dim); padding-left: 1rem; }
+  .hierarchy .impl { color: #059669; }
+  .hierarchy .arrow { color: var(--text-dim); }
+
+  .flow {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin: 1rem 0;
+  }
+  .flow-node {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.6rem 1.2rem;
+    font-size: 0.82rem;
+    text-align: center;
+    min-width: 120px;
+  }
+  .flow-node strong { display: block; font-size: 0.75rem; color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+  .flow-arrow {
+    font-size: 1.2rem;
+    color: var(--text-dim);
+    padding: 0 0.5rem;
+    opacity: 0.6;
+  }
+
+  .factory-flow {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 2rem;
+    margin-top: 1rem;
+  }
+  .factory-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+  .factory-step:last-child { margin-bottom: 0; }
+  .step-num {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--accent-dispatch);
+    color: #000;
+    font-weight: 700;
+    font-size: 0.8rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .step-content h5 { font-size: 0.88rem; margin-bottom: 0.2rem; }
+  .step-content p  { font-size: 0.8rem; color: var(--text-dim); }
+
+  .lang-switch {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    display: flex;
+    gap: 4px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 4px;
+    z-index: 100;
+  }
+  .lang-switch a {
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: 0.78rem;
+    text-decoration: none;
+    color: var(--text-dim);
+    transition: all 0.2s;
+  }
+  .lang-switch a.active {
+    background: var(--accent-api);
+    color: #fff;
+  }
+  .lang-switch a:hover:not(.active) {
+    color: var(--text);
+  }
+
+  footer {
+    margin-top: 4rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+    text-align: center;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+  }
+
+  @media (max-width: 768px) {
+    .backend-grid { grid-template-columns: repeat(2, 1fr); }
+    .pattern-grid { grid-template-columns: 1fr; }
+    body { padding: 1rem; }
+  }
+</style>
+</head>
+<body>
+
+<div class="lang-switch">
+  <a href="architecture.html">EN</a>
+  <a href="architecture-cn.html" class="active">中文</a>
+</div>
+
+<h1>Tensorvia 架构设计</h1>
+<p class="subtitle">跨平台多后端张量加速库 &mdash; 四层架构，Bridge 模式、自注册工厂、编译期模板特化分发的统一设计。</p>
+
+<!-- ====== 四层架构 ====== -->
+<div class="layer-stack">
+  <div class="layer layer-api">
+    <span class="layer-label">用户 API 层</span>
+    <h3><code>Tensor</code> 外观类 &amp; <code>ops::</code> 命名空间</h3>
+    <p>
+      用户入口。<code>Tensor</code> 提供静态工厂方法（<code>Zeros</code>、<code>Ones</code>、<code>Random</code>）、
+      运算符重载（<code>+ - * /</code>）、视图操作（<code>.view()</code>、<code>.slice()</code>、<code>.t()</code>、<code>.permute()</code>）、
+      设备迁移（<code>.to_host()</code>、<code>.to_device()</code>）。
+      所有算术、矩阵乘法、激活函数、归约等操作通过 <code>ops::</code> 命名空间调用。
+    </p>
+  </div>
+
+  <div class="arrow-down">&#x25BC;</div>
+
+  <div class="layer layer-dispatch">
+    <span class="layer-label">分发层</span>
+    <h3>编译期后端选择 + 运行时类型解析</h3>
+    <p>
+      <code>src/ops.cpp</code> 通过 <code>#ifdef BACKEND_XXX</code> 在编译期选择唯一后端实现。
+      各后端内部，<code>dispatch_dtype()</code> 将运行时 <code>DataType</code> 枚举通过
+      <code>std::type_identity&lt;T&gt;</code> + lambda 转为编译期具体类型，为全部 8 种数据类型生成特化 kernel。
+    </p>
+  </div>
+
+  <div class="arrow-down">&#x25BC;</div>
+
+  <div class="layer layer-abstract">
+    <span class="layer-label">抽象层</span>
+    <h3><code>TensorImpl</code> (Bridge) &middot; <code>ContextImpl</code> &middot; <code>Metadata</code> &middot; 工厂</h3>
+    <p>
+      <code>Tensor</code> 持有 <code>shared_ptr&lt;TensorImpl&gt;</code>（多态设备存储）+ <code>Metadata</code>（栈上值类型：shape、strides、dtype、device、offset）。
+      视图操作零拷贝 &mdash; 共享同一个 <code>TensorImpl</code>，仅修改 Metadata。
+      自注册工厂将 <code>Device</code> 枚举映射到工厂函数，各后端在静态初始化期通过 <code>Registrar</code> 自动注册。
+    </p>
+  </div>
+
+  <div class="arrow-down">&#x25BC;</div>
+
+  <div class="layer layer-backends">
+    <span class="layer-label">后端层</span>
+    <h3>各后端特化实现</h3>
+    <p>每个后端提供：<code>TensorImpl</code> 子类、<code>ContextImpl</code> 子类（CPU 除外）、以及各算子的模板特化实现。</p>
+    <div class="backend-grid">
+      <div class="backend-card bk-cpu">
+        <h4>CPU</h4>
+        <div class="tech">OpenMP + AVX2/FMA SIMD</div>
+        <div class="tech">多核 x86 处理器</div>
+        <div class="chip" style="background:rgba(37,99,235,0.1);color:var(--accent-cpu)">CPUTensor</div>
+      </div>
+      <div class="backend-card bk-cuda">
+        <h4>CUDA</h4>
+        <div class="tech">CUDA Toolkit / NVCC</div>
+        <div class="tech">NVIDIA GPU</div>
+        <div class="chip" style="background:rgba(77,140,0,0.1);color:var(--accent-cuda)">CUDATensor</div>
+      </div>
+      <div class="backend-card bk-sycl">
+        <h4>SYCL</h4>
+        <div class="tech">Intel oneAPI / DPC++</div>
+        <div class="tech">Intel &amp; NVIDIA GPU</div>
+        <div class="chip" style="background:rgba(0,96,169,0.1);color:var(--accent-sycl)">SYCLTensor</div>
+      </div>
+      <div class="backend-card bk-vulkan">
+        <h4>Vulkan</h4>
+        <div class="tech">Vulkan Compute / SPIR-V</div>
+        <div class="tech">任意 GPU (VK 1.4)</div>
+        <div class="chip" style="background:rgba(201,61,32,0.1);color:var(--accent-vulkan)">VKTensor</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ====== 设计模式 ====== -->
+<h2 class="section-title st-purple">核心设计模式</h2>
+<div class="pattern-grid">
+  <div class="pattern-card">
+    <h4>Bridge 模式 &mdash; 存储抽象</h4>
+    <p>
+      <code>Tensor</code> 持有 <code>shared_ptr&lt;TensorImpl&gt;</code> + 栈上分配的 <code>Metadata</code>。
+      <br>拷贝构造通过 <code>TensorImpl::clone()</code> 深拷贝。
+      <br>视图操作（<code>.slice()</code>、<code>.view()</code>、<code>.permute()</code>）共享同一个 <code>shared_ptr&lt;TensorImpl&gt;</code> &mdash; 零拷贝，引用计数管理生命周期。
+      <br><code>Metadata</code> 是普通结构体，记录 <code>shape</code>、<code>strides</code>、<code>dtype</code>、<code>device</code>、<code>offset</code>。
+    </p>
+  </div>
+  <div class="pattern-card">
+    <h4>自注册工厂</h4>
+    <p>
+      每个后端定义全局 <code>struct XxxRegistrar</code>，其构造函数调用
+      <code>register_tensor_impl(Device::XXX, factory_fn)</code>。
+      <br>Registrar 是全局对象 &mdash; 构造函数在 <code>main()</code> 之前执行。
+      <br>工厂是 Meyers' 单例：<code>static unordered_map&lt;Device, function&gt;</code>。
+      <br><strong>新增后端无需修改任何核心代码。</strong>
+    </p>
+  </div>
+  <div class="pattern-card">
+    <h4>模板特化分发</h4>
+    <p>
+      每个算子声明为：<br>
+      <code>template&lt;Device D&gt; struct AddImpl;</code> <span style="color:var(--text-dim)">（主模板不完整）</span><br>
+      各后端提供完整特化：<br>
+      <code>template&lt;&gt; struct AddImpl&lt;Device::CUDA&gt;</code><br>
+      <code>src/ops.cpp</code> 通过 <code>#ifdef BACKEND_XXX</code> 选择 &mdash; 最终二进制只包含一个后端。
+      <br><strong>算子分发零虚函数调用开销。</strong>
+    </p>
+  </div>
+  <div class="pattern-card">
+    <h4><code>std::type_identity</code> 类型分派</h4>
+    <p>
+      <code>dispatch_dtype(DataType, lambda)</code> 将运行时枚举转为编译期类型：
+      <br><code>case FLOAT32: f(std::type_identity&lt;float&gt;{});</code>
+      <br>lambda 接收 <code>type_identity&lt;T&gt;</code> 并推导 <code>T</code>，实例化类型特化 kernel。
+      <br><code>compute_type_t&lt;T&gt;</code> 将 <code>float16</code>/<code>bfloat16</code> 映射为 <code>float</code>，确保中间计算精度安全。
+    </p>
+  </div>
+</div>
+
+<!-- ====== 类继承层次 ====== -->
+<h2 class="section-title st-cyan">类继承层次</h2>
+<div class="hierarchy">
+  <span class="cls">class</span> <span class="base">TensorImpl</span> {                          <span class="member">// 抽象接口</span><br>
+  &nbsp;&nbsp;<span class="member">virtual void* data() = 0;</span><br>
+  &nbsp;&nbsp;<span class="member">virtual unique_ptr&lt;TensorImpl&gt; clone() = 0;</span><br>
+  &nbsp;&nbsp;<span class="member">virtual void copy_to(shared_ptr&lt;TensorImpl&gt;) = 0;</span><br>
+  &nbsp;&nbsp;<span class="member">virtual shared_ptr&lt;ContextImpl&gt; context() = 0;</span><br>
+  }<br><br>
+  <span class="cls">class</span> <span class="impl">CPUTensor</span>      <span class="arrow">&mdash;&rarr;</span> <span class="base">TensorImpl</span> &nbsp; (<code>std::malloc</code> / <code>std::free</code>)<br>
+  <span class="cls">class</span> <span class="impl">CUDATensor</span>     <span class="arrow">&mdash;&rarr;</span> <span class="base">TensorImpl</span> &nbsp; (<code>cudaMalloc</code> / <code>cudaFree</code>)<br>
+  <span class="cls">class</span> <span class="impl">SYCLTensor</span>     <span class="arrow">&mdash;&rarr;</span> <span class="base">TensorImpl</span> &nbsp; (<code>sycl::malloc</code> / <code>sycl::free</code>)<br>
+  <span class="cls">class</span> <span class="impl">VKTensor</span>       <span class="arrow">&mdash;&rarr;</span> <span class="base">TensorImpl</span> &nbsp; (<code>vk::Buffer</code> + <code>vk::DeviceMemory</code>)<br><br>
+  <span class="cls">class</span> <span class="base">ContextImpl</span> {                              <span class="member">// 抽象接口</span><br>
+  &nbsp;&nbsp;<span class="member">virtual void* ctx_raw_ptr() = 0;</span><br>
+  }<br><br>
+  <span class="cls">class</span> <span class="impl">CUDAContext</span>    <span class="arrow">&mdash;&rarr;</span> <span class="base">ContextImpl</span> &nbsp; (持有 <code>cudaStream_t</code>)<br>
+  <span class="cls">class</span> <span class="impl">SYCLContext</span>    <span class="arrow">&mdash;&rarr;</span> <span class="base">ContextImpl</span> &nbsp; (持有 <code>sycl::queue</code>)<br>
+  <span class="cls">class</span> <span class="impl">VulkanContext</span>  <span class="arrow">&mdash;&rarr;</span> <span class="base">ContextImpl</span> &nbsp; (持有 <code>vk::Device</code>、Pipeline 缓存)<br><br>
+  <span class="cls">struct</span> <span class="base">Metadata</span> {                                <span class="member">// 普通值类型，栈上分配</span><br>
+  &nbsp;&nbsp;<span class="member">vector&lt;int64_t&gt; shape, strides;</span><br>
+  &nbsp;&nbsp;<span class="member">size_t numel; int64_t offset;</span><br>
+  &nbsp;&nbsp;<span class="member">Device device; DataType dtype;</span><br>
+  }<br><br>
+  <span class="cls">class</span> <span class="base">Tensor</span> {                                   <span class="member">// 用户接口（外观类）</span><br>
+  &nbsp;&nbsp;<span class="member">Metadata m_meta;</span><br>
+  &nbsp;&nbsp;<span class="member">shared_ptr&lt;TensorImpl&gt; m_impl;</span><br>
+  }
+</div>
+
+<!-- ====== 算子分发流程 ====== -->
+<h2 class="section-title st-amber">算子分发流程</h2>
+<div class="flow">
+  <div class="flow-node"><strong>用户调用</strong><code>ops::Add(a, b)</code></div>
+  <span class="flow-arrow">&#x2192;</span>
+  <div class="flow-node"><strong>ops.cpp 分发</strong><code>#ifdef BACKEND_XXX</code></div>
+  <span class="flow-arrow">&#x2192;</span>
+  <div class="flow-node"><strong>后端实现</strong><code>AddImpl&lt;Device::CUDA&gt;</code></div>
+  <span class="flow-arrow">&#x2192;</span>
+  <div class="flow-node"><strong>类型解析</strong><code>dispatch_dtype()</code></div>
+  <span class="flow-arrow">&#x2192;</span>
+  <div class="flow-node"><strong>Kernel</strong><code>add_kernel&lt;float&gt;()</code></div>
+</div>
+
+<!-- ====== 工厂注册流程 ====== -->
+<h2 class="section-title st-green">工厂注册流程</h2>
+<div class="factory-flow">
+  <div class="factory-step">
+    <span class="step-num">1</span>
+    <div class="step-content">
+      <h5>静态初始化</h5>
+      <p>全局 <code>struct XxxRegistrar</code> 对象的构造函数在 <code>main()</code> 之前执行。</p>
+    </div>
+  </div>
+  <div class="factory-step">
+    <span class="step-num">2</span>
+    <div class="step-content">
+      <h5>注册工厂函数</h5>
+      <p>构造函数调用 <code>register_tensor_impl(Device::XXX, [](void* ptr, size_t numel, DataType dtype) { return make_shared&lt;XxxTensor&gt;(...); })</code></p>
+    </div>
+  </div>
+  <div class="factory-step">
+    <span class="step-num">3</span>
+    <div class="step-content">
+      <h5>填充单例映射表</h5>
+      <p><code>static unordered_map&lt;Device, TensorImplFactory&gt;</code> 存储映射关系。Meyers' 单例避免静态初始化顺序问题。</p>
+    </div>
+  </div>
+  <div class="factory-step">
+    <span class="step-num">4</span>
+    <div class="step-content">
+      <h5>运行时创建 Tensor</h5>
+      <p><code>Tensor::Random({1024, 1024}, ...)</code> 调用 <code>create_tensor_impl(device, ptr, numel, dtype)</code>，分派到对应工厂函数。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ====== 零拷贝视图 ====== -->
+<h2 class="section-title st-cyan">零拷贝视图语义</h2>
+<div class="flow">
+  <div class="flow-node"><strong>原始张量</strong><code>Tensor A</code></div>
+  <span class="flow-arrow">&#x2192;</span>
+  <div class="flow-node"><strong>视图</strong><code>B = A.slice(...)</code></div>
+  <span class="flow-arrow">&#x2192;</span>
+  <div class="flow-node" style="border-color:var(--accent-cuda)">
+    <strong>共享存储</strong>
+    <code>shared_ptr&lt;TensorImpl&gt;</code><br>
+    <span style="font-size:0.7rem;color:var(--accent-cuda)">引用计数 +1</span>
+  </div>
+  <span class="flow-arrow">&#x2192;</span>
+  <div class="flow-node"><strong>修改 Metadata</strong>
+    <code>shape / strides / offset</code><br>
+    <span style="font-size:0.7rem;color:var(--text-dim)">栈上分配，O(1)</span>
+  </div>
+</div>
+
+<!-- ====== 内存管理 ====== -->
+<h2 class="section-title st-purple">各后端内存管理</h2>
+<div class="pattern-grid">
+  <div class="pattern-card" style="border-color:rgba(37,99,235,0.25)">
+    <h4 style="color:var(--accent-cpu)">CPU</h4>
+    <p>
+      <code>std::malloc</code> 分配，自定义 <code>FreeDeleter</code> 用 <code>std::free</code> 释放。
+      <br>无 ContextImpl &mdash; 直接操作主机内存。
+    </p>
+  </div>
+  <div class="pattern-card" style="border-color:rgba(77,140,0,0.25)">
+    <h4 style="color:var(--accent-cuda)">CUDA</h4>
+    <p>
+      <code>cudaMalloc</code> 分配，<code>cudaFree</code> 释放。
+      <br><code>CUDAContext</code> 持有 <code>cudaStream_t</code>，自动选择显存最大的 GPU。
+    </p>
+  </div>
+  <div class="pattern-card" style="border-color:rgba(0,96,169,0.25)">
+    <h4 style="color:var(--accent-sycl)">SYCL</h4>
+    <p>
+      <code>sycl::malloc</code> 分配，<code>sycl::free</code> 释放。
+      <br><code>SYCLContext</code> 持有 <code>sycl::queue</code>，支持 Intel/NVIDIA 多设备。
+    </p>
+  </div>
+  <div class="pattern-card" style="border-color:rgba(201,61,32,0.25)">
+    <h4 style="color:var(--accent-vulkan)">Vulkan</h4>
+    <p>
+      <code>vk::Buffer</code> + <code>vk::DeviceMemory</code> 管理。
+      <br><code>VulkanContext</code> 持有完整 Vulkan 设备栈：Instance、PhysicalDevice、Queue、CommandPool、Pipeline 缓存。
+      <br>338 个 SPIR-V Compute Pipeline 在注册期预编译并缓存。
+    </p>
+  </div>
+</div>
+
+<!-- ====== 可扩展性 ====== -->
+<h2 class="section-title st-green">如何扩展</h2>
+<div class="pattern-grid">
+  <div class="pattern-card">
+    <h4>新增后端（如 Metal）</h4>
+    <p>
+      1. 在 <code>Device</code> 枚举中添加 <code>METAL</code><br>
+      2. 实现 <code>MetalContext : ContextImpl</code><br>
+      3. 实现 <code>MetalTensor : TensorImpl</code><br>
+      4. 为各算子添加 <code>XxxImpl&lt;Device::METAL&gt;</code> 特化<br>
+      5. 在 <code>src/init.cpp</code> 中添加 <code>MetalRegistrar</code><br>
+      6. 在 <code>CMakeLists.txt</code> 中添加编译选项<br>
+      <strong>核心层零修改。</strong>
+    </p>
+  </div>
+  <div class="pattern-card">
+    <h4>新增算子（如 Floor）</h4>
+    <p>
+      1. 在 <code>OpType</code> 枚举中添加 <code>Floor</code><br>
+      2. 在 <code>include/core/ops.h</code> 中声明 API<br>
+      3. 在各后端 <code>ops/*.h</code> 中声明模板特化<br>
+      4. 在各后端 <code>.cpp</code> / <code>.cu</code> 中实现 kernel<br>
+      5. 在 <code>src/ops.cpp</code> 中添加 <code>#ifdef</code> 分发<br>
+      6. Vulkan 后端需额外编写 SPIR-V Compute Shader
+    </p>
+  </div>
+</div>
+
+<footer>
+  Tensorvia &mdash; 架起硬件与性能之间的桥梁<br>
+  <a href="https://github.com/Aimol-l/Tensorvia" style="color:var(--accent-api);text-decoration:none">GitHub</a>
+</footer>
+
+</body>
+</html>

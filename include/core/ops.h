@@ -22,6 +22,9 @@ namespace ops{
     OPS_API void println(Tensor & a);
     OPS_API void println(Tensor && a);
 
+    OPS_API void export_csv(Tensor & a, const std::string& path);
+    OPS_API void export_csv(Tensor && a, const std::string& path);
+
     OPS_API Tensor Ones(const std::vector<int64_t>& shape, via::DataType dtype);
     OPS_API Tensor Zeros(const std::vector<int64_t>& shape, via::DataType dtype);
     OPS_API Tensor Fill(const std::vector<int64_t>& shape, via::DataType dtype, float value);
@@ -116,4 +119,7 @@ namespace ops{
     OPS_API size_t Nonzero(const Tensor& t); // 返回张量 t 中非零元素的数量。
     OPS_API Tensor Argmax(const Tensor& t, int axis); // 沿指定维度 axis 查找最大值的位置索引（不是值）。
     OPS_API Tensor Argmin(const Tensor& t, int axis); //  沿 axis 查找最小值的位置。
+
+    OPS_API void Temp(Tensor& t);
+
 }

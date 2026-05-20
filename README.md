@@ -25,8 +25,8 @@
 |---------|----------|--------------|--------------|----------------|---------|
 | **CPU** | GCC/Clang | C++23 | OpenMP/SIMD | Multi-core CPUs | ✅ Working |
 | **CUDA** | NVCC | C++23 | CUDA Toolkit | NVIDIA GPUs | ✅ Working |
-| **SYCL** | ICPX | C++23 | DPC++ | Intel/NVIDIA GPUs | ⚠️ Experimental |
-| **Vulkan** | GCC/Clang | C++23 | Vulkan API | GPUs | ⚠️ Experimental |
+| **SYCL** | ICPX | C++23 | DPC++ | Intel/NVIDIA GPUs | ✅ Working |
+| **Vulkan** | GCC/Clang | C++23 | Vulkan API | GPUs | ✅ Working |
 
 ## 📦 Installation
 
@@ -162,7 +162,46 @@ int main() {
 | SYCL | 20 ms | 35.8x |
 | VULKAN | 27 ms | 26.5x |
 
-> Note: Vulkan backend performance needs optimization and is currently experimental.
+To reproduce benchmarks on your hardware:
+
+```bash
+# Build with benchmark enabled
+cmake -B build -DBACKEND_CPU=ON -DBUILD_BENCHMARK=ON -DCMAKE_BUILD_TYPE=Release && cmake --build build --parallel
+
+# Run
+./build/bin/benchmark
+```
+
+## 🏗 Architecture
+
+Tensorvia uses a four-layer architecture with design patterns that enable backend extensibility with zero core-code modification.
+
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│                      User API Layer                             │
+│  Tensor (facade) · ops:: namespace · operator overloads         │
+├─────────────────────────────────────────────────────────────────┤
+│                      Dispatch Layer                             │
+│  ops.cpp · #ifdef compile-time dispatch · dispatch_dtype<>      │
+├─────────────────────────────────────────────────────────────────┤
+│                     Abstraction Layer                           │
+│  TensorImpl (Bridge) · ContextImpl · Metadata (value type)     │
+│  Self-Registration Factory · std::variant type erasure          │
+├──────────┬──────────┬───────────────────┬───────────────────────┤
+│  CPU     │  CUDA    │  SYCL             │  Vulkan               │
+│ OpenMP/  │ CUDA     │ DPC++/            │ Vulkan Compute        │
+│ AVX2     │ Kernels  │ oneAPI            │ SPIR-V Shaders        │
+└──────────┴──────────┴───────────────────┴───────────────────────┘
+```
+
+For the full interactive architecture diagram, see [Architecture Diagram](docs/architecture.html).
+
+**Key patterns:**
+
+- **Bridge**: `Tensor` holds `shared_ptr<TensorImpl>` (polymorphic storage) + `Metadata` (stack value type). View operations (slice/permute/reshape) are zero-copy — they share the same `TensorImpl` with modified shape/stride/offset.
+- **Self-Registration Factory**: Each backend defines a global `Registrar` object that registers itself into a singleton factory map at static initialization. Adding a new backend requires zero changes to core code.
+- **Template Specialization Dispatch**: Each operation is `template<Device D> struct XxxImpl;` with full specialization per backend. `#ifdef` selects one backend at compile time — zero virtual-call overhead.
+- **`dispatch_dtype` + `std::type_identity`**: Converts runtime `DataType` enum to compile-time template parameters via switch + lambda, generating fully specialized kernel code for all 8 data types.
 
 ## 🧪 Testing
 
@@ -188,12 +227,10 @@ cd build && make test
 
 The following sections provide comprehensive documentation for different aspects of Tensorvia:
 
-- [API Reference](docs/api.md) - Detailed API documentation
-- [Backend Guide](docs/backends.md) - How to use different backends
-- [Performance Tips](docs/performance.md) - Optimization strategies
-- [Building from Source](docs/building.md) - Detailed build instructions
-- [Examples](examples/) - Complete example projects
-- [Contributing](docs/contributing.md) - How to contribute to the project
+- [Architecture Diagram](docs/architecture.html) - Interactive architecture diagram
+- [API Reference](docs/api.md) - Detailed API documentation *(coming soon)*
+- [Backend Guide](docs/backends.md) - How to use different backends *(coming soon)*
+- [Examples](examples/) - Complete example projects *(coming soon)*
 
 ## 🐛 Troubleshooting
 

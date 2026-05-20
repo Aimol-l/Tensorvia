@@ -58,7 +58,7 @@ enum class OpType {
     Sin,Cos,Tan,Exp,Relu,Silu,Tanh,Sqrt,Sidmoid,Pow,Log,Softmax,
     Clamp,Sum, SumVec,Min, MinVec, Max, MaxVec, Mean,Concat,
     Transpose2d,TransposeNd,Equal,NotEqual,Greater,Less,GreaterEqual,LessEqual,
-    All,Any,Nonzero,Argmax,Argmin
+    All,Any,Nonzero,Argmax,Argmin,Temp
 };
 inline const char* op_to_string(OpType op) {
     switch (op) {
@@ -110,6 +110,7 @@ inline const char* op_to_string(OpType op) {
         case OpType::Nonzero:   return "nonzero";
         case OpType::Argmax:    return "argmax";
         case OpType::Argmin:    return "argmin";
+        case OpType::Temp:    return "temp";
         default: throw std::invalid_argument("Unknown OpType");
     }
 }

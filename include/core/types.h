@@ -3,7 +3,6 @@
 #include <cstdint>
 #include <type_traits>
 
-// #define BACKEND_SYCL
 
 template<typename T>
 struct compute_type_helper { using type = T; };

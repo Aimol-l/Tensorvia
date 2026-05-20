@@ -57,7 +57,7 @@ void cast_kernel(const T* src, R* dst, size_t size) {
 void TypecastImpl<Device::CPU>::execute(Tensor& a, DataType dst_type) {
     auto src_ptr = data_as_const_variant(a.dtype(), a.data());
 
-    auto cpu_impl = create_tensor_impl(a.numel(),a.dtype(), Device::CPU);
+    auto cpu_impl = create_tensor_impl(a.numel(), dst_type, Device::CPU);
     std::visit([&](auto* src_typed_ptr) {
         using SrcType = std::remove_pointer_t<decltype(src_typed_ptr)>;
         auto dispatch_dst = [&](auto* dst_typed_ptr) {

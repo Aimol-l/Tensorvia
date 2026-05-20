@@ -379,21 +379,11 @@ std::vector<uint32_t> VulkanContext::readSpvFile(const std::string& filename) {
     file.close();
     return buffer;
 }
-
-
-// void VulkanContext::printPipeLines(){
-//     for(auto[key,val]:m_pipelines){
-//         std::println("compute line: {}",key);
-//     }
-//     for(auto[key,val]:m_pipeline_layouts){
-//         std::println("compute line layout: {}",key);
-//     }
-//     for(auto[key,val]:m_descriptor_set_layouts){
-//         std::println("m_descriptor_set_layouts: {}",key);
-//     }
-// }
-
-// relu,float32,buffers,gx,gy,gz,...
+// 进行一次运算需要：
+// vk::buffer 
+// vk::pipeline
+// vk::CommandBuffer
+// vk::DescriptorSet
 void VulkanContext::submitCompute(
     OpType op,
     DataType dtype,
@@ -415,9 +405,9 @@ void VulkanContext::submitCompute(
         throw std::runtime_error(std::format("can not find descriptor_set_layouts:{}", ori_op));
     }
 
-    vk::Pipeline pipeline = m_pipelines[type_op];      // <- 使用正确的 key
-    vk::PipelineLayout layout = m_pipeline_layouts[type_op];
-    vk::DescriptorSetLayout dsl = m_descriptor_set_layouts[ori_op];
+    vk::Pipeline pipeline = m_pipelines[type_op];      // 用来直接在cmd中绑定
+    vk::PipelineLayout layout = m_pipeline_layouts[type_op]; // 用来关联pipeline 和 descriptorset
+    vk::DescriptorSetLayout dsl = m_descriptor_set_layouts[ori_op]; //用来创建描述符集
 
     // 分配 descriptor set - 使用命名容器，避免临时问题
     std::array<vk::DescriptorSetLayout, 1> setLayouts = { dsl };
@@ -443,14 +433,14 @@ void VulkanContext::submitCompute(
     writes.reserve(buffers.size());
     for (size_t i = 0; i < bufferInfos.size(); ++i) {
         writes.emplace_back(
-            ds,                                  // dstSet
-            static_cast<uint32_t>(i),            // dstBinding
-            0,                                   // dstArrayElement
-            1,                                   // descriptorCount
-            vk::DescriptorType::eStorageBuffer,  // descriptorType
-            nullptr,                             // pImageInfo
-            &bufferInfos[i],                     // pBufferInfo (指向 bufferInfos 中的元素)
-            nullptr                              // pTexelBufferView
+            ds,                                         // dstSet
+            static_cast<uint32_t>(i),               // dstBinding
+            0,                                 // dstArrayElement
+            1,                                 // descriptorCount
+            vk::DescriptorType::eStorageBuffer, // descriptorType
+            nullptr,                                // pImageInfo
+            &bufferInfos[i],                       // pBufferInfo (指向 bufferInfos 中的元素)
+            nullptr                           // pTexelBufferView
         );
     }
 
@@ -472,7 +462,7 @@ void VulkanContext::submitCompute(
     }
     cmd.dispatch(gx, gy, gz);
     cmd.end();
-   // 提交并等待
+    // 提交并等待
     vk::SubmitInfo submitInfo{};
     submitInfo.setCommandBuffers(cmd);
     vk::Fence fence = m_device.createFence({});

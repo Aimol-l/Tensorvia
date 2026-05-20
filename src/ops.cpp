@@ -1,6 +1,7 @@
 #include "backend/cpu/ops/activate.h"
 #include "backend/cpu/ops/arithmetic.h"
 #include "backend/cpu/ops/concat.h"
+#include "backend/cpu/ops/export_csv.h"
 #include "backend/cpu/ops/initializer.h"
 #include "backend/cpu/ops/logical.h"
 #include "backend/cpu/ops/mul.h"
@@ -9,6 +10,8 @@
 #include "backend/cpu/ops/slice.h"
 #include "backend/cpu/ops/transpose.h"
 #include "backend/cpu/ops/typecast.h"
+#include "backend/cpu/ops/temp.h"
+
 
 #ifdef BACKEND_SYCL
     #include "backend/sycl/ops/activate.h"
@@ -45,6 +48,7 @@
     #include "backend/vulkan/ops/slice.h"
     #include "backend/vulkan/ops/transpose.h"
     #include "backend/vulkan/ops/typecast.h"
+    #include "backend/vulkan/ops/temp.h"
 #endif
 
 using namespace via;
@@ -69,7 +73,6 @@ namespace ops {
         std::cout<<std::format("Tensor dtype: {} | Tensor device: {}",dtype_to_string(a.dtype()), device_to_string(a.device()))<<std::endl;
     }
     OPS_API void println(Tensor && a) {
-        LOG_INFO("println");
         if(a.numel() == 0 || a.data() == nullptr) 
             throw std::runtime_error("tensor a is null");
         a.to_contiguous(); // 不修改后端设备
@@ -82,6 +85,41 @@ namespace ops {
         }
         std::cout<<std::format("Tensor dtype: {} | Tensor device: {}",dtype_to_string(a.dtype()), device_to_string(device))<<std::endl;
     }
+    OPS_API void export_csv(Tensor & a, const std::string& path){
+        if(a.numel() == 0 || a.data() == nullptr)
+            throw std::runtime_error("tensor a is null");
+        if(a.shape().size() > 2)
+            throw std::runtime_error(std::format("export_csv: only 1D or 2D tensors are supported, got {}D", a.shape().size()));
+        if(a.device() == Device::CPU){
+            if(a.is_contiguous()){
+                ExportCsvImpl<Device::CPU>::execute(a, path);
+            }else{
+                Tensor temp = a.clone();
+                ExportCsvImpl<Device::CPU>::execute(temp, path);
+            }
+        }else{
+            Tensor temp = a.clone();
+            temp.to_host();
+            ExportCsvImpl<Device::CPU>::execute(temp, path);
+        }
+        std::cout<<std::format("Exported to '{}' | Tensor dtype: {} | Tensor device: {}", path, dtype_to_string(a.dtype()), device_to_string(a.device()))<<std::endl;
+    }
+    OPS_API void export_csv(Tensor && a, const std::string& path){
+        if(a.numel() == 0 || a.data() == nullptr)
+            throw std::runtime_error("tensor a is null");
+        if(a.shape().size() > 2)
+            throw std::runtime_error(std::format("export_csv: only 1D or 2D tensors are supported, got {}D", a.shape().size()));
+        a.to_contiguous(); // 不修改后端设备
+        Device device = a.device();
+        if (a.device() == Device::CPU) {
+            ExportCsvImpl<Device::CPU>::execute(a, path);
+        } else {
+            a.to_host(); // 修改 a 是安全的，因为它是一个临时对象
+            ExportCsvImpl<Device::CPU>::execute(a, path);
+        }
+        std::cout<<std::format("Exported to '{}' | Tensor dtype: {} | Tensor device: {}", path, dtype_to_string(a.dtype()), device_to_string(device))<<std::endl;
+    }
+
     Tensor Ones(const std::vector<int64_t>& shape, DataType dtype){
         // 合法性判断
         if(shape.empty()) 
@@ -1633,6 +1671,23 @@ namespace ops {
         #endif
         #ifdef BACKEND_VULKAN
             return ArgMinImpl<Device::VULKAN>::execute(a,axis);
+        #endif
+    }
+
+    void Temp(Tensor &t){
+        if(t.data() == nullptr|| t.numel() == 0) 
+            throw std::runtime_error("tensor a is null");
+        #ifdef BACKEND_CPU
+            TempImpl<Device::CPU>::execute(t);
+        #endif
+        #ifdef BACKEND_SYCL
+            TempImpl<Device::SYCL>::execute(t);
+        #endif
+        #ifdef BACKEND_CUDA
+            TempImpl<Device::CUDA>::execute(t);
+        #endif
+        #ifdef BACKEND_VULKAN
+            TempImpl<Device::VULKAN>::execute(t);
         #endif
     }
 }

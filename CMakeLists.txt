@@ -1,14 +1,12 @@
 cmake_minimum_required(VERSION 3.25)# 项目信息
 
 # ------------------------- 设置 C++ 标准 -------------------------
-
-
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_BUILD_TYPE "Release")
-
 # ------------------------- 后端选项定义 -------------------------
 option(BUILD_TEST      "build test file with ./tests/*.cpp" OFF)
+option(BUILD_BENCHMARK "build benchmark executable" OFF)
 option(BACKEND_CPU     "Enable CPU backend" OFF)
 option(BACKEND_CUDA    "Enable CUDA backend" OFF)
 option(BACKEND_SYCL    "Enable SYCL backend" OFF)
@@ -37,7 +35,7 @@ project(
 if(BACKEND_CPU)
     find_package(OpenMP REQUIRED)
     add_definitions(-DBACKEND_CPU)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -mavx2 -mfma -fopenmp")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -mavx2 -mfma -mf16c -fopenmp")
 endif()
 
 if(BACKEND_CUDA)
@@ -51,14 +49,14 @@ if(BACKEND_CUDA)
     find_package(CUDAToolkit REQUIRED)
     
     set(CMAKE_CUDA_ARCHITECTURES "native")  # 常见现代GPU架构
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -mavx2 -mfma -fopenmp")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -mavx2 -mfma -mf16c -fopenmp")
 endif()
 
 if(BACKEND_VULKAN)
     add_definitions(-DBACKEND_VULKAN)
     find_package(Vulkan REQUIRED)
     find_package(OpenMP REQUIRED)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -mavx2 -mfma -fopenmp")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -mavx2 -mfma -mf16c -fopenmp")
 endif()
 
 
@@ -88,7 +86,6 @@ endif()
 if(BACKEND_VULKAN)
     include_directories(${CMAKE_SOURCE_DIR}/include/backend/cpu)
     include_directories(${PROJECT_SOURCE_DIR}/include/backend/vulkan)
-
 endif()
 
 # ------------------------- 源文件收集 -------------------------
@@ -231,4 +228,24 @@ if(BUILD_TEST)
         
         add_test(NAME ${test_name} COMMAND ${test_name})
     endforeach()
+endif()
+
+# ------------------------- 基准测试 -------------------------
+if(BUILD_BENCHMARK)
+    add_executable(benchmark "${PROJECT_SOURCE_DIR}/benchmarks/benchmark.cpp")
+    target_link_libraries(benchmark PRIVATE ${PROJECT_NAME})
+
+    if(BACKEND_CPU)
+        target_link_libraries(benchmark PRIVATE OpenMP::OpenMP_CXX)
+    endif()
+    if(BACKEND_CUDA)
+        target_link_libraries(benchmark PRIVATE OpenMP::OpenMP_CXX)
+    endif()
+    if(BACKEND_SYCL)
+        target_compile_options(benchmark PRIVATE -fsycl -O2 -fiopenmp -mavx2 -mfma -fsycl-targets=nvptx64-nvidia-cuda,spir64_x86_64)
+        target_link_libraries(benchmark PRIVATE ${IntelSYCL_LIBRARIES})
+    endif()
+    if(BACKEND_VULKAN)
+        target_link_libraries(benchmark PRIVATE OpenMP::OpenMP_CXX)
+    endif()
 endif()
