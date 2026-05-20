@@ -25,12 +25,21 @@ if(BACKEND_SYCL)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsycl -O2 -fiopenmp -mavx2 -mfma -fsycl-targets=nvptx64-nvidia-cuda,spir64_x86_64")
 endif()
 
-project(
-    tensorvia
-    LANGUAGES CXX C CUDA    #编程语言
-    DESCRIPTION "多后端 Tensor 加速计算库"
-    VERSION 0.1.0
-)
+if(BACKEND_CUDA)
+    project(
+        tensorvia
+        LANGUAGES CXX C CUDA
+        DESCRIPTION "多后端 Tensor 加速计算库"
+        VERSION 0.1.0
+    )
+else()
+    project(
+        tensorvia
+        LANGUAGES CXX C
+        DESCRIPTION "多后端 Tensor 加速计算库"
+        VERSION 0.1.0
+    )
+endif()
 # 编译器配置
 if(BACKEND_CPU)
     find_package(OpenMP REQUIRED)
