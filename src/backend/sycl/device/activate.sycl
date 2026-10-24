@@ -1,0 +1,62 @@
+// Softmax along one axis. Relu/Silu/Tanh/Sigmoid are element-wise unary ops and
+// live in arithmetic.sycl.
+#include "common.h"
+
+using namespace tvv::sycl_dev;
+
+namespace {
+
+template <class T, class R>
+void softmax_kernel(sycl::queue& q, const T* in, R* out,
+                    const tvv::sycl::ReduceAxis& p) {
+    using C = std::conditional_t<std::is_same_v<R, double>, double, float>;
+    const int64_t total = p.outer * p.inner;
+    q.parallel_for(range_of(total), [=](sycl::id<1> idx) {
+        const int64_t i = static_cast<int64_t>(idx[0]);
+        const int64_t outer_idx = i / p.inner;
+        const int64_t inner_idx = i % p.inner;
+        const int64_t base = outer_idx * p.axis * p.inner + inner_idx;
+
+        C max_val = -inf_value<C>();
+        for (int64_t k = 0; k < p.axis; ++k) {
+            const C v = to_compute<C>(in[base + k * p.inner]);
+            max_val = v > max_val ? v : max_val;
+        }
+        C sum = C(0);
+        for (int64_t k = 0; k < p.axis; ++k) {
+            const C v = to_compute<C>(in[base + k * p.inner]);
+            sum += sycl::exp(v - max_val);
+        }
+        for (int64_t k = 0; k < p.axis; ++k) {
+            const C v = to_compute<C>(in[base + k * p.inner]);
+            out[base + k * p.inner] = store_as<R>(sycl::exp(v - max_val) / sum);
+        }
+    });
+}
+
+}  // namespace
+
+extern "C" {
+
+int sycl_c_launch_softmax(void* ctx, const void* in, void* out,
+                          int in_dtype, int out_dtype,
+                          const tvv::sycl::ReduceAxis* p) {
+    if (ctx == nullptr || in == nullptr || out == nullptr || p == nullptr)
+        return tvv::sycl::kSyclInvalid;
+    try {
+        auto& q = queue_of(ctx);
+        return dispatch_dtype(in_dtype, [&](auto src_tag) -> int {
+            using T = typename decltype(src_tag)::type;
+            return dispatch_dtype(out_dtype, [&](auto dst_tag) -> int {
+                using R = typename decltype(dst_tag)::type;
+                softmax_kernel<T, R>(q, static_cast<const T*>(in),
+                                     static_cast<R*>(out), *p);
+                return tvv::sycl::kSyclOk;
+            });
+        });
+    } catch (...) {
+        return tvv::sycl::kSyclFailure;
+    }
+}
+
+}  // extern "C"

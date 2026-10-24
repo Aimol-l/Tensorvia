@@ -1,0 +1,282 @@
+// Reductions: global and per-axis sum/min/max/mean, argmax/argmin, all/any and
+// the NonZero count.
+#include "common.h"
+
+using namespace tvv::sycl_dev;
+namespace contract = tvv::sycl_dev::contract;
+
+namespace {
+
+template <class T, class Out>
+void reduce_all_kernel(sycl::queue& q, const T* in, Out* out, int64_t numel, int op) {
+    using Acc = reduction_acc_t<T>;
+    const size_t n = kWorkGroup;
+    q.submit([&](sycl::handler& h) {
+        sycl::local_accessor<Acc, 1> sdata(sycl::range<1>(n), h);
+        h.parallel_for(sycl::nd_range<1>(sycl::range<1>(n), sycl::range<1>(n)),
+                       [=](sycl::nd_item<1> item) {
+                           const size_t lid = item.get_local_id(0);
+                           Acc acc;
+                           if (op == tvv::sycl::kReduceSum) {
+                               acc = Acc(0);
+                               for (int64_t i = static_cast<int64_t>(lid); i < numel;
+                                    i += static_cast<int64_t>(n))
+                                   acc += static_cast<Acc>(to_compute<Acc>(in[i]));
+                           } else if (op == tvv::sycl::kReduceMin) {
+                               acc = max_finite<Acc>();
+                               for (int64_t i = static_cast<int64_t>(lid); i < numel;
+                                    i += static_cast<int64_t>(n))
+                                   acc = contract::min_contract(acc, to_compute<Acc>(in[i]));
+                           } else {
+                               acc = lowest_finite<Acc>();
+                               for (int64_t i = static_cast<int64_t>(lid); i < numel;
+                                    i += static_cast<int64_t>(n))
+                                   acc = contract::max_contract(acc, to_compute<Acc>(in[i]));
+                           }
+
+                           sdata[lid] = acc;
+                           item.barrier(sycl::access::fence_space::local_space);
+                           for (size_t s = n / 2; s > 0; s >>= 1) {
+                               if (lid < s) {
+                                   const Acc a = sdata[lid];
+                                   const Acc b = sdata[lid + s];
+                                   if (op == tvv::sycl::kReduceSum)
+                                       sdata[lid] = static_cast<Acc>(a + b);
+                                   else if (op == tvv::sycl::kReduceMin)
+                                       sdata[lid] = contract::min_contract(a, b);
+                                   else
+                                       sdata[lid] = contract::max_contract(a, b);
+                               }
+                               item.barrier(sycl::access::fence_space::local_space);
+                           }
+                           if (lid == 0) out[0] = store_as<Out>(sdata[0]);
+                       });
+    });
+}
+
+template <class T, class Out>
+void reduce_axis_kernel(sycl::queue& q, const T* in, Out* out,
+                        const tvv::sycl::ReduceAxis& p, int op) {
+    using Acc = reduction_acc_t<T>;
+    const int64_t total = p.outer * p.inner;
+    q.parallel_for(range_of(total), [=](sycl::id<1> idx) {
+        const int64_t i = static_cast<int64_t>(idx[0]);
+        const int64_t outer_idx = i / p.inner;
+        const int64_t inner_idx = i % p.inner;
+        const int64_t base = outer_idx * p.axis * p.inner + inner_idx;
+
+        Acc acc;
+        if (op == tvv::sycl::kReduceSum || op == tvv::sycl::kReduceMean) {
+            acc = Acc(0);
+            for (int64_t k = 0; k < p.axis; ++k)
+                acc += static_cast<Acc>(to_compute<Acc>(in[base + k * p.inner]));
+        } else if (op == tvv::sycl::kReduceMin) {
+            acc = to_compute<Acc>(in[base]);
+            for (int64_t k = 1; k < p.axis; ++k)
+                acc = contract::min_contract(acc, to_compute<Acc>(in[base + k * p.inner]));
+        } else {
+            acc = to_compute<Acc>(in[base]);
+            for (int64_t k = 1; k < p.axis; ++k)
+                acc = contract::max_contract(acc, to_compute<Acc>(in[base + k * p.inner]));
+        }
+        if (op == tvv::sycl::kReduceMean) {
+            out[i] = store_as<Out>(static_cast<double>(acc) / static_cast<double>(p.axis));
+        } else {
+            out[i] = store_as<Out>(acc);
+        }
+    });
+}
+
+template <class T>
+void arg_reduce_kernel(sycl::queue& q, const T* in, int32_t* out,
+                       const tvv::sycl::ReduceAxis& p, int is_max) {
+    const int64_t total = p.outer * p.inner;
+    q.parallel_for(range_of(total), [=](sycl::id<1> idx) {
+        const int64_t i = static_cast<int64_t>(idx[0]);
+        const int64_t outer_idx = i / p.inner;
+        const int64_t inner_idx = i % p.inner;
+        const int64_t base = outer_idx * p.axis * p.inner + inner_idx;
+
+        T best = in[base];
+        int64_t best_idx = 0;
+        for (int64_t k = 1; k < p.axis; ++k) {
+            const T v = in[base + k * p.inner];
+            const bool better = is_max ? contract::argmax_better(v, best)
+                                       : contract::argmin_better(v, best);
+            if (better) {
+                best = v;
+                best_idx = k;
+            }
+        }
+        out[i] = static_cast<int32_t>(best_idx);
+    });
+}
+
+// The destination word is initialized by a one-work-item launch on the same
+// in-order queue, then each work-group folds its slice and combines with one
+// atomic. The host never has to zero device memory.
+void init_uint_kernel(sycl::queue& q, unsigned int* out, unsigned int value) {
+    q.parallel_for(sycl::range<1>(1), [=](sycl::id<1>) { out[0] = value; });
+}
+
+void init_ull_kernel(sycl::queue& q, unsigned int* out) {
+    q.parallel_for(sycl::range<1>(1), [=](sycl::id<1>) { out[0] = 0u; });
+}
+
+template <class T>
+void all_any_kernel(sycl::queue& q, const T* in, unsigned int* out, int64_t numel,
+                    int is_all, double value) {
+    const size_t n = kWorkGroup;
+    const int64_t groups = numel <= 0 ? 1
+                                      : (numel + static_cast<int64_t>(n) - 1) /
+                                            static_cast<int64_t>(n);
+    const float val = static_cast<float>(value);
+    q.submit([&](sycl::handler& h) {
+        sycl::local_accessor<int, 1> sdata(sycl::range<1>(n), h);
+        h.parallel_for(
+            sycl::nd_range<1>(sycl::range<1>(static_cast<size_t>(groups) * n),
+                              sycl::range<1>(n)),
+            [=](sycl::nd_item<1> item) {
+                const size_t lid = item.get_local_id(0);
+                const int64_t start = static_cast<int64_t>(item.get_group(0) * n + lid);
+                const int64_t stride = static_cast<int64_t>(groups) * n;
+                bool ok = is_all != 0;
+                for (int64_t i = start; i < numel; i += stride) {
+                    const bool hit = contract::match_value<T>(in[i], val);
+                    ok = is_all ? (ok && hit) : (ok || hit);
+                }
+                sdata[lid] = ok ? 1 : 0;
+                item.barrier(sycl::access::fence_space::local_space);
+                for (size_t s = n / 2; s > 0; s >>= 1) {
+                    if (lid < s) {
+                        if (is_all) sdata[lid] &= sdata[lid + s];
+                        else        sdata[lid] |= sdata[lid + s];
+                    }
+                    item.barrier(sycl::access::fence_space::local_space);
+                }
+                if (lid == 0) {
+                    sycl::atomic_ref<unsigned int, sycl::memory_order::relaxed,
+                                     sycl::memory_scope::device,
+                                     sycl::access::address_space::global_space>
+                        word(out[0]);
+                    if (is_all) word.fetch_and(static_cast<unsigned int>(sdata[0]));
+                    else        word.fetch_or(static_cast<unsigned int>(sdata[0]));
+                }
+            });
+    });
+}
+
+template <class T>
+void nonzero_count_kernel(sycl::queue& q, const T* in, unsigned int* out, int64_t numel) {
+    q.parallel_for(range_of(numel), [=](sycl::id<1> idx) {
+        const int64_t i = static_cast<int64_t>(idx[0]);
+        if (in[i] != T(0)) {
+            sycl::atomic_ref<unsigned int, sycl::memory_order::relaxed,
+                             sycl::memory_scope::device,
+                             sycl::access::address_space::global_space>
+                word(out[0]);
+            word.fetch_add(1u);
+        }
+    });
+}
+
+}  // namespace
+
+extern "C" {
+
+int sycl_c_launch_reduce_all(void* ctx, const void* in, void* out, int64_t numel,
+                             int in_dtype, int out_dtype, int op) {
+    if (ctx == nullptr || in == nullptr || out == nullptr)
+        return tvv::sycl::kSyclInvalid;
+    try {
+        auto& q = queue_of(ctx);
+        return dispatch_dtype(in_dtype, [&](auto src_tag) -> int {
+            using T = typename decltype(src_tag)::type;
+            return dispatch_dtype(out_dtype, [&](auto dst_tag) -> int {
+                using Out = typename decltype(dst_tag)::type;
+                reduce_all_kernel<T, Out>(q, static_cast<const T*>(in),
+                                          static_cast<Out*>(out), numel, op);
+                return tvv::sycl::kSyclOk;
+            });
+        });
+    } catch (...) {
+        return tvv::sycl::kSyclFailure;
+    }
+}
+
+int sycl_c_launch_reduce_axis(void* ctx, const void* in, void* out,
+                              int in_dtype, int out_dtype, int op,
+                              const tvv::sycl::ReduceAxis* p) {
+    if (ctx == nullptr || in == nullptr || out == nullptr || p == nullptr)
+        return tvv::sycl::kSyclInvalid;
+    try {
+        auto& q = queue_of(ctx);
+        return dispatch_dtype(in_dtype, [&](auto src_tag) -> int {
+            using T = typename decltype(src_tag)::type;
+            return dispatch_dtype(out_dtype, [&](auto dst_tag) -> int {
+                using Out = typename decltype(dst_tag)::type;
+                reduce_axis_kernel<T, Out>(q, static_cast<const T*>(in),
+                                           static_cast<Out*>(out), *p, op);
+                return tvv::sycl::kSyclOk;
+            });
+        });
+    } catch (...) {
+        return tvv::sycl::kSyclFailure;
+    }
+}
+
+int sycl_c_launch_arg_reduce(void* ctx, const void* in, void* out, int dtype,
+                             int is_max, const tvv::sycl::ReduceAxis* p) {
+    if (ctx == nullptr || in == nullptr || out == nullptr || p == nullptr)
+        return tvv::sycl::kSyclInvalid;
+    try {
+        auto& q = queue_of(ctx);
+        return dispatch_dtype(dtype, [&](auto tag) -> int {
+            using T = typename decltype(tag)::type;
+            arg_reduce_kernel<T>(q, static_cast<const T*>(in),
+                                 static_cast<int32_t*>(out), *p, is_max);
+            return tvv::sycl::kSyclOk;
+        });
+    } catch (...) {
+        return tvv::sycl::kSyclFailure;
+    }
+}
+
+int sycl_c_launch_all_any(void* ctx, const void* in, void* out, int64_t numel,
+                          int dtype, int is_all, double value) {
+    if (ctx == nullptr || in == nullptr || out == nullptr)
+        return tvv::sycl::kSyclInvalid;
+    try {
+        auto& q = queue_of(ctx);
+        init_uint_kernel(q, static_cast<unsigned int*>(out),
+                         is_all ? 1u : 0u);
+        return dispatch_dtype(dtype, [&](auto tag) -> int {
+            using T = typename decltype(tag)::type;
+            all_any_kernel<T>(q, static_cast<const T*>(in),
+                              static_cast<unsigned int*>(out), numel, is_all, value);
+            return tvv::sycl::kSyclOk;
+        });
+    } catch (...) {
+        return tvv::sycl::kSyclFailure;
+    }
+}
+
+int sycl_c_launch_nonzero(void* ctx, const void* in, void* out, int64_t numel,
+                          int dtype) {
+    if (ctx == nullptr || in == nullptr || out == nullptr)
+        return tvv::sycl::kSyclInvalid;
+    try {
+        auto& q = queue_of(ctx);
+        init_ull_kernel(q, static_cast<unsigned int*>(out));
+        return dispatch_dtype(dtype, [&](auto tag) -> int {
+            using T = typename decltype(tag)::type;
+            nonzero_count_kernel<T>(q, static_cast<const T*>(in),
+                                    static_cast<unsigned int*>(out), numel);
+            return tvv::sycl::kSyclOk;
+        });
+    } catch (...) {
+        return tvv::sycl::kSyclFailure;
+    }
+}
+
+}  // extern "C"

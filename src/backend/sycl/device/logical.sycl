@@ -1,0 +1,92 @@
+// Broadcast and scalar comparison kernels; the result is INT8 holding 0 or 1.
+#include "common.h"
+
+using namespace tvv::sycl_dev;
+namespace contract = tvv::sycl_dev::contract;
+
+namespace {
+
+template <class T>
+inline int8_t cmp_value(int op, T x, T y, double abs_tol, double rel_tol) {
+    using C = promoted_t<T>;
+    const C cx = to_compute<C>(x);
+    const C cy = to_compute<C>(y);
+    switch (op) {
+        case tvv::sycl::kCmpEqual:
+            return contract::cmp_close<C>(cx, cy, abs_tol, rel_tol) ? 1 : 0;
+        case tvv::sycl::kCmpNotEqual:
+            return contract::cmp_close<C>(cx, cy, abs_tol, rel_tol) ? 0 : 1;
+        case tvv::sycl::kCmpGreater:      return cx > cy ? 1 : 0;
+        case tvv::sycl::kCmpLess:         return cx < cy ? 1 : 0;
+        case tvv::sycl::kCmpGreaterEqual: return cx >= cy ? 1 : 0;
+        case tvv::sycl::kCmpLessEqual:    return cx <= cy ? 1 : 0;
+        default:                          return 0;
+    }
+}
+
+template <class T>
+void compare_kernel(sycl::queue& q, const T* a, const T* b, int8_t* out,
+                    const tvv::sycl::Bcast& p, int op, double abs_tol,
+                    double rel_tol) {
+    q.parallel_for(range_of(p.numel), [=](sycl::id<1> idx) {
+        const int64_t i = static_cast<int64_t>(idx[0]);
+        const int64_t ia = p.off_a + bcast_offset(i, p, p.sa);
+        const int64_t ib = p.off_b + bcast_offset(i, p, p.sb);
+        out[p.off_o + i] = cmp_value(op, a[ia], b[ib], abs_tol, rel_tol);
+    });
+}
+
+template <class T>
+void compare_scalar_kernel(sycl::queue& q, const T* a, int8_t* out, int64_t numel,
+                           int op, double scalar, double abs_tol, double rel_tol) {
+    // The scalar arrives as double; convert once so half arithmetic stays in
+    // the same native type the tensor uses.
+    const T s = store_from_double<T>(scalar);
+    q.parallel_for(range_of(numel), [=](sycl::id<1> idx) {
+        const int64_t i = static_cast<int64_t>(idx[0]);
+        out[i] = cmp_value(op, a[i], s, abs_tol, rel_tol);
+    });
+}
+
+}  // namespace
+
+extern "C" {
+
+int sycl_c_launch_compare(void* ctx, const void* a, const void* b, void* out,
+                          int dtype, int op, double tol_abs, double tol_rel,
+                          const tvv::sycl::Bcast* p) {
+    if (ctx == nullptr || a == nullptr || b == nullptr || out == nullptr || p == nullptr)
+        return tvv::sycl::kSyclInvalid;
+    try {
+        auto& q = queue_of(ctx);
+        return dispatch_dtype(dtype, [&](auto tag) -> int {
+            using T = typename decltype(tag)::type;
+            compare_kernel<T>(q, static_cast<const T*>(a), static_cast<const T*>(b),
+                              static_cast<int8_t*>(out), *p, op, tol_abs, tol_rel);
+            return tvv::sycl::kSyclOk;
+        });
+    } catch (...) {
+        return tvv::sycl::kSyclFailure;
+    }
+}
+
+int sycl_c_launch_compare_scalar(void* ctx, const void* a, void* out, int64_t numel,
+                                 int dtype, int op, double scalar,
+                                 double tol_abs, double tol_rel) {
+    if (ctx == nullptr || a == nullptr || out == nullptr)
+        return tvv::sycl::kSyclInvalid;
+    try {
+        auto& q = queue_of(ctx);
+        return dispatch_dtype(dtype, [&](auto tag) -> int {
+            using T = typename decltype(tag)::type;
+            compare_scalar_kernel<T>(q, static_cast<const T*>(a),
+                                     static_cast<int8_t*>(out), numel, op, scalar,
+                                     tol_abs, tol_rel);
+            return tvv::sycl::kSyclOk;
+        });
+    } catch (...) {
+        return tvv::sycl::kSyclFailure;
+    }
+}
+
+}  // extern "C"

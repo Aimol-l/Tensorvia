@@ -1,0 +1,91 @@
+// Tiled matrix multiplication.
+//
+// A is viewed as [batch, rows, k] and B as [batch, k, cols]; a 2D call is the
+// batch=1 case. The host promotes both operands and the destination to a
+// common dtype, so one scalar type per launch is enough.
+#include "common.h"
+
+using namespace tvv::sycl_dev;
+
+namespace {
+
+constexpr int kTile = 16;
+
+// The sum of two promoted scalars carries the integral promotion rules, so a
+// narrow integer operand accumulates in int rather than in its storage type.
+template <class T>
+using accum_t = decltype(promoted_t<T>() + promoted_t<T>());
+
+template <class T>
+void matmul_kernel(sycl::queue& q, const T* a, const T* b, T* out,
+                   int64_t batch, int64_t rows, int64_t cols, int64_t k) {
+    using Acc = accum_t<T>;
+    const size_t col_tiles = static_cast<size_t>((cols + kTile - 1) / kTile);
+    const size_t row_tiles = static_cast<size_t>((rows + kTile - 1) / kTile);
+    const size_t batches   = static_cast<size_t>(batch > 0 ? batch : 1);
+
+    q.submit([&](sycl::handler& h) {
+        sycl::local_accessor<T, 1> tile_a(sycl::range<1>(kTile * kTile), h);
+        sycl::local_accessor<T, 1> tile_b(sycl::range<1>(kTile * kTile), h);
+        h.parallel_for(
+            sycl::nd_range<3>(sycl::range<3>(col_tiles * kTile, row_tiles * kTile, batches),
+                              sycl::range<3>(kTile, kTile, 1)),
+            [=](sycl::nd_item<3> item) {
+                const size_t tx = item.get_local_id(0);
+                const size_t ty = item.get_local_id(1);
+                const int64_t row = static_cast<int64_t>(item.get_group(1) * kTile + ty);
+                const int64_t col = static_cast<int64_t>(item.get_group(0) * kTile + tx);
+                const int64_t bz  = static_cast<int64_t>(item.get_group(2));
+
+                Acc sum = Acc(0);
+                const int64_t num_tiles = (k + kTile - 1) / kTile;
+                for (int64_t tile_idx = 0; tile_idx < num_tiles; ++tile_idx) {
+                    const int64_t a_k = tile_idx * kTile + static_cast<int64_t>(tx);
+                    tile_a[ty * kTile + tx] =
+                        (row < rows && a_k < k)
+                            ? a[bz * rows * k + row * k + a_k]
+                            : T(0);
+                    const int64_t b_k = tile_idx * kTile + static_cast<int64_t>(ty);
+                    tile_b[ty * kTile + tx] =
+                        (b_k < k && col < cols)
+                            ? b[bz * k * cols + b_k * cols + col]
+                            : T(0);
+                    item.barrier(sycl::access::fence_space::local_space);
+                    for (int i = 0; i < kTile; ++i) {
+                        sum += static_cast<Acc>(to_compute<Acc>(tile_a[ty * kTile + i])) *
+                               static_cast<Acc>(to_compute<Acc>(tile_b[i * kTile + tx]));
+                    }
+                    item.barrier(sycl::access::fence_space::local_space);
+                }
+                if (row < rows && col < cols) {
+                    out[bz * rows * cols + row * cols + col] = store_as<T>(sum);
+                }
+            });
+    });
+}
+
+}  // namespace
+
+extern "C" {
+
+int sycl_c_launch_matmul(void* ctx, const void* a, const void* b, void* out,
+                         int dtype, int64_t batch, int64_t rows, int64_t cols,
+                         int64_t k) {
+    if (ctx == nullptr || a == nullptr || b == nullptr || out == nullptr)
+        return tvv::sycl::kSyclInvalid;
+    if (batch < 0 || rows < 0 || cols < 0 || k < 0)
+        return tvv::sycl::kSyclInvalid;
+    try {
+        auto& q = queue_of(ctx);
+        return dispatch_dtype(dtype, [&](auto tag) -> int {
+            using T = typename decltype(tag)::type;
+            matmul_kernel<T>(q, static_cast<const T*>(a), static_cast<const T*>(b),
+                             static_cast<T*>(out), batch, rows, cols, k);
+            return tvv::sycl::kSyclOk;
+        });
+    } catch (...) {
+        return tvv::sycl::kSyclFailure;
+    }
+}
+
+}  // extern "C"

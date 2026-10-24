@@ -1,0 +1,86 @@
+// Concatenation along one axis.
+//
+// One kernel per input instead of a device-side pointer array: the host calls
+// this entry once per operand, with that operand's prefix offset on the axis.
+#include "common.h"
+
+using namespace tvv::sycl_dev;
+
+namespace {
+
+struct ConcatOne {
+    int64_t numel       = 0;
+    int64_t axis_offset = 0;
+    int32_t ndim        = 0;
+    int32_t axis        = 0;
+    int64_t in_shape[kMaxDims]   = {};
+    int64_t in_strides[kMaxDims] = {};
+    int64_t out_strides[kMaxDims] = {};
+};
+
+template <class T>
+void concat_kernel(sycl::queue& q, const T* in, T* out, const ConcatOne& p) {
+    q.parallel_for(range_of(p.numel), [=](sycl::id<1> idx) {
+        const int64_t i = static_cast<int64_t>(idx[0]);
+        int64_t rem = i;
+        int64_t in_off = 0;
+        int64_t out_off = 0;
+        for (int d = p.ndim - 1; d >= 0; --d) {
+            const int64_t dim = p.in_shape[d];
+            const int64_t c = dim > 0 ? rem % dim : 0;
+            if (dim > 0) rem /= dim;
+            in_off += c * p.in_strides[d];
+            const int64_t oc = (d == p.axis) ? c + p.axis_offset : c;
+            out_off += oc * p.out_strides[d];
+        }
+        out[out_off] = in[in_off];
+    });
+}
+
+}  // namespace
+
+extern "C" {
+
+int sycl_c_launch_concat(void* ctx, void* out, const void* const* inputs,
+                         const int64_t* input_offsets, int32_t num_inputs,
+                         int dtype, const int64_t* out_strides,
+                         const int64_t* in_shapes, const int64_t* in_strides,
+                         int32_t ndim, int32_t axis) {
+    if (ctx == nullptr || out == nullptr || inputs == nullptr ||
+        input_offsets == nullptr || out_strides == nullptr || in_shapes == nullptr ||
+        in_strides == nullptr)
+        return tvv::sycl::kSyclInvalid;
+    if (num_inputs <= 0 || ndim <= 0 || ndim > kMaxDims) return tvv::sycl::kSyclInvalid;
+    if (axis < 0 || axis >= ndim) return tvv::sycl::kSyclInvalid;
+    try {
+        auto& q = queue_of(ctx);
+        for (int32_t n = 0; n < num_inputs; ++n) {
+            if (inputs[n] == nullptr) return tvv::sycl::kSyclInvalid;
+
+            ConcatOne p{};
+            p.ndim = ndim;
+            p.axis = axis;
+            p.axis_offset = input_offsets[n];
+            p.numel = 1;
+            for (int32_t d = 0; d < ndim; ++d) {
+                p.in_shape[d] = in_shapes[static_cast<int64_t>(n) * ndim + d];
+                p.in_strides[d] = in_strides[static_cast<int64_t>(n) * ndim + d];
+                p.out_strides[d] = out_strides[d];
+                p.numel *= p.in_shape[d];
+            }
+
+            const int status = dispatch_dtype(dtype, [&](auto tag) -> int {
+                using T = typename decltype(tag)::type;
+                concat_kernel<T>(q, static_cast<const T*>(inputs[n]),
+                                 static_cast<T*>(out), p);
+                return tvv::sycl::kSyclOk;
+            });
+            if (status != tvv::sycl::kSyclOk) return status;
+        }
+        return tvv::sycl::kSyclOk;
+    } catch (...) {
+        return tvv::sycl::kSyclFailure;
+    }
+}
+
+}  // extern "C"

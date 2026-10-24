@@ -1,0 +1,49 @@
+// General N-D permutation into a contiguous output.
+#include "common.h"
+
+using namespace tvv::sycl_dev;
+
+namespace {
+
+template <class T>
+void transpose_kernel(sycl::queue& q, const T* in, T* out,
+                      const tvv::sycl::Transpose& p) {
+    q.parallel_for(range_of(p.numel), [=](sycl::id<1> idx) {
+        const int64_t i = static_cast<int64_t>(idx[0]);
+        // Decode the contiguous input index with its strides, then encode the
+        // permuted coordinate in the output.
+        int64_t rem = i;
+        int64_t coord[kMaxDims] = {};
+        for (int d = 0; d < p.ndim; ++d) {
+            const int64_t s = p.in_strides[d];
+            coord[d] = s > 0 ? rem / s : 0;
+            if (s > 0) rem %= s;
+        }
+        int64_t out_off = 0;
+        for (int d = 0; d < p.ndim; ++d) out_off += coord[p.axes[d]] * p.out_strides[d];
+        out[out_off] = in[i];
+    });
+}
+
+}  // namespace
+
+extern "C" {
+
+int sycl_c_launch_transpose(void* ctx, const void* in, void* out, int dtype,
+                            const tvv::sycl::Transpose* p) {
+    if (ctx == nullptr || in == nullptr || out == nullptr || p == nullptr)
+        return tvv::sycl::kSyclInvalid;
+    if (p->ndim <= 0 || p->ndim > kMaxDims) return tvv::sycl::kSyclInvalid;
+    try {
+        auto& q = queue_of(ctx);
+        return dispatch_dtype(dtype, [&](auto tag) -> int {
+            using T = typename decltype(tag)::type;
+            transpose_kernel<T>(q, static_cast<const T*>(in), static_cast<T*>(out), *p);
+            return tvv::sycl::kSyclOk;
+        });
+    } catch (...) {
+        return tvv::sycl::kSyclFailure;
+    }
+}
+
+}  // extern "C"

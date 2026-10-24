@@ -1,0 +1,55 @@
+// Strided-view repack: materialize an arbitrary (offset, strides) view into a
+// contiguous buffer. Used by clone_as_contiguous / to_host.
+#include "common.h"
+
+using namespace tvv::sycl_dev;
+
+namespace {
+
+void repack_kernel(sycl::queue& q, const char* src, char* dst, int64_t numel,
+                   int64_t offset, int32_t ndim, int32_t dtype_size,
+                   const int64_t* shape, const int64_t* strides) {
+    int64_t shape_v[kMaxDims] = {};
+    int64_t strides_v[kMaxDims] = {};
+    for (int32_t d = 0; d < ndim; ++d) {
+        shape_v[d] = shape[d];
+        strides_v[d] = strides[d];
+    }
+    q.parallel_for(range_of(numel), [=](sycl::id<1> idx) {
+        const int64_t i = static_cast<int64_t>(idx[0]);
+        int64_t temp = i;
+        int64_t src_offset = offset;
+        for (int32_t d = ndim - 1; d >= 0; --d) {
+            const int64_t coord = temp % shape_v[d];
+            temp /= shape_v[d];
+            src_offset += coord * strides_v[d];
+        }
+        const char* from = src + src_offset * dtype_size;
+        char* to = dst + i * dtype_size;
+        for (int32_t b = 0; b < dtype_size; ++b) to[b] = from[b];
+    });
+}
+
+}  // namespace
+
+extern "C" {
+
+int sycl_c_launch_repack(void* ctx, const void* in, void* out, int64_t numel,
+                         int64_t offset, int32_t ndim, int32_t dtype_size,
+                         const int64_t* shape, const int64_t* strides) {
+    if (ctx == nullptr || in == nullptr || out == nullptr || shape == nullptr ||
+        strides == nullptr)
+        return tvv::sycl::kSyclInvalid;
+    if (ndim < 0 || ndim > kMaxDims) return tvv::sycl::kSyclInvalid;
+    if (numel == 0) return tvv::sycl::kSyclOk;
+    try {
+        repack_kernel(queue_of(ctx), static_cast<const char*>(in),
+                      static_cast<char*>(out), numel, offset, ndim, dtype_size,
+                      shape, strides);
+        return tvv::sycl::kSyclOk;
+    } catch (...) {
+        return tvv::sycl::kSyclFailure;
+    }
+}
+
+}  // extern "C"

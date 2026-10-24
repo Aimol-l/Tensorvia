@@ -1,0 +1,147 @@
+// Element-wise arithmetic: broadcast binary, in-place scalar and unary.
+//
+// The host always promotes both operands (and the output) to a common dtype
+// before calling in, so each launch dispatches a single scalar type.
+#include "common.h"
+
+using namespace tvv::sycl_dev;
+namespace contract = tvv::sycl_dev::contract;
+
+namespace {
+
+template <class C>
+inline C binary_value(int op, C x, C y) {
+    switch (op) {
+        case tvv::sycl::kBinAdd: return x + y;
+        case tvv::sycl::kBinSub: return x - y;
+        case tvv::sycl::kBinMul: return x * y;
+        case tvv::sycl::kBinDiv: return contract::div_contract(x, y);
+        default:                 return x;
+    }
+}
+
+template <class C>
+inline C unary_value(int op, C x, C p0, C p1) {
+    switch (op) {
+        case tvv::sycl::kUnaryAbs:
+            if constexpr (std::is_signed_v<C>) {
+                return x < C(0) ? -x : x;
+            } else {
+                return x;
+            }
+        case tvv::sycl::kUnarySin:     return sycl::sin(x);
+        case tvv::sycl::kUnaryCos:     return sycl::cos(x);
+        case tvv::sycl::kUnaryTan:     return sycl::tan(x);
+        case tvv::sycl::kUnaryExp:     return sycl::exp(x);
+        case tvv::sycl::kUnarySqrt:    return sycl::sqrt(x);
+        case tvv::sycl::kUnaryLog:     return sycl::log(x) / sycl::log(p0);
+        case tvv::sycl::kUnaryPow:     return sycl::pow(x, p0);
+        case tvv::sycl::kUnaryRelu:    return contract::relu_contract(x);
+        case tvv::sycl::kUnarySilu:    return x / (C(1) + sycl::exp(-x));
+        case tvv::sycl::kUnaryTanh:    return sycl::tanh(x);
+        case tvv::sycl::kUnarySigmoid: return C(1) / (C(1) + sycl::exp(-x));
+        case tvv::sycl::kUnaryClamp:   return contract::clamp_contract(x, p0, p1);
+        default:                       return x;
+    }
+}
+
+template <class T>
+void binary_kernel(sycl::queue& q, const T* a, const T* b, T* out,
+                   const tvv::sycl::Bcast& p, int op) {
+    using C = promoted_t<T>;
+    q.parallel_for(range_of(p.numel), [=](sycl::id<1> idx) {
+        const int64_t i = static_cast<int64_t>(idx[0]);
+        const int64_t ia = p.off_a + bcast_offset(i, p, p.sa);
+        const int64_t ib = p.off_b + bcast_offset(i, p, p.sb);
+        const C x = to_compute<C>(a[ia]);
+        const C y = to_compute<C>(b[ib]);
+        out[p.off_o + i] = store_as<T>(binary_value(op, x, y));
+    });
+}
+
+template <class T>
+void scalar_kernel(sycl::queue& q, T* buf, int64_t numel, int op, double scalar) {
+    using C = promoted_t<T>;
+    const C s = static_cast<C>(scalar);
+    q.parallel_for(range_of(numel), [=](sycl::id<1> idx) {
+        const int64_t i = static_cast<int64_t>(idx[0]);
+        buf[i] = store_as<T>(binary_value(op, to_compute<C>(buf[i]), s));
+    });
+}
+
+template <class T, class R>
+void unary_kernel(sycl::queue& q, const T* in, R* out, int64_t numel, int op,
+                  double p0, double p1) {
+    using C = unary_compute_t<T>;
+    const C c0 = static_cast<C>(p0);
+    const C c1 = static_cast<C>(p1);
+    q.parallel_for(range_of(numel), [=](sycl::id<1> idx) {
+        const int64_t i = static_cast<int64_t>(idx[0]);
+        out[i] = store_as<R>(unary_value(op, to_compute<C>(in[i]), c0, c1));
+    });
+}
+
+}  // namespace
+
+extern "C" {
+
+int sycl_c_launch_binary(void* ctx, const void* a, const void* b, void* out,
+                         int dtype, int op, const tvv::sycl::Bcast* p) {
+    if (ctx == nullptr || a == nullptr || b == nullptr || out == nullptr || p == nullptr)
+        return tvv::sycl::kSyclInvalid;
+    try {
+        auto& q = queue_of(ctx);
+        return dispatch_dtype(dtype, [&](auto tag) -> int {
+            using T = typename decltype(tag)::type;
+            binary_kernel<T>(q, static_cast<const T*>(a), static_cast<const T*>(b),
+                             static_cast<T*>(out), *p, op);
+            return tvv::sycl::kSyclOk;
+        });
+    } catch (...) {
+        return tvv::sycl::kSyclFailure;
+    }
+}
+
+int sycl_c_launch_scalar(void* ctx, void* buf, int64_t numel, int dtype,
+                         int op, double scalar) {
+    if (ctx == nullptr || buf == nullptr) return tvv::sycl::kSyclInvalid;
+    try {
+        auto& q = queue_of(ctx);
+        return dispatch_dtype(dtype, [&](auto tag) -> int {
+            using T = typename decltype(tag)::type;
+            scalar_kernel<T>(q, static_cast<T*>(buf), numel, op, scalar);
+            return tvv::sycl::kSyclOk;
+        });
+    } catch (...) {
+        return tvv::sycl::kSyclFailure;
+    }
+}
+
+int sycl_c_launch_unary(void* ctx, const void* in, void* out, int64_t numel,
+                        int in_dtype, int out_dtype, int op, double p0, double p1) {
+    if (ctx == nullptr || in == nullptr || out == nullptr)
+        return tvv::sycl::kSyclInvalid;
+    // The only promotion the other backends apply is integer -> FLOAT32 and a
+    // same-type in-place update.
+    const bool same = in_dtype == out_dtype;
+    const bool to_float = out_dtype == tvv::sycl::kFloat32;
+    if (!same && !to_float) return tvv::sycl::kSyclUnsupported;
+    try {
+        auto& q = queue_of(ctx);
+        return dispatch_dtype(in_dtype, [&](auto tag) -> int {
+            using T = typename decltype(tag)::type;
+            if (same) {
+                unary_kernel<T, T>(q, static_cast<const T*>(in), static_cast<T*>(out),
+                                   numel, op, p0, p1);
+            } else {
+                unary_kernel<T, float>(q, static_cast<const T*>(in),
+                                       static_cast<float*>(out), numel, op, p0, p1);
+            }
+            return tvv::sycl::kSyclOk;
+        });
+    } catch (...) {
+        return tvv::sycl::kSyclFailure;
+    }
+}
+
+}  // extern "C"

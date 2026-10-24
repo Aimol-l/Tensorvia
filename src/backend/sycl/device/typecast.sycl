@@ -1,0 +1,41 @@
+// Element-wise dtype conversion.
+#include "common.h"
+
+using namespace tvv::sycl_dev;
+
+namespace {
+
+template <class T, class R>
+void cast_kernel(sycl::queue& q, const T* in, R* out, int64_t numel) {
+    using C = promoted_t<T>;
+    q.parallel_for(range_of(numel), [=](sycl::id<1> idx) {
+        const int64_t i = static_cast<int64_t>(idx[0]);
+        out[i] = store_as<R>(to_compute<C>(in[i]));
+    });
+}
+
+}  // namespace
+
+extern "C" {
+
+int sycl_c_launch_cast(void* ctx, const void* in, void* out, int64_t numel,
+                       int in_dtype, int out_dtype) {
+    if (ctx == nullptr || in == nullptr || out == nullptr)
+        return tvv::sycl::kSyclInvalid;
+    try {
+        auto& q = queue_of(ctx);
+        return dispatch_dtype(in_dtype, [&](auto src_tag) -> int {
+            using T = typename decltype(src_tag)::type;
+            return dispatch_dtype(out_dtype, [&](auto dst_tag) -> int {
+                using R = typename decltype(dst_tag)::type;
+                cast_kernel<T, R>(q, static_cast<const T*>(in),
+                                  static_cast<R*>(out), numel);
+                return tvv::sycl::kSyclOk;
+            });
+        });
+    } catch (...) {
+        return tvv::sycl::kSyclFailure;
+    }
+}
+
+}  // extern "C"

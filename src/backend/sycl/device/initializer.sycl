@@ -1,0 +1,65 @@
+// Fill and random initialization.
+//
+// Random uses a counter-based splitmix64 hash of (seed, element index): no
+// per-element generator state, no oneDPL dependency, and the same distribution
+// on every device.
+#include "common.h"
+
+using namespace tvv::sycl_dev;
+
+namespace {
+
+template <class T>
+void fill_kernel(sycl::queue& q, T* out, int64_t numel, T value) {
+    q.parallel_for(range_of(numel), [=](sycl::id<1> idx) {
+        out[static_cast<int64_t>(idx[0])] = value;
+    });
+}
+
+template <class T>
+void random_kernel(sycl::queue& q, T* out, int64_t numel, float lo, float hi,
+                   uint64_t seed) {
+    const double dlo = static_cast<double>(lo);
+    const double dhi = static_cast<double>(hi);
+    q.parallel_for(range_of(numel), [=](sycl::id<1> idx) {
+        const int64_t i = static_cast<int64_t>(idx[0]);
+        const double r = uniform01(seed, i);
+        out[i] = store_from_double<T>(dlo + r * (dhi - dlo));
+    });
+}
+
+}  // namespace
+
+extern "C" {
+
+int sycl_c_launch_fill(void* ctx, void* out, int64_t numel, int dtype, double value) {
+    if (ctx == nullptr || out == nullptr) return tvv::sycl::kSyclInvalid;
+    try {
+        auto& q = queue_of(ctx);
+        return dispatch_dtype(dtype, [&](auto tag) -> int {
+            using T = typename decltype(tag)::type;
+            fill_kernel<T>(q, static_cast<T*>(out), numel,
+                           store_from_double<T>(value));
+            return tvv::sycl::kSyclOk;
+        });
+    } catch (...) {
+        return tvv::sycl::kSyclFailure;
+    }
+}
+
+int sycl_c_launch_random(void* ctx, void* out, int64_t numel, int dtype,
+                         float lo, float hi, uint64_t seed) {
+    if (ctx == nullptr || out == nullptr) return tvv::sycl::kSyclInvalid;
+    try {
+        auto& q = queue_of(ctx);
+        return dispatch_dtype(dtype, [&](auto tag) -> int {
+            using T = typename decltype(tag)::type;
+            random_kernel<T>(q, static_cast<T*>(out), numel, lo, hi, seed);
+            return tvv::sycl::kSyclOk;
+        });
+    } catch (...) {
+        return tvv::sycl::kSyclFailure;
+    }
+}
+
+}  // extern "C"

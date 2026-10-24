@@ -1,0 +1,97 @@
+// Context, USM allocation, host transfers and queue synchronization.
+//
+// The queue is the whole device state: SYCL kernels are submitted to it and
+// the in-order property makes the synchronous host drivers trivially correct.
+#include "common.h"
+
+#include <cstring>
+
+using namespace tvv::sycl_dev;
+
+extern "C" {
+
+void* sycl_c_context_create() {
+    try {
+        auto* ctx = new Context();
+        // A queue with default_selector_v always names a device; if the device
+        // is unusable the first launch reports it. Returning the handle here
+        // keeps "no device" (nullptr) reserved for construction failures.
+        return ctx;
+    } catch (...) {
+        return nullptr;
+    }
+}
+
+void sycl_c_context_destroy(void* ctx) {
+    if (ctx == nullptr) return;
+    try {
+        delete static_cast<Context*>(ctx);
+    } catch (...) {
+        // Destructors do not throw; nothing actionable on a failed teardown.
+    }
+}
+
+int sycl_c_wait(void* ctx) {
+    if (ctx == nullptr) return tvv::sycl::kSyclInvalid;
+    try {
+        queue_of(ctx).wait_and_throw();
+        return tvv::sycl::kSyclOk;
+    } catch (...) {
+        return tvv::sycl::kSyclFailure;
+    }
+}
+
+int sycl_c_device_name(void* ctx, char* out, int cap) {
+    if (ctx == nullptr || out == nullptr || cap <= 0) return tvv::sycl::kSyclInvalid;
+    try {
+        const auto name = queue_of(ctx)
+                              .get_device()
+                              .get_info<sycl::info::device::name>();
+        const size_t n = name.size() < static_cast<size_t>(cap - 1)
+                             ? name.size()
+                             : static_cast<size_t>(cap - 1);
+        std::memcpy(out, name.c_str(), n);
+        out[n] = '\0';
+        return static_cast<int>(n);
+    } catch (...) {
+        return tvv::sycl::kSyclFailure;
+    }
+}
+
+void* sycl_c_malloc(void* ctx, size_t bytes) {
+    if (ctx == nullptr) return nullptr;
+    try {
+        // malloc_device(0) is not portable; a zero-byte tensor still needs a
+        // valid handle so the destructor and copy paths stay uniform.
+        return sycl::malloc_device(bytes == 0 ? 1 : bytes, queue_of(ctx));
+    } catch (...) {
+        return nullptr;
+    }
+}
+
+void sycl_c_free(void* ctx, void* ptr) {
+    if (ctx == nullptr || ptr == nullptr) return;
+    try {
+        sycl::free(ptr, queue_of(ctx));
+    } catch (...) {
+        // A failed release is not actionable from a destructor path.
+    }
+}
+
+int sycl_c_memcpy(void* ctx, void* dst, const void* src, size_t bytes, int kind) {
+    if (ctx == nullptr || dst == nullptr || src == nullptr) return tvv::sycl::kSyclInvalid;
+    if (bytes == 0) return tvv::sycl::kSyclOk;
+    if (kind != tvv::sycl::kHostToDevice && kind != tvv::sycl::kDeviceToHost &&
+        kind != tvv::sycl::kDeviceToDevice)
+        return tvv::sycl::kSyclInvalid;
+    try {
+        // queue::memcpy selects the USM copy path; the in-order queue plus the
+        // wait below makes the copy complete before the caller's buffer dies.
+        queue_of(ctx).memcpy(dst, src, bytes).wait_and_throw();
+        return tvv::sycl::kSyclOk;
+    } catch (...) {
+        return tvv::sycl::kSyclFailure;
+    }
+}
+
+}  // extern "C"

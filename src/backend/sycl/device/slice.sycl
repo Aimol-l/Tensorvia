@@ -1,0 +1,45 @@
+// Start/stop slice of a strided input into a contiguous output.
+#include "common.h"
+
+using namespace tvv::sycl_dev;
+
+namespace {
+
+template <class T>
+void slice_kernel(sycl::queue& q, const T* in, T* out, const tvv::sycl::Slice& p) {
+    q.parallel_for(range_of(p.numel), [=](sycl::id<1> idx) {
+        const int64_t i = static_cast<int64_t>(idx[0]);
+        int64_t rem = i;
+        int64_t in_off = p.offset;
+        for (int d = p.ndim - 1; d >= 0; --d) {
+            const int64_t dim = p.out_shape[d];
+            const int64_t c = dim > 0 ? rem % dim : 0;
+            if (dim > 0) rem /= dim;
+            in_off += (c + p.starts[d]) * p.in_strides[d];
+        }
+        out[i] = in[in_off];
+    });
+}
+
+}  // namespace
+
+extern "C" {
+
+int sycl_c_launch_slice(void* ctx, const void* in, void* out, int dtype,
+                        const tvv::sycl::Slice* p) {
+    if (ctx == nullptr || in == nullptr || out == nullptr || p == nullptr)
+        return tvv::sycl::kSyclInvalid;
+    if (p->ndim <= 0 || p->ndim > kMaxDims) return tvv::sycl::kSyclInvalid;
+    try {
+        auto& q = queue_of(ctx);
+        return dispatch_dtype(dtype, [&](auto tag) -> int {
+            using T = typename decltype(tag)::type;
+            slice_kernel<T>(q, static_cast<const T*>(in), static_cast<T*>(out), *p);
+            return tvv::sycl::kSyclOk;
+        });
+    } catch (...) {
+        return tvv::sycl::kSyclFailure;
+    }
+}
+
+}  // extern "C"
