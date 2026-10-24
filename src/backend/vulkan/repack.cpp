@@ -4,11 +4,11 @@
 #include <stdexcept>
 #include <vulkan/vulkan.hpp>
 
-#include "interface/tensorvia.hpp"
-#include "interface/types.hpp"
-#include "interface/tensor.hpp"
-#include "interface/backend/vulkan/vulkan_common.hpp"
-#include "interface/backend/vulkan/vulkan_context.hpp"
+#include "tensorvia.hpp"
+#include "tensorvia/types.hpp"
+#include "tensorvia/tensor.hpp"
+#include "tensorvia/backend/vulkan/vulkan_common.hpp"
+#include "tensorvia/backend/vulkan/vulkan_context.hpp"
 
 void vulkan_repack(const Metadata& meta, vk::Buffer input, vk::Buffer output,
                    std::shared_ptr<VulkanContext> ctx) {

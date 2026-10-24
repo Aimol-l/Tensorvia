@@ -21,10 +21,10 @@
 // predefines the corresponding feature macros (GCC does, clang does not), so
 // checking __has_include alone is not enough.
 //
-// TENSORVIA_FORCE_SOFTWARE_FLOAT16 is baked into the generated types header of
-// the header-first (CUDA) lane: nvcc's C++20 front end has no std::float16_t,
-// while the host TUs of the same artifact may compile as C++23. Pinning the
-// software type in the shared header keeps one ABI across the whole artifact.
+// TENSORVIA_FORCE_SOFTWARE_FLOAT16 pins the software types across the whole
+// CUDA artifact: nvcc's C++20 front end has no std::float16_t, while the host
+// TUs of the same artifact may compile as C++23. The macro is declared for the
+// CUDA lane in mcpp.toml and passed to the device units by build.mcpp.
 #if defined(TENSORVIA_FORCE_SOFTWARE_FLOAT16) && TENSORVIA_FORCE_SOFTWARE_FLOAT16
     #include "float16.hpp"
     #include "bfloat16.hpp"

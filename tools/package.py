@@ -46,8 +46,9 @@ BACKEND_ALIASES = {"vk": "vulkan"}
 SUPPORTED_BACKENDS = ("cpu", "vulkan", "cuda", "sycl")
 
 # Runtime / build-time dependencies per backend, per distro family.
-# Python 3 is a build-time need of the Vulkan backend only: CMake runs
-# tools/gen_spv.py to compile the shaders into the SPIR-V registry.
+# Python 3 is a build-time need of this CMake path for the Vulkan backend
+# only (tools/gen_spv.py). The mcpp path additionally runs gen_facade.py's
+# export check on every build and gen_spv.py for Vulkan.
 ARCH_DEPS = {
     "cpu":    (("gcc-libs",), ("cmake", "gcc", "ninja")),
     "vulkan": (("gcc-libs", "vulkan-icd-loader"),

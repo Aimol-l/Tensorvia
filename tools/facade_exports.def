@@ -1,6 +1,8 @@
-# Public surface re-exported by the header-first module facade
-# (src/interface/header_core.cppm). One name per line. `tools/gen_facade.py`
-# turns this into `export using ::name;` / `export namespace ns { using ::ns::name; }`.
+# Public surface exported by the mcpp module wrapper (src/interface/tensorvia.ixx).
+# One name per line. `tools/gen_facade.py` turns this into `export using ::name;`
+# / `export namespace ns { using ::ns::name; }`, and its --check also fails when a
+# public declaration in include/tensorvia/*.hpp is missing here (or listed in
+# [ignore], which marks a name as deliberately internal).
 #
 # Keep in sync with the export blocks of the interfaces; tests/facade_api.cpp
 # compiles every name through `import tensorvia;`, so a missing entry fails the

@@ -9,8 +9,8 @@
 #include <utility>
 #include <vector>
 
-#include "interface/types.hpp"
-#include "interface/tensor.hpp"
+#include "tensorvia/types.hpp"
+#include "tensorvia/tensor.hpp"
 
 namespace ops {
 

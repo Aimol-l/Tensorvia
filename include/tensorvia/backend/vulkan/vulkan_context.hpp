@@ -11,9 +11,9 @@
 #include <unordered_map>
 #include <vector>
 
-#include "interface/types.hpp"
-#include "interface/context.hpp"
-#include "interface/backend/vulkan/vulkan_common.hpp"
+#include "tensorvia/types.hpp"
+#include "tensorvia/context.hpp"
+#include "tensorvia/backend/vulkan/vulkan_common.hpp"
 
 class VulkanContext : public ContextImpl {
 private:

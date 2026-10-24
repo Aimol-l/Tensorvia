@@ -8,8 +8,8 @@
 #include <span>
 #include <vector>
 
-#include "interface/types.hpp"
-#include "interface/context.hpp"
+#include "tensorvia/types.hpp"
+#include "tensorvia/context.hpp"
 
 struct Metadata {
     size_t numel = 0;

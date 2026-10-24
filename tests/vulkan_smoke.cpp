@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-#include "interface/tensorvia.hpp"
+#include "tensorvia.hpp"
 
 namespace {
 

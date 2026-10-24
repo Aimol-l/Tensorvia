@@ -13,10 +13,10 @@
 #include <string_view>
 #include <vector>
 
-#include "interface/tensorvia.hpp"
-#include "interface/types.hpp"
-#include "interface/backend/vulkan/vulkan_common.hpp"
-#include "interface/backend/vulkan/vulkan_context.hpp"
+#include "tensorvia.hpp"
+#include "tensorvia/types.hpp"
+#include "tensorvia/backend/vulkan/vulkan_common.hpp"
+#include "tensorvia/backend/vulkan/vulkan_context.hpp"
 
 using vulkan_detail::check_fence;
 using vulkan_detail::check_result;

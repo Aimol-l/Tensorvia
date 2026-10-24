@@ -20,8 +20,8 @@
 //
 // This is the only partition that includes <vulkan/vulkan.hpp>; the operator
 // implementation units get their Vulkan types from here.
-#include "interface/types.hpp"
-#include "interface/tensor.hpp"
+#include "tensorvia/types.hpp"
+#include "tensorvia/tensor.hpp"
 
 // ---------------------------------------------------------------------------
 // Push constants. Field order and sizeof() must match the corresponding .comp

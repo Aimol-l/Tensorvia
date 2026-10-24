@@ -12,12 +12,12 @@
 
 #include "sycl_island.h"
 
-#include "interface/tensorvia.hpp"
-#include "interface/types.hpp"
-#include "interface/context.hpp"
-#include "interface/tensor.hpp"
-#include "interface/backend/sycl/sycl_context.hpp"
-#include "interface/backend/sycl/sycl_tensor.hpp"
+#include "tensorvia.hpp"
+#include "tensorvia/types.hpp"
+#include "tensorvia/context.hpp"
+#include "tensorvia/tensor.hpp"
+#include "tensorvia/backend/sycl/sycl_context.hpp"
+#include "tensorvia/backend/sycl/sycl_tensor.hpp"
 
 namespace {
 

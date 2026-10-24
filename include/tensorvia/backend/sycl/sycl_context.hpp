@@ -5,11 +5,11 @@
 #include <string>
 
 // SYCL-free interface: the queue and the USM allocator live in the opaque
-// handle created by src/backend/sycl/device/runtime.sycl. The generated header
-// of this partition is included by both the module-lane host drivers and the
-// generated header-mode copies, so it must stay clear of <sycl/sycl.hpp>.
-#include "interface/types.hpp"
-#include "interface/context.hpp"
+// handle created by src/backend/sycl/device/runtime.sycl. Both the host
+// drivers (.cpp) and the device unit include this header, so it must stay
+// clear of <sycl/sycl.hpp>.
+#include "tensorvia/types.hpp"
+#include "tensorvia/context.hpp"
 
 class SYCLContext : public ContextImpl {
 private:

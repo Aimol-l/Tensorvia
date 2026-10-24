@@ -6,11 +6,11 @@
 [![Platform](https://img.shields.io/badge/Platform-Linux-lightgrey)](https://github.com/Aimol-l/Tensorvia)
 [![Backends](https://img.shields.io/badge/Backends-CPU%20%7C%20Vulkan%20%7C%20CUDA%20%7C%20SYCL-brightgreen)](https://github.com/Aimol-l/Tensorvia)
 
-**Tensorvia** 是一个高性能的 C++23 张量计算库，通过统一 API 使用 CPU、Vulkan、CUDA 或 SYCL 后端。源码以
-C++23 命名模块组织，同一份 `.ixx` / `.cpp` 可以两种方式使用：
+**Tensorvia** 是一个高性能的 C++23 张量计算库，通过统一 API 使用 CPU、Vulkan、CUDA 或 SYCL 后端。库主体是
+头文件源码（`include/tensorvia/`，单一事实源），同一条消费路径两种形态：
 
-- **mcpp**：直接构建模块，`import tensorvia;`
-- **CMake ≥ 3.28**：构建时生成为头文件模式，`#include <tensorvia.hpp>`，不要求编译器支持模块 
+- **mcpp**：`src/interface/tensorvia.ixx` 薄包装成模块，`import tensorvia;`
+- **CMake ≥ 3.28 / 安装包**：直接 `#include <tensorvia.hpp>`，不要求编译器支持模块
 
 ## 🌟 特性
 
@@ -53,7 +53,7 @@ C++23 命名模块组织，同一份 `.ixx` / `.cpp` 可以两种方式使用：
 | CMake | CMake ≥ 3.28、支持 C++23 的 GCC/Clang、OpenMP |
 | 测试 | GoogleTest（`BUILD_TEST=ON` 或 `mcpp test`） |
 | Vulkan | Vulkan 1.4 头文件/loader、`glslangValidator`、Python 3（构建期编译 SPIR-V） |
-| CUDA | CUDA Toolkit **12.9**（mcpp 自动安装 payload；CMake 需自行提供 `nvcc`） |
+| CUDA | CUDA Toolkit（mcpp 按 `--accel` 声明的线自动安装 payload；CMake 需自行提供 `nvcc`） |
 | SYCL | DPC++（mcpp 自动安装 `dpcpp` payload；CMake 需 `icpx` 在 `PATH` 上）与 SYCL 运行时 |
 
 ## 一、当使用MCPP构建时
@@ -121,6 +121,12 @@ mcpp pack tensorvia                              # CPU 后端
 
 # 打包到: ./target/dist/tensorvia-0.x.x-xxxx.tar.gz
 ```
+
+> **二进制包的已知限制**：包内 `libtensorvia.so` 静态自含 libc++（mcpp 的
+> portable 默认）。若使用方的程序 `catch` 库内抛出的 C++ 异常，两侧的
+> libc++ 副本类型不一致时会 `bad_cast` 逃逸——二进制包建议仅用于不穿越
+> `.so` 边界捕获异常的场景；异常级 API 的消费请用源码渠道（registry 源码
+> 包 / git / path 依赖，使用方与库同工具链编译，无此问题）。
 
 ```sh
 # bash
@@ -199,12 +205,13 @@ mcpp build --dev --features vulkan                                 # CPU + Vulka
 | `BACKEND_CUDA` | 启用CUDA后端 | OFF |
 | `BACKEND_SYCL` | 启用SYCL后端 | OFF |
 | `BACKEND_VULKAN` | 启用Vulkan后端 | OFF |
-| `BUILD_TEST` | 构建测试可执行文件 | OFF |
-| `ENABLE_AVX2` | CPU 后端启用 AVX2 运行期快路径 | Release 下 ON，Debug 下 OFF |
-| `SYCL_COMPILER_PATH` | `icpx` 的完整路径 | 自动探测 |
+| `BUILD_TEST` | 构建测试可执行文件（`tests/`，facade 与 bench 除外） | OFF |
+| `BUILD_BENCH` | 构建 `tests/bench.cpp` | OFF |
 | `CMAKE_BUILD_TYPE` | 构建类型 (Release/Debug) | Release |
 
-同一构建目录中，`BACKEND_CUDA`、`BACKEND_SYCL`、`BACKEND_VULKAN` 至多启用一个。
+Vulkan 后端需要 `glslangValidator` 与 Vulkan 头文件（同 mcpp 路径）；SYCL 需要
+`icpx` 可被 `find_program` 找到（或在 `PATH` 上）。`-march=x86-64-v3` 随库的
+PUBLIC 编译选项传给使用方。
 
 ```bash
 git clone --recursive https://github.com/Aimol-l/Tensorvia.git

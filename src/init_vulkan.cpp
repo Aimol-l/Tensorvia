@@ -1,11 +1,11 @@
 #include <cstddef>
 #include <memory>
 
-#include "interface/tensorvia.hpp"
-#include "interface/types.hpp"
-#include "interface/factory.hpp"
-#include "interface/backend/vulkan/vulkan_context.hpp"
-#include "interface/backend/vulkan/vulkan_tensor.hpp"
+#include "tensorvia.hpp"
+#include "tensorvia/types.hpp"
+#include "tensorvia/factory.hpp"
+#include "tensorvia/backend/vulkan/vulkan_context.hpp"
+#include "tensorvia/backend/vulkan/vulkan_tensor.hpp"
 
 namespace {
 // The Vulkan device, pipelines and shader registry are only created when the

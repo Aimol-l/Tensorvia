@@ -3,10 +3,10 @@
 #include <stdexcept>
 #include <utility>
 
-#include "interface/tensorvia.hpp"
-#include "interface/types.hpp"
-#include "interface/tensor.hpp"
-#include "interface/factory.hpp"
+#include "tensorvia.hpp"
+#include "tensorvia/types.hpp"
+#include "tensorvia/tensor.hpp"
+#include "tensorvia/factory.hpp"
 
 // Host <-> device transfer lives on TensorImpl, so every backend participates
 // through the same two primitives and these symbols are defined exactly once

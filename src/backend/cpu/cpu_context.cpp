@@ -18,9 +18,9 @@
 #include <string>
 #include <thread>
 
-#include "interface/tensorvia.hpp"
-#include "interface/context.hpp"
-#include "interface/cpu_context.hpp"
+#include "tensorvia.hpp"
+#include "tensorvia/context.hpp"
+#include "tensorvia/cpu_context.hpp"
 
 namespace {
 

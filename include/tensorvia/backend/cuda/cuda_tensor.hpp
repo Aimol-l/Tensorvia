@@ -7,10 +7,10 @@
 // src/backend/cuda/device/runtime.cu. data() returns a real device pointer
 // (unlike Vulkan, where it returns a buffer handle), but it must still not be
 // dereferenced on the host: use copy_to_host / Tensor::to_host.
-#include "interface/types.hpp"
-#include "interface/tensor.hpp"
-#include "interface/context.hpp"
-#include "interface/backend/cuda/cuda_context.hpp"
+#include "tensorvia/types.hpp"
+#include "tensorvia/tensor.hpp"
+#include "tensorvia/context.hpp"
+#include "tensorvia/backend/cuda/cuda_context.hpp"
 
 class CUDATensor : public TensorImpl {
 private:

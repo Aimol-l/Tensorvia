@@ -1,11 +1,11 @@
 #include <cstddef>
 #include <memory>
 
-#include "interface/tensorvia.hpp"
-#include "interface/types.hpp"
-#include "interface/factory.hpp"
-#include "interface/backend/cuda/cuda_context.hpp"
-#include "interface/backend/cuda/cuda_tensor.hpp"
+#include "tensorvia.hpp"
+#include "tensorvia/types.hpp"
+#include "tensorvia/factory.hpp"
+#include "tensorvia/backend/cuda/cuda_context.hpp"
+#include "tensorvia/backend/cuda/cuda_tensor.hpp"
 
 namespace {
 // The driver, stream and allocator are only touched when the first

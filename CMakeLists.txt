@@ -189,14 +189,11 @@ target_compile_features(tensorvia PUBLIC cxx_std_23)
 
 target_include_directories(tensorvia
     PUBLIC
-        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
-# _platform.h / _simd_math.h are implementation details: visible to this
-# library's own units, never installed.
-target_include_directories(tensorvia
-    PRIVATE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
-)
+# _platform.h / _simd_math.h are implementation details: they sit under the
+# same root but are never installed (see the install section below).
 
 if(BACKEND_VULKAN)
     target_include_directories(tensorvia
@@ -262,7 +259,7 @@ endif()
 # unconditionally, so the whole library is built for x86-64-v3.
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$")
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|IntelLLVM")
-        target_compile_options(tensorvia PUBLIC -march=x86-64-v3 -fno-math-errno)
+        target_compile_options(tensorvia PUBLIC -march=x86-64-v3)
     endif()
 endif()
 
@@ -281,8 +278,10 @@ if(BUILD_TEST)
     )
     # facade_api.cpp compiles only through the module wrapper (`import
     # tensorvia;`) — it is mcpp test's surface check, not a header-path test.
+    # bench.cpp has its own main() and is a benchmark, not a test.
     list(REMOVE_ITEM TVV_TEST_INPUTS
-        "${PROJECT_SOURCE_DIR}/tests/facade_api.cpp")
+        "${PROJECT_SOURCE_DIR}/tests/facade_api.cpp"
+        "${PROJECT_SOURCE_DIR}/tests/bench.cpp")
     set(TVV_TEST_SOURCES ${TVV_TEST_INPUTS})
     foreach(test_file ${TVV_TEST_SOURCES})
         get_filename_component(test_name ${test_file} NAME_WE)
@@ -305,10 +304,7 @@ if(BUILD_TEST)
 endif()
 
 if(BUILD_BENCH)
-    file(GLOB TVV_BENCH_INPUTS CONFIGURE_DEPENDS
-        "${PROJECT_SOURCE_DIR}/benchmarks/*.cpp"
-    )
-    set(TVV_BENCH_SOURCES ${TVV_BENCH_INPUTS})
+    set(TVV_BENCH_SOURCES "${PROJECT_SOURCE_DIR}/tests/bench.cpp")
     foreach(bench_file ${TVV_BENCH_SOURCES})
         get_filename_component(bench_name ${bench_file} NAME_WE)
         add_executable(${bench_name} "${bench_file}")
@@ -348,15 +344,16 @@ install(TARGETS tensorvia
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
-# Public surface, installed from the source tree itself. Install explicit
+# Public surface, installed straight from the source tree: the source layout
+# IS the install layout (include/tensorvia.hpp + include/tensorvia/*.hpp), so
+# every internal include resolves the same way in both. Install explicit
 # files, never a directory, so a CPU package cannot ship Vulkan headers. The
 # backend/{cuda,sycl} partition headers stay internal: nothing in the installed
-# surface includes them. _platform.h / _simd_math.h are implementation details.
-set(TVV_IFACE_DIR "${PROJECT_SOURCE_DIR}/src/interface")
+# surface includes them. _platform.h / _simd_math.h stay out as well.
+set(TVV_IFACE_DIR "${PROJECT_SOURCE_DIR}/include/tensorvia")
 file(GLOB TVV_PUBLIC_PARTITION_HEADERS CONFIGURE_DEPENDS
     "${TVV_IFACE_DIR}/*.hpp"
 )
-list(REMOVE_ITEM TVV_PUBLIC_PARTITION_HEADERS "${TVV_IFACE_DIR}/tensorvia.hpp")
 if(BACKEND_VULKAN)
     file(GLOB TVV_VULKAN_PARTITION_HEADERS CONFIGURE_DEPENDS
         "${TVV_IFACE_DIR}/backend/vulkan/*.hpp"
@@ -364,26 +361,10 @@ if(BACKEND_VULKAN)
     list(APPEND TVV_PUBLIC_PARTITION_HEADERS ${TVV_VULKAN_PARTITION_HEADERS})
 endif()
 
-# 安装树的头文件：内部 include 从源码布局（interface/…）改写为安装布局
-# （tensorvia/…），float16/bfloat16 从 include/ 复制进来——使用方
-# #include <tensorvia.hpp> 之后的所有内部路径在安装树里自洽。
-set(TVV_INSTALL_HEADERS_DIR "${CMAKE_CURRENT_BINARY_DIR}/install-headers")
-file(REMOVE_RECURSE "${TVV_INSTALL_HEADERS_DIR}")
-file(MAKE_DIRECTORY "${TVV_INSTALL_HEADERS_DIR}/tensorvia")
-file(READ "${TVV_IFACE_DIR}/tensorvia.hpp" TVV_UMBRELLA_TEXT)
-string(REPLACE "interface/" "tensorvia/" TVV_UMBRELLA_TEXT "${TVV_UMBRELLA_TEXT}")
-file(WRITE "${TVV_INSTALL_HEADERS_DIR}/tensorvia.hpp" "${TVV_UMBRELLA_TEXT}")
-foreach(tvv_h IN LISTS TVV_PUBLIC_PARTITION_HEADERS)
-    file(READ "${tvv_h}" TVV_PART_TEXT)
-    string(REPLACE "interface/" "tensorvia/" TVV_PART_TEXT "${TVV_PART_TEXT}")
-    get_filename_component(TVV_PART_NAME "${tvv_h}" NAME)
-    file(WRITE "${TVV_INSTALL_HEADERS_DIR}/tensorvia/${TVV_PART_NAME}" "${TVV_PART_TEXT}")
-endforeach()
-file(COPY "${PROJECT_SOURCE_DIR}/include/float16.hpp"
-     "${PROJECT_SOURCE_DIR}/include/bfloat16.hpp"
-     DESTINATION "${TVV_INSTALL_HEADERS_DIR}/tensorvia")
-install(DIRECTORY "${TVV_INSTALL_HEADERS_DIR}/"
+install(FILES "${PROJECT_SOURCE_DIR}/include/tensorvia.hpp"
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(FILES ${TVV_PUBLIC_PARTITION_HEADERS}
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/tensorvia)
 install(EXPORT TensorviaTargets
     FILE TensorviaTargets.cmake
     NAMESPACE Tensorvia::

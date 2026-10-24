@@ -1,15 +1,10 @@
 // Build-time work for the optional backends.
 //
-// Two lanes share one root module:
-//
-//   module lane (CPU / Vulkan)  — src/interface/**/*.ixx compile as C++23
-//                                 module units; no header tree, no nvcc.
-//   CUDA lane (any cuda accel)  — nvcc has no module support, so the artifact
-//                                 must not mix module and header translation
-//                                 units. Everything except the root module and
-//                                 the facade is generated as an ordinary .cpp
-//                                 tree, and the .cu units are compiled against
-//                                 the same generated headers.
+// One lane: the headers under include/ are the sources of truth. The only
+// module unit is the thin wrapper src/interface/tensorvia.ixx (its export
+// block is generated from tools/facade_exports.def); every host unit is an
+// ordinary .cpp that #includes the headers, and the .cu device units compile
+// against the same headers through rules-cuda.
 //
 // This program therefore owns source selection: mcpp.toml only names the root.
 import std;
@@ -198,8 +193,9 @@ int main() {
             return 1;
         }
     }
-    // nvcc has no modules and SYCL's host drivers are module implementation
-    // units; mcpp's two lanes cannot be mixed in one artifact. CMake can.
+    // The device units of the two lanes are compiled by different payload
+    // compilers (nvcc vs DPC++); mcpp cannot mix them in one artifact. CMake
+    // can.
     if (cuda_lane && sycl_lane) {
         std::cerr << "mcpp build: one artifact cannot use both the CUDA and SYCL lanes; "
                      "build them separately (CMake supports the combination)\n";
@@ -283,8 +279,9 @@ int main() {
     // unit; nvcc only needs C++20 and the include roots.
     if (want_cuda) {
         mcpp::rules::cuda::options opt;
-        opt.includes = {root + "/src", root + "/src/backend/cuda", root + "/include"};
-        opt.flags    = {"-std=c++20", "-DBACKEND_CUDA"};
+        opt.includes = {root + "/include", root + "/src/backend/cuda"};
+        opt.flags    = {"-std=c++20", "-DBACKEND_CUDA",
+                        "-DTENSORVIA_FORCE_SOFTWARE_FLOAT16=1"};
         if (!mcpp::rules::cuda::compile(opt)) return 1;
     }
     return 0;

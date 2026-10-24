@@ -5,7 +5,7 @@ mcpp 路径的薄包装 `src/interface/tensorvia.ixx`：全局模块片段 inclu
 事实源（interface/tensorvia.hpp），export 出公开 API 面。这个文件是机械的：
 
     module;
-    #include "interface/tensorvia.hpp"
+    #include "tensorvia.hpp"
     export module tensorvia;
     export using ::Tensor;
     export namespace ops { using ::ops::Add; ... }
@@ -29,6 +29,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 DEFAULT_DEF = ROOT / "tools" / "facade_exports.def"
 DEFAULT_OUT = ROOT / "src" / "interface" / "tensorvia.ixx"
 DEFAULT_TEST_OUT = ROOT / "tests" / "facade_api.cpp"
+IFACE_DIR = ROOT / "include" / "tensorvia"
 IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 HEADER = (
     "// 由 tools/gen_facade.py 从 tools/facade_exports.def 生成，请勿手改。\n"
@@ -69,8 +70,78 @@ def parse(path: pathlib.Path) -> dict[str, list[str]]:
     return sections
 
 
+# 公开面扫描：总头包含的 7 个公开分区头里的顶层声明。backend/ 下的头不进
+# 总头（内部声明分区），tensorvia.hpp 自己只是 include 列表。
+PUBLIC_PARTITIONS = ("version", "types", "context", "tensor", "factory",
+                     "cpu_context", "ops")
+STMT_PREFIXES = ("return", "if", "for", "while", "switch", "else", "using",
+                 "static_assert", "friend", "typename", "template", "case",
+                 "default", "do", "catch", "break", "continue", "goto",
+                 "public:", "private:", "protected:", "{", "}", "#")
+
+
+def scan_public_names(iface_dir: pathlib.Path) -> set[tuple[str, str]]:
+    """Return {(namespace, name)} for every top-level declaration in the
+    public partition headers. namespace is "" for global-scope names.
+
+    Class bodies are removed first (members ship with the class; a private
+    helper inside a class is not a facade candidate). Template function
+    bodies survive, but their statements never match the declaration
+    patterns below."""
+    names: set[tuple[str, str]] = set()
+    for part in PUBLIC_PARTITIONS:
+        hpp = iface_dir / f"{part}.hpp"
+        if not hpp.is_file():
+            raise SystemExit(f"missing public partition header: {hpp}")
+        # ---- pass 1: strip class bodies ----
+        kept: list[str] = []
+        in_class = False
+        depth = 0
+        for raw in hpp.read_text(encoding="utf-8").splitlines():
+            s = raw.strip()
+            if not in_class:
+                m = re.match(r"(?:class|struct)\s+(\w+)", s)
+                if m and not s.endswith(";"):          # a definition, not a fwd decl
+                    names.add(("", m.group(1)))
+                    in_class = True
+                    depth = s.count("{") - s.count("}")
+                    if depth <= 0 and "{" not in s:     # `class X` then `{` later
+                        depth = 1
+                    continue
+                kept.append(s)
+            else:
+                depth += s.count("{") - s.count("}")
+                if depth <= 0:
+                    in_class = False
+        # ---- pass 2: top-level declarations, sticky namespace ----
+        ns = ""
+        for s in kept:
+            m = re.match(r"namespace\s+(\w+)\s*\{", s)
+            if m:
+                ns = m.group(1)          # 粘滞：模板函数体的 } 不换命名空间，
+                continue                 # 每个公开头最多一个顶层命名空间
+            m = re.match(r"(?:class|struct|enum\s+class|enum)\s+(\w+)", s)
+            if m:
+                names.add((ns, m.group(1)))
+                continue
+            m = re.match(r"using\s+(\w+)\s*=", s)
+            if m:
+                names.add((ns, m.group(1)))
+                continue
+            m = re.match(r"inline\s+constexpr\s+[^=]*?(\w+)\s*=", s)
+            if m:
+                names.add((ns, m.group(1)))
+                continue
+            if not s.startswith(STMT_PREFIXES):
+                m = re.match(
+                    r"(?:template\s*<[^>]*>\s*)?[A-Za-z_][\w:<>,\*&\s]*?\s(\w+)\s*\(", s)
+                if m:
+                    names.add((ns, m.group(1)))
+    return names
+
+
 def render(sections: dict[str, list[str]]) -> str:
-    out = [HEADER, "module;\n", '#include "interface/tensorvia.hpp"\n\n',
+    out = [HEADER, "module;\n", '#include "tensorvia.hpp"\n\n',
            "export module tensorvia;\n\n"]
     if sections["global"]:
         for name in sections["global"]:
@@ -113,6 +184,21 @@ def main() -> int:
     args = parser.parse_args()
 
     sections = parse(args.def_file)
+
+    # 漏导出守卫：公开分区头里有、清单未登记的顶层声明——两路径公开面静默
+    # 分叉的事故（FR-3）。内部符号登记进 .def 的 [ignore] 节即视为已裁决。
+    declared = {(("" if s == "global" else s), n)
+                for s, names in sections.items() for n in names}
+    ignored = {("ignore", n) for n in sections.get("ignore", [])}
+    missing = sorted(scan_public_names(IFACE_DIR) - declared - ignored)
+    if missing:
+        for ns, n in missing:
+            qual = f"{ns}::" if ns else ""
+            print(f"public declaration not in the facade list: {qual}{n} — "
+                  f"add it to {args.def_file.name} (or [ignore] if internal)",
+                  file=sys.stderr)
+        return 1
+
     expected = {args.out: render(sections), args.test_out: render_test(sections)}
 
     if args.write:

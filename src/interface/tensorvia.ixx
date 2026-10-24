@@ -4,7 +4,7 @@
 // API 面。没有任何逻辑代码；清单与头文件的一致性由 --check 守卫，名字
 // 的存在性由 tests/facade_api.cpp 编译守卫。
 module;
-#include "interface/tensorvia.hpp"
+#include "tensorvia.hpp"
 
 export module tensorvia;
 

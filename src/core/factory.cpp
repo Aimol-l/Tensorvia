@@ -6,10 +6,10 @@
 #include <cstddef>
 #include <functional>
 
-#include "interface/tensorvia.hpp"
-#include "interface/types.hpp"
-#include "interface/tensor.hpp"
-#include "interface/factory.hpp"
+#include "tensorvia.hpp"
+#include "tensorvia/types.hpp"
+#include "tensorvia/tensor.hpp"
+#include "tensorvia/factory.hpp"
 
 namespace {
 auto& get_factories() {

@@ -13,11 +13,11 @@
 #include <new>
 #include <stdexcept>
 
-#include "interface/context.hpp"
-#include "interface/backend/cuda/cuda_context.hpp"
-#include "interface/backend/cuda/cuda_tensor.hpp"
-#include "interface/tensor.hpp"
-#include "interface/types.hpp"
+#include "tensorvia/context.hpp"
+#include "tensorvia/backend/cuda/cuda_context.hpp"
+#include "tensorvia/backend/cuda/cuda_tensor.hpp"
+#include "tensorvia/tensor.hpp"
+#include "tensorvia/types.hpp"
 
 // ---------------------------------------------------------------------------
 // Context

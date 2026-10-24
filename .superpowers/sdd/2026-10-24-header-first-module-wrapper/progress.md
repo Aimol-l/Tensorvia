@@ -45,3 +45,12 @@ Task 6: complete (commits b4b5af5..HEAD-next, tests: spec Test Steps 1-7 全过;
 Task 6: Ruling: 去掉 -fno-math-errno（两行 cxxflags）—— 它进入 clang 的 BMI 兼容性检查，import 使用方不开同 flag 即 "errno ... disabled in precompiled file but is currently enabled" 构建失败（FR-7 阻塞：使用方为库的私有微优化买单）；分发兼容性优先，微优化可被 -O2+ 的默认行为覆盖 — 代价：数学函数 errno 设置的微优化丢失
 Task 6: Ruling: 修正 Task 2 ledger 的风险记录 —— ops.cpp 的 dispatch 用 if constexpr (has_*_impl) 概念检查：BACKEND_* define 随 feature（用户改动）时，未链接的后端算子走运行时 "not implemented" 抛出而非链接失败，pack --features sycl 无 accel 实测 EXIT 0 出正确 CPU 包 — 原风险不成立
 验收记录: mcpp build CPU 30.26s（基线 30.41s，持平）; mcpp test 6/6; vulkan/cuda smoke 1/1 真跑; sycl smoke 40/42（llvm/libc++ vs libsycl/libstdc++ 异常类型，gcc16 实证转换零问题）; cmake ctest 5/5; 消费方 llvm 端到端 EXIT 0; LLVM 工具链（Review Focus #1）验证通过
+
+Final: fixed P0-1 (提交遗漏) — Task 3 的 git add 范围漏 src/interface/tensorvia.ixx，干净 HEAD 态 --check 红；已提交，stash 验证干净检出 --check EXIT 0 — suite 全绿
+Final: fixed P0-2 (pack leg 缺头文件) — 公开头树从 src/interface/ 迁到 include/tensorvia/（mcpp 库约定：include/ 公开、src/ 不公开），pack 产物含完整头树 30 条目，解压包 path 依赖可编译 — 布局迁移后源码布局=安装布局
+Final: fixed M-2 (install 陈旧) — 布局统一后 install 改写逻辑（configure 时生成 install-headers/）整个删除，install 直装源树；改公开头后 build+install 不再静默装旧头 — ctest+消费方验证
+Final: fixed M-1 (漏导出无守卫) — gen_facade 加公开面扫描（类体删除+粘滞命名空间两遍法，零误报零漏报 104/104）；RED→GREEN：新增公开函数不登记 → --check 报 "public declaration not in the facade list" — 接入 --check/--write
+Final: fixed M-3 (float16 ABI 钉定丢失) — TENSORVIA_FORCE_SOFTWARE_FLOAT16=1 两侧定义（mcpp.toml cuda build 段 + build.mcpp rules-cuda flags）+ types.hpp 注释更新 — cuda_smoke（含 float16 用例）1/1
+Final: Ruling: P0-2 的 .so 运行时 libc++ 副本问题降级为二进制分发已知限制 — pack 的 .so 静态自含 libc++（mcpp portable 默认）与使用方二进制的 libc++ 副本不一致时 catch 跨 .so 异常 bad_cast 逃逸；cxx_runtime=toolchain-coupled 实验回滚（链到系统 libc++ 且引入 libunwind not found 失败模式）；源码分发渠道（registry tag 包/git/path，使用方与库同工具链）无此问题 — README 1.2 已注明限制与适用场景 — 代价：二进制包用户需避开跨 .so catch
+Final: fixed m-1..m-6 — CMake PUBLIC -fno-math-errno 删除；注释组更新（build.mcpp 头部/sycl_context/tensorvia.hpp/facade_exports.def）；README 开头总述+CUDA 版本表述+删不存在选项+pack 限制；core.hpp 孤儿删除；bench.cpp 排除 BUILD_TEST 且 BUILD_BENCH glob 修正为 tests/bench.cpp；package.py 注释限定 — suite 全绿
+Final 回归: mcpp CPU 6/6; vulkan smoke 1/1; cuda smoke 1/1; facade_api 1/1; gen_facade --check 绿(含扫描器); cmake ctest 4/4 + bench 产出; pack 解压消费可编译

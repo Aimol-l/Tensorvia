@@ -8,11 +8,11 @@
 #include <utility>
 #include <vector>
 
-#include "interface/tensorvia.hpp"
-#include "interface/types.hpp"
-#include "interface/tensor.hpp"
-#include "interface/factory.hpp"
-#include "interface/ops.hpp"
+#include "tensorvia.hpp"
+#include "tensorvia/types.hpp"
+#include "tensorvia/tensor.hpp"
+#include "tensorvia/factory.hpp"
+#include "tensorvia/ops.hpp"
 
 
 

@@ -10,14 +10,14 @@
 #include <utility>
 #include <vector>
 
-#include "interface/tensorvia.hpp"
-#include "interface/types.hpp"
-#include "interface/tensor.hpp"
-#include "interface/ops.hpp"
-#include "interface/cpu_ops.hpp"
-#include "interface/backend/vulkan/vulkan_ops.hpp"  // declarations only; definitions are compiled under BACKEND_VULKAN
-#include "interface/backend/cuda/cuda_ops.hpp"    // declarations only; definitions are compiled under BACKEND_CUDA
-#include "interface/backend/sycl/sycl_ops.hpp"    // declarations only; definitions are compiled under BACKEND_SYCL
+#include "tensorvia.hpp"
+#include "tensorvia/types.hpp"
+#include "tensorvia/tensor.hpp"
+#include "tensorvia/ops.hpp"
+#include "tensorvia/cpu_ops.hpp"
+#include "tensorvia/backend/vulkan/vulkan_ops.hpp"  // declarations only; definitions are compiled under BACKEND_VULKAN
+#include "tensorvia/backend/cuda/cuda_ops.hpp"    // declarations only; definitions are compiled under BACKEND_CUDA
+#include "tensorvia/backend/sycl/sycl_ops.hpp"    // declarations only; definitions are compiled under BACKEND_SYCL
 
 namespace {
 

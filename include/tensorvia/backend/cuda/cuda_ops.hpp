@@ -13,9 +13,9 @@
 // specialization makes execute_on's `has_cuda_impl` concept false, which turns
 // into the "not implemented on the CUDA backend" runtime error instead of a
 // link failure.
-#include "interface/types.hpp"
-#include "interface/tensor.hpp"
-#include "interface/cpu_ops.hpp"
+#include "tensorvia/types.hpp"
+#include "tensorvia/tensor.hpp"
+#include "tensorvia/cpu_ops.hpp"
 
 namespace ops {
 

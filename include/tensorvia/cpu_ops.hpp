@@ -14,9 +14,9 @@
 #include <variant>
 #include <vector>
 
-#include "interface/types.hpp"
-#include "interface/tensor.hpp"
-#include "interface/ops.hpp"
+#include "tensorvia/types.hpp"
+#include "tensorvia/tensor.hpp"
+#include "tensorvia/ops.hpp"
 
 namespace ops {
 

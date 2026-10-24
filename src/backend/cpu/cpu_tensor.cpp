@@ -6,11 +6,11 @@
 #include <new>
 #include <vector>
 
-#include "interface/tensorvia.hpp"
-#include "interface/types.hpp"
-#include "interface/tensor.hpp"
-#include "interface/cpu_tensor.hpp"
-#include "interface/cpu_context.hpp"
+#include "tensorvia.hpp"
+#include "tensorvia/types.hpp"
+#include "tensorvia/tensor.hpp"
+#include "tensorvia/cpu_tensor.hpp"
+#include "tensorvia/cpu_context.hpp"
 
 namespace {
 

@@ -4,10 +4,10 @@
 #include <cstdint>
 #include <memory>
 
-#include "interface/types.hpp"
-#include "interface/tensor.hpp"
-#include "interface/context.hpp"
-#include "interface/cpu_context.hpp"
+#include "tensorvia/types.hpp"
+#include "tensorvia/tensor.hpp"
+#include "tensorvia/context.hpp"
+#include "tensorvia/cpu_context.hpp"
 
 namespace cpu_tensor_detail {
 // Stateful deleter: carries the byte size so the pool knows which size-class

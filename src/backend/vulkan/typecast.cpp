@@ -2,11 +2,11 @@
 #include <print>
 #include <stdexcept>
 
-#include "interface/tensorvia.hpp"
-#include "interface/types.hpp"
-#include "interface/tensor.hpp"
-#include "interface/cpu_ops.hpp"
-#include "interface/backend/vulkan/vulkan_ops.hpp"
+#include "tensorvia.hpp"
+#include "tensorvia/types.hpp"
+#include "tensorvia/tensor.hpp"
+#include "tensorvia/cpu_ops.hpp"
+#include "tensorvia/backend/vulkan/vulkan_ops.hpp"
 
 namespace ops {
 

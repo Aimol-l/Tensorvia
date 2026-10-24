@@ -7,10 +7,10 @@
 // src/backend/sycl/host/runtime.cpp. data() returns a real USM device pointer,
 // but it must still not be dereferenced on the host: use copy_to_host /
 // Tensor::to_host.
-#include "interface/types.hpp"
-#include "interface/tensor.hpp"
-#include "interface/context.hpp"
-#include "interface/backend/sycl/sycl_context.hpp"
+#include "tensorvia/types.hpp"
+#include "tensorvia/tensor.hpp"
+#include "tensorvia/context.hpp"
+#include "tensorvia/backend/sycl/sycl_context.hpp"
 
 class SYCLTensor : public TensorImpl {
 private:

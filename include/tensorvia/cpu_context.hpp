@@ -4,7 +4,7 @@
 #include <memory>
 #include <string>
 
-#include "interface/context.hpp"
+#include "tensorvia/context.hpp"
 
 class CPUContext : public ContextImpl {
 private:

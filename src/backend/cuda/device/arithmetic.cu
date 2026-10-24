@@ -9,10 +9,10 @@
 #include <stdexcept>
 #include <string>
 
-#include "interface/backend/cuda/cuda_ops.hpp"
-#include "interface/ops.hpp"
-#include "interface/tensor.hpp"
-#include "interface/types.hpp"
+#include "tensorvia/backend/cuda/cuda_ops.hpp"
+#include "tensorvia/ops.hpp"
+#include "tensorvia/tensor.hpp"
+#include "tensorvia/types.hpp"
 
 #include "cuda_launch.hpp"
 #include "ufunc_detail.hpp"

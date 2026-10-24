@@ -1,11 +1,11 @@
 #include <cstddef>
 #include <memory>
 
-#include "interface/tensorvia.hpp"
-#include "interface/types.hpp"
-#include "interface/factory.hpp"
-#include "interface/backend/sycl/sycl_context.hpp"
-#include "interface/backend/sycl/sycl_tensor.hpp"
+#include "tensorvia.hpp"
+#include "tensorvia/types.hpp"
+#include "tensorvia/factory.hpp"
+#include "tensorvia/backend/sycl/sycl_context.hpp"
+#include "tensorvia/backend/sycl/sycl_tensor.hpp"
 
 namespace {
 // The queue and the USM allocator are only touched when the first

@@ -18,12 +18,12 @@
 // This partition is the only host code that touches the seam. Everything below
 // is an ordinary host function; the .sycl units live in a different compiler's
 // entity universe, hence the int-status / void* contract.
-#include "interface/types.hpp"
-#include "interface/tensor.hpp"
-#include "interface/ops.hpp"
-#include "interface/cpu_ops.hpp"
-#include "interface/backend/sycl/sycl_context.hpp"
-#include "interface/backend/sycl/sycl_tensor.hpp"
+#include "tensorvia/types.hpp"
+#include "tensorvia/tensor.hpp"
+#include "tensorvia/ops.hpp"
+#include "tensorvia/cpu_ops.hpp"
+#include "tensorvia/backend/sycl/sycl_context.hpp"
+#include "tensorvia/backend/sycl/sycl_tensor.hpp"
 
 namespace ops::sycl_ufunc {
 

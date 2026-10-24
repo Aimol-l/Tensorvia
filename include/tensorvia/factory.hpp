@@ -4,8 +4,8 @@
 #include <functional>
 #include <memory>
 
-#include "interface/types.hpp"
-#include "interface/tensor.hpp"
+#include "tensorvia/types.hpp"
+#include "tensorvia/tensor.hpp"
 
 using TensorImplFactory =
     std::function<std::shared_ptr<TensorImpl>(void* ptr, size_t numel, DataType)>;

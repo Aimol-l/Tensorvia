@@ -4,16 +4,16 @@
 #include <string>
 #include <vector>
 
-#include "interface/tensorvia.hpp"
-#include "interface/types.hpp"
-#include "interface/tensor.hpp"
-#include "interface/ops.hpp"
-#include "interface/cpu_ops.hpp"
-#include "interface/backend/vulkan/vulkan_ops.hpp"
-#include "interface/backend/vulkan/vulkan_common.hpp"
-#include "interface/backend/vulkan/vulkan_context.hpp"
-#include "interface/backend/vulkan/vulkan_tensor.hpp"
-#include "interface/backend/vulkan/vulkan_ufunc.hpp"
+#include "tensorvia.hpp"
+#include "tensorvia/types.hpp"
+#include "tensorvia/tensor.hpp"
+#include "tensorvia/ops.hpp"
+#include "tensorvia/cpu_ops.hpp"
+#include "tensorvia/backend/vulkan/vulkan_ops.hpp"
+#include "tensorvia/backend/vulkan/vulkan_common.hpp"
+#include "tensorvia/backend/vulkan/vulkan_context.hpp"
+#include "tensorvia/backend/vulkan/vulkan_tensor.hpp"
+#include "tensorvia/backend/vulkan/vulkan_ufunc.hpp"
 
 namespace ops {
 

@@ -8,8 +8,8 @@
 // this partition is included by the CUDA translation units, so keeping it clear
 // of <cuda_runtime.h> means the same declaration is also compilable by a plain
 // host compiler (and by CMake, where only the header form is built).
-#include "interface/types.hpp"
-#include "interface/context.hpp"
+#include "tensorvia/types.hpp"
+#include "tensorvia/context.hpp"
 
 class CUDAContext : public ContextImpl {
 private:

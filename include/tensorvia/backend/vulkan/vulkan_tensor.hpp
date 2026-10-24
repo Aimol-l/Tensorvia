@@ -5,11 +5,11 @@
 #include <memory>
 #include <vulkan/vulkan.hpp>
 
-#include "interface/types.hpp"
-#include "interface/tensor.hpp"
-#include "interface/context.hpp"
-#include "interface/backend/vulkan/vulkan_common.hpp"
-#include "interface/backend/vulkan/vulkan_context.hpp"
+#include "tensorvia/types.hpp"
+#include "tensorvia/tensor.hpp"
+#include "tensorvia/context.hpp"
+#include "tensorvia/backend/vulkan/vulkan_common.hpp"
+#include "tensorvia/backend/vulkan/vulkan_context.hpp"
 
 class VKTensor : public TensorImpl {
 private:
