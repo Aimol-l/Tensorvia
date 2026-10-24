@@ -1,9 +1,8 @@
 #pragma once
 
-// Module-lane provider of :core (CPU / Vulkan artifacts).
-//
-// The CUDA lane provides the same partition from header_core.ixx instead, so
-// exactly one definition of `tensorvia:core` participates in any build.
+// Internal aggregation header: re-lists the public partitions in dependency
+// order. The installed umbrella (tensorvia.hpp) carries the same list — keep
+// the two in step.
 
 #include "interface/version.hpp"
 #include "interface/types.hpp"

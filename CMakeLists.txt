@@ -25,10 +25,10 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
 
-# CMake builds the header-mode view of the library: the .ixx sources are
-# rewritten into plain headers/translation units by tools/gen_header_mode.py.
-# Module scanning stays off, so no module support is required from the
-# toolchain and consumers only need an ordinary #include <tensorvia.hpp>.
+# CMake builds the library's header form directly: src/interface/*.hpp are the
+# single source of truth (mcpp wraps them in a module for `import tensorvia;`).
+# Module scanning stays off, so no module support is required from the toolchain
+# and consumers only need an ordinary #include <tensorvia.hpp>.
 set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 if(NOT CMAKE_BUILD_TYPE)

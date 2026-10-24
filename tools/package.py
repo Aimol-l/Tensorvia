@@ -46,22 +46,22 @@ BACKEND_ALIASES = {"vk": "vulkan"}
 SUPPORTED_BACKENDS = ("cpu", "vulkan", "cuda", "sycl")
 
 # Runtime / build-time dependencies per backend, per distro family.
-# Every backend needs Python 3: CMake runs tools/gen_header_mode.py to derive
-# the installed .h/.hpp tree from the module sources.
+# Python 3 is a build-time need of the Vulkan backend only: CMake runs
+# tools/gen_spv.py to compile the shaders into the SPIR-V registry.
 ARCH_DEPS = {
-    "cpu":    (("gcc-libs",), ("cmake", "gcc", "ninja", "python")),
+    "cpu":    (("gcc-libs",), ("cmake", "gcc", "ninja")),
     "vulkan": (("gcc-libs", "vulkan-icd-loader"),
                ("cmake", "gcc", "ninja", "glslang", "vulkan-headers", "python")),
     # cuda carries the toolkit (nvcc + cudart) on Arch.
     "cuda":   (("gcc-libs", "cuda"),
-               ("cmake", "gcc", "ninja", "cuda", "python")),
+               ("cmake", "gcc", "ninja", "cuda")),
     # SYCL needs the DPC++ compiler (icpx) at build time and the SYCL runtime
     # at run time; both live in the oneAPI packages.
     "sycl":   (("gcc-libs", "intel-oneapi-runtime-dpcpp-cpp"),
-               ("cmake", "gcc", "ninja", "python", "intel-oneapi-dpcpp-cpp")),
+               ("cmake", "gcc", "ninja", "intel-oneapi-dpcpp-cpp")),
 }
 DEB_DEPS = {
-    "cpu":    ("libc6, libgomp1", "cmake, g++, ninja-build, python3"),
+    "cpu":    ("libc6, libgomp1", "cmake, g++, ninja-build"),
     "vulkan": ("libc6, libgomp1, libvulkan1",
                "cmake, g++, ninja-build, glslang-tools, libvulkan-dev, python3"),
     "cuda":   ("libc6, libgomp1, cuda-cudart",
@@ -70,7 +70,7 @@ DEB_DEPS = {
                "cmake, g++, ninja-build, python3, intel-oneapi-compiler-dpcpp-cpp"),
 }
 RPM_DEPS = {
-    "cpu":    ("gcc-libs", "cmake, gcc-c++, ninja-build, python3"),
+    "cpu":    ("gcc-libs", "cmake, gcc-c++, ninja-build"),
     "vulkan": ("gcc-libs, vulkan-loader",
                "cmake, gcc-c++, ninja-build, glslang, vulkan-loader-devel, python3"),
     "cuda":   ("gcc-libs, cuda-cudart",
