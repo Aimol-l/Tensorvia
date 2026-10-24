@@ -1,0 +1,55 @@
+#version 450
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_shader_8bit_storage : require
+#extension GL_NV_shader_atomic_int64 : enable
+#extension GL_EXT_shader_atomic_int64 : enable
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform Params {
+    int64_t numel;
+} params;
+
+layout(std430, binding = 0) readonly buffer InputA {
+    float data[];
+} a;
+
+layout(std430, binding = 1) writeonly buffer Output {
+    int data[];
+} dst;
+
+shared int sdata[256];
+
+const float tolerance = 1e-5;
+
+void main() {
+    uint tid = gl_LocalInvocationID.x;
+    uint idx = gl_GlobalInvocationID.x;
+
+
+    int local_bool = 0;
+    // 网格跨步：workgroup 数由宿主固定在 kMaxGroups 上限内，每个 workgroup
+    // 按 gl_NumWorkGroups * gl_WorkGroupSize 的步长遍历自己那份元素。
+    // 修前每个 workgroup 只处理 256 个元素、却按 workgroup 编号写结果数组，
+    // 而宿主只开 ceil(numel/256) 个 group、结果数组恒 256 项——numel > 65536
+    // 时第 256 号起的 group 会写 dst.data[>=256]，越界写显存。
+    for(idx = gl_GlobalInvocationID.x; idx < params.numel;
+        idx += gl_NumWorkGroups.x * gl_WorkGroupSize.x) {
+        local_bool += (abs(float(a.data[idx])) > tolerance ? 1 : 0);
+    }
+    sdata[tid] = local_bool;
+    barrier();
+
+    for(uint i = gl_WorkGroupSize.x / 2; i > 0; i >>= 1) {
+        if(tid < i) {
+            sdata[tid] += sdata[tid + i];
+        }
+        barrier();
+    }
+    if(tid == 0) {
+        if(sdata[0] > 0) {
+            dst.data[gl_WorkGroupID.x] =  sdata[0];
+        }
+    }
+    
+}

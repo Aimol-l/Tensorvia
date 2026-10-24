@@ -1,0 +1,54 @@
+#version 460
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform Params {
+    float min_v;
+    float max_v;
+    int64_t numel;
+} params;
+layout(std430, binding = 0) buffer InputA {
+    float data[];
+}src;
+
+layout(std430, binding = 1) buffer InputB {
+    float data[];
+}dst;
+
+// clamp 的判据与 include/core/numeric_contract.h 的 clamp_contract 同源（P-9 切片 3）。
+// shader 读不到那份 C++ 代码，只能手工照抄——改契约时这八份要一起改。
+//
+// 写法上两处不能省：
+//   ① **显式判 NaN**（第一行）。不能靠 GLSL 的 `clamp`/`min`/`max`——它们的定义是
+//      "比较为假就返回 x"，**规范上**本该传播 NaN；但**实测与规范相反**——把它们退回原
+//      写法重新构建后，断言 NaN 传播的用例报红，本机驱动把它们编成了 FMin/FMax
+//      （IEEE maxNum 语义，返回**另一个操作数**），NaN 照吞。修复前四个后端**一致地
+//      吞** NaN、没有例外，所以这一层不能按规范推断。契约选的是传播
+//      （NumPy clip / PyTorch clamp 的语义）。
+//   ② **改成三元比较**。这一条在**本文件（float32）上不是为了精度**：原写法
+//      `clamp(x, min_v, max_v)` 的 x 与边界同为 float，本来就没有窄化可言。
+//      改的理由是把八份 clamp shader 收成同一套判据——①的 NaN 判断一旦显式写出来，
+//      `clamp` 内建就已经用不上了，剩下的三元比较顺带保证「比较的两个类型都是元素
+//      自己的类型」，不至于在别的 dtype 上再想一遍。
+//      **附带更正一句我此前写错的说明**：曾经在这里写过"float64 那份会把 double
+//      窄化"，那是错的。GLSL 的隐式转换只允许 float→double，**不允许 double→float**
+//      （用 glslangValidator 探针实测：`clamp(double_x, float_lo, float_hi)` 可编译，
+//      说明边界被提升为 double；反过来 `clamp(float_x, double_lo, …)` 直接报
+//      "cannot convert from double to float" 编译失败）。所以原 float64 shader 的
+//      精度是好的。**真正因窄化而失真的是 int32/int64 那两份**——它们写的是
+//      `int(clamp(float(x), …))`，`float(x)` 把 int 压到 24 位。
+//      另注：int8/int16 那两份虽然也写了 `float(x)`，但取值范围内的每个 int8/int16
+//      都能被 float 精确表示，窄化不丢信息，故它们同样不以精度为由。
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (int64_t(idx) >= params.numel) return;
+
+    float x = src.data[idx];
+    if (x != x) { dst.data[idx] = x; return; }
+
+    float lo = float(params.min_v);
+    float hi = float(params.max_v);
+    dst.data[idx] = (x < lo) ? lo : ((hi < x) ? hi : x);
+}

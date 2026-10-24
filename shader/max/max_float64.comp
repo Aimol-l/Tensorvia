@@ -1,0 +1,63 @@
+#version 460
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+
+layout(push_constant) uniform Params {
+    int64_t numel;
+} params;
+
+layout(std430, binding = 0) buffer InputA {
+    double data[];
+}src;
+
+layout(std430, binding = 1) buffer OutputB {
+    double data[];
+}dst;
+
+shared double sharedMem[256];
+
+double max_c(double a, double b) {
+    if (a != a) return a;
+    if (b != b) return b;
+    return b > a ? b : a;
+}
+
+void main() {
+    uint tid = gl_LocalInvocationID.x;
+    uint idx = gl_GlobalInvocationID.x;
+    uint block_size = gl_WorkGroupSize.x;
+    uint group_size = gl_NumWorkGroups.x * block_size;
+
+    // grid stride
+    uint seed_idx = idx < uint(params.numel) ? idx : 0u;
+    double max_val = src.data[seed_idx];
+    for (uint s = idx; s < params.numel; s += group_size) {
+        max_val = max_c(max_val, src.data[s]);
+    }
+
+    // block stride
+    sharedMem[tid] = max_val;
+    barrier();
+
+    for (uint stride = block_size / 2; stride > 32; stride >>= 1) {
+        if (tid < stride) {
+            sharedMem[tid] = max_c(sharedMem[tid], sharedMem[tid + stride]);
+        }
+        barrier();
+    }
+
+    #pragma unroll
+    for(int i = 32; i > 0; i >>= 1) {
+        if( tid < i) {
+            sharedMem[tid] = max_c(sharedMem[tid], sharedMem[tid + i]);
+        }
+        barrier();
+    }
+
+    if (tid == 0) {
+        dst.data[gl_WorkGroupID.x] = double(sharedMem[0]);
+    }
+
+}

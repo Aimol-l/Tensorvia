@@ -1,0 +1,34 @@
+#version 460
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+
+layout(push_constant) uniform Params {
+    int64_t numel;
+} params;
+
+layout(std430, binding = 0) buffer Data {
+    double values[];
+}src;
+
+// relu 的判据与 include/core/numeric_contract.h 的 relu_contract 同源（P-9 切片 3）。
+// shader 读不到那份 C++ 代码，只能手工照抄——改契约时这八份要一起改。
+//
+// **显式判 NaN** 不能省。`max(x, 0)` 按 GLSL 规范（"比较为假就返回 x"）**本该**传播 NaN，
+// 但**实测与规范相反**：把它退回修复前的写法重新构建后，断言 NaN 传播的用例报红——
+// 这个驱动真的把它编成了 `FMax`（IEEE maxNum 语义，返回**另一个操作数** 0），NaN 被吞。
+// 即修复前四个后端**一致地吞** NaN、没有例外。所以这一层不能按规范推断，只有反证能定案。
+// 契约选的是传播：relu(NaN) 是 NaN，不是 0（NumPy maximum / PyTorch relu 语义）。
+//
+// 整型的四份没有 NaN，判据只需要 `max(x, 0)` 那半句；写法统一是为了改动不会分叉。
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (int64_t(idx) >= params.numel) return;
+
+    double x = src.values[idx];
+    if (x != x) return;  // NaN 原样留下
+
+    src.values[idx] = max(src.values[idx], 0.0);
+}

@@ -1,0 +1,38 @@
+#version 460
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+
+layout(push_constant) uniform Params {
+    int64_t numel;
+} params;
+
+layout(std430, binding = 0) buffer InputA {
+    double data[];
+} a;
+
+layout(std430, binding = 1) buffer InputB {
+    double data[];
+} b;
+
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (int64_t(idx) >= params.numel) return;
+
+    // 在 float 里算再升回 double，与本后端其它 FLOAT64 超越函数一致
+    // （exp_float64.comp / sigmoid_float64.comp / softmax_float64.comp 都这么写）。
+    //
+    // 这不是偷懒：glslang 的 Vulkan 前端**不提供任何 double 精度的超越函数内建**。
+    // 已实测 exp(double) / tanh(double) / pow(double,double) 全部
+    // `no matching overloaded function found`，加 GL_EXT_shader_explicit_arithmetic_types_float64
+    // 或 GL_ARB_gpu_shader_fp64 都不改变结果；double 只有 + - * / abs 可用。
+    // GLSL 里也根本没有 expm1。所以「全程 double」在本工具链上无法实现，
+    // FLOAT64 版本只能有约 7 位有效数字——这是后端级已知局限，不是此处引入的。
+    //
+    // 原先的实现在此之上还多错一层：写的是 exp(2x-1)/exp(2x+1)，分子分母各减 1，
+    // 商恒等于 exp(-2)≈0.1353，与 x 完全无关（tanh(0) 也因此得到 0.1353 而不是 0）。
+    // 改用内建 tanh 后这条彻底消失。
+    b.data[idx] = double(tanh(float(a.data[idx])));
+}

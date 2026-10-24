@@ -1,0 +1,38 @@
+#version 460
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform Params {
+    int64_t numel;
+} params;
+
+layout(std430, binding = 0) buffer InputA {
+    float data[];
+} a;
+
+layout(std430, binding = 1) buffer InputB {
+    float data[];
+} b;
+
+// 饱和契约（P-9 切片 3），与 CPU 的 cpu::exp_f32 / CUDA 的
+// cuda_ufunc::device_exp<float> 同一份：
+//   x < -87 → +0.0    x > 88 → +inf    NaN → NaN
+//
+// 不能省掉下溢这一支：`expf(-100.0f)` 实际是 3.78e-44（可表示的非规格化数，
+// 不是 0），而 CPU 快路径按契约回 0；上溢那支同理——`expf` 要到 88.7 才真的
+// 溢出为 inf，88 与 88.7 之间是另一个后端差异。tests/numerics.cpp 断言
+// `exp(-100.0f)` **恰好等于 0.0**（容差 0），这一支就是为它写的。
+//
+// 绑定 0 与 1 在 C++ 侧指向同一个缓冲区（ExpImpl 的原地/非原地两条路径都传
+// {buf, buf}），所以读 b 写 b 是对的。
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (int64_t(idx) >= params.numel) return;
+
+    float x = b.data[idx];
+    if (x != x) { b.data[idx] = x; return; }                        // NaN 传播
+    if (x > 88.0)  { b.data[idx] = uintBitsToFloat(0x7F800000u); return; }  // +inf
+    if (x < -87.0) { b.data[idx] = 0.0; return; }                   // 下溢归零
+    b.data[idx] = exp(x);
+}

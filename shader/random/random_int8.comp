@@ -1,0 +1,40 @@
+#version 460
+
+#extension GL_EXT_shader_8bit_storage : require
+#extension GL_EXT_shader_explicit_arithmetic_types : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform Params {
+    float min_v;
+    float max_v;
+    uint  seed;      // ← 改成 uint32 更符合 xorshift32
+    int64_t numel;
+} params;
+
+layout(std430, binding = 0) buffer Output {
+    int8_t data[];
+};
+
+//============================================================
+uint xorshift32(inout uint s) {
+    s ^= s << 13;
+    s ^= s >> 17;
+    s ^= s << 5;
+    return s;
+}
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= uint(params.numel)) return;
+
+    uint state = params.seed ^ idx ^ 0x9E3779B9u;
+    uint r = xorshift32(state);
+
+    float range = params.max_v - params.min_v + 1;
+
+    int val = int(params.min_v) + int(r % uint(range));
+
+    data[idx] = int8_t(val);
+}

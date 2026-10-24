@@ -1,0 +1,75 @@
+#version 460
+#extension GL_EXT_bfloat16 : enable
+#extension GL_EXT_shader_explicit_arithmetic_types : enable
+
+#define MAX_INPUTS 8
+#define MAX_DIMS   6
+
+layout(local_size_x = 256) in;
+
+struct ConcatParams {
+    uint num;
+    uint axis;
+    uint prefix_sum[MAX_INPUTS + 1];
+    uint output_shape[MAX_DIMS];
+    uint output_strides[MAX_DIMS];
+    uint input_strides[MAX_INPUTS][MAX_DIMS];
+};
+
+layout(std430, binding = 0) readonly buffer Params {ConcatParams params;}p;
+layout(std430, binding = 1) writeonly buffer Output {bfloat16_t data[];}res;
+layout(std430, binding = 2) readonly buffer Input0 { bfloat16_t data[]; }input0;
+layout(std430, binding = 3) readonly buffer Input1 { bfloat16_t data[]; }input1;
+layout(std430, binding = 4) readonly buffer Input2 { bfloat16_t data[]; }input2;
+layout(std430, binding = 5) readonly buffer Input3 { bfloat16_t data[]; }input3;
+layout(std430, binding = 6) readonly buffer Input4 { bfloat16_t data[]; }input4;
+layout(std430, binding = 7) readonly buffer Input5 { bfloat16_t data[]; }input5;
+layout(std430, binding = 8) readonly buffer Input6 { bfloat16_t data[]; }input6;
+layout(std430, binding = 9) readonly buffer Input7 { bfloat16_t data[]; }input7;
+
+bfloat16_t load_input(uint idx, uint linear) {
+    if (idx == 0u) return input0.data[linear];
+    if (idx == 1u) return input1.data[linear];
+    if (idx == 2u) return input2.data[linear];
+    if (idx == 3u) return input3.data[linear];
+    if (idx == 4u) return input4.data[linear];
+    if (idx == 5u) return input5.data[linear];
+    if (idx == 6u) return input6.data[linear];
+    return input7.data[linear];
+}
+
+void main() {
+    uint gid = gl_GlobalInvocationID.x;
+    // 尾部工作组的越界线程必须早退：gx 是 ceil(numel/256)，最后一个工作组里
+    // gid >= numel 的线程若无条件写 res.data[gid]，就是规范级的越界写
+    // （审计 M-2；slice/repack 的 shader 一直有这道守卫，只有 concat 漏了）。
+    // total 由 output_shape 求积：host 侧把不足 ndim 的维度填 1，故它等于输出
+    // numel。0 与 1 都按 1 处理，与下面坐标分解的 `tmp /= max(s, 1u)` 同一套假设。
+    uint total = 1u;
+    for (int i = 0; i < MAX_DIMS; ++i) {
+        uint s = p.params.output_shape[i];
+        total *= (s > 1u) ? s : 1u;
+    }
+    if (gid >= total) return;
+    uint tmp = gid;
+    uint coord[MAX_DIMS];
+    for (int i = MAX_DIMS - 1; i >= 0; --i) {
+        uint s = p.params.output_shape[i];
+        coord[i] = (s > 1u) ? tmp % s : 0u;
+        tmp /= max(s, 1u);
+    }
+    uint axis = p.params.axis;
+    uint a = coord[axis];
+    uint src = 0u;
+    for (uint i = 0; i < p.params.num; ++i) {
+        if (a < p.params.prefix_sum[i + 1]) {
+            src = i;
+            break;
+        }
+    }
+    coord[axis] = a - p.params.prefix_sum[src];
+    uint linear = 0u;
+    for (uint i = 0; i < MAX_DIMS; ++i)
+        linear += coord[i] * p.params.input_strides[src][i];
+    res.data[gid] = load_input(src, linear);
+}

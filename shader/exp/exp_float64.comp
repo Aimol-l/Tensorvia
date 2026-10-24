@@ -1,0 +1,37 @@
+#version 460
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+
+layout(push_constant) uniform Params {
+    int64_t numel;
+} params;
+
+layout(std430, binding = 0) buffer InputA {
+    double data[];
+} a;
+
+layout(std430, binding = 1) buffer InputB {
+    double data[];
+} b;
+
+// 这里**保持 float 中转**：glslang 的 Vulkan 前端不提供任何 double 精度的
+// exp 内建（`no matching overloaded function found`，见 tests/check.h 顶部），
+// 写成 `exp(a.data[idx])` 直接编译不过。
+//
+// 所以本后端的 FLOAT64 exp 只有 24 位有效精度——这是**工具链能力边界**，
+// 不是可以在这批修复里消除的缺陷，tests/numerics.cpp 第 7 节已按此给期望值。
+// 对比另外三个后端：CPU 走 std::exp(double)、CUDA 走 exp(double)、SYCL 走
+// std::exp(double)，都是满精度，且都**不做饱和**——double 要到 709 才溢出、
+// -745 才真正下溢，对 double 钳 [-87,88] 反而会把正确结果改错。
+//
+// 于是"exp 饱和到 [-87,88]"这条契约**只作用于 FLOAT32**；Vulkan 这条 f64 路径
+// 因工具链所限退化为 float，其饱和行为随之由 float 决定（与 CPU/CUDA 的 f64
+// 路径不同）——已记录为已知偏差，不在此处伪造。
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (int64_t(idx) >= params.numel) return;
+
+    b.data[idx] = double(exp(float(a.data[idx])));
+}
