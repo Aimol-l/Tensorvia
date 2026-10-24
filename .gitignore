@@ -1,0 +1,25 @@
+.vscode
+.cache
+.github
+target/
+compile_commands.json
+dist/
+
+# CMake build trees
+build/
+build-*/
+cmake-build-*/
+
+# Build artifacts
+*.o
+*.so
+*.so.*
+*.a
+*.dylib
+*.dll
+*.exe
+
+# Generated SPIR-V registry (written into the build tree, never the source tree)
+gen/
+spirv/spv_registry.cpp
+spirv/spv_registry.h
