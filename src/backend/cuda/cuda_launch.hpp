@@ -16,8 +16,8 @@
 
 #include <cuda_runtime.h>
 
-#include <tensorvia/tensor.h>
-#include <tensorvia/types.h>
+#include "interface/tensor.hpp"
+#include "interface/types.hpp"
 
 namespace tvv::cuda {
 

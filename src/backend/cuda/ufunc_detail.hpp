@@ -16,12 +16,12 @@
 #include <string>
 #include <vector>
 
-#include <tensorvia/cpu_ops.h>
-#include <tensorvia/cuda_context.h>
-#include <tensorvia/cuda_tensor.h>
-#include <tensorvia/ops_api.h>
-#include <tensorvia/tensor.h>
-#include <tensorvia/types.h>
+#include "interface/cpu_ops.hpp"
+#include "interface/backend/cuda/cuda_context.hpp"
+#include "interface/backend/cuda/cuda_tensor.hpp"
+#include "interface/ops.hpp"
+#include "interface/tensor.hpp"
+#include "interface/types.hpp"
 
 #include "cuda_launch.hpp"
 

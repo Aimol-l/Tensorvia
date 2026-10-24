@@ -3,8 +3,8 @@
 #include "common.cuh"
 #include "cuda_launch.hpp"
 
-#include <tensorvia/tensor.h>
-#include <tensorvia/types.h>
+#include "interface/tensor.hpp"
+#include "interface/types.hpp"
 
 namespace {
 

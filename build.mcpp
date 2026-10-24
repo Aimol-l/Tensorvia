@@ -1,0 +1,283 @@
+// Build-time work for the optional backends.
+//
+// Two lanes share one root module:
+//
+//   module lane (CPU / Vulkan)  — src/interface/**/*.ixx compile as C++23
+//                                 module units; no header tree, no nvcc.
+//   CUDA lane (any cuda accel)  — nvcc has no module support, so the artifact
+//                                 must not mix module and header translation
+//                                 units. Everything except the root module and
+//                                 the facade is generated as an ordinary .cpp
+//                                 tree, and the .cu units are compiled against
+//                                 the same generated headers.
+//
+// This program therefore owns source selection: mcpp.toml only names the root.
+import std;
+import mcpp;
+import mcpp.rules.cuda;
+import mcpp.rules.sycl;
+
+namespace {
+
+std::string join(const std::string& base, const std::string& rel) {
+    return base + "/" + rel;
+}
+
+// Every regular file under `dir` whose extension matches.
+std::vector<std::string> files_with_extension(const std::string& dir,
+                                              const std::string& extension) {
+    std::vector<std::string> out;
+    std::error_code ec;
+    if (!std::filesystem::is_directory(dir, ec)) return out;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(dir, ec)) {
+        if (!entry.is_regular_file()) continue;
+        if (entry.path().extension() == extension) out.push_back(entry.path().string());
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+// Emit the library's source set: the wrapper module comes from [lib] path;
+// every host translation unit is named here so a removed file fails loudly
+// instead of silently dropping a definition. Headers are the sources of
+// truth — only the wrapper module and the .cpp units compile. Vulkan gates
+// on its feature (no accel of its own); the SYCL and CUDA host drivers gate
+// on their lane (feature AND accelerator), so `mcpp pack --features sycl`
+// without --accel still yields the CPU-only artifact.
+bool add_library_sources(const std::string& root, bool want_vulkan,
+                         bool sycl_lane, bool cuda_lane) {
+    for (const auto& path : files_with_extension(join(root, "src/core"), ".cpp"))
+        mcpp::source(path.c_str());
+    mcpp::source(join(root, "src/init.cpp").c_str());
+    for (const auto& path : files_with_extension(join(root, "src/backend/cpu"), ".cpp"))
+        mcpp::source(path.c_str());
+
+    if (want_vulkan) {
+        mcpp::source(join(root, "src/init_vulkan.cpp").c_str());
+        for (const auto& path : files_with_extension(join(root, "src/backend/vulkan"), ".cpp"))
+            mcpp::source(path.c_str());
+    }
+
+    if (sycl_lane) {
+        mcpp::source(join(root, "src/init_sycl.cpp").c_str());
+        for (const auto& path : files_with_extension(join(root, "src/backend/sycl/host"), ".cpp"))
+            mcpp::source(path.c_str());
+        // sycl_island.h sits beside host/ and device/; both include it by name.
+        mcpp::include_dir(join(root, "src/backend/sycl").c_str());
+    }
+
+    if (cuda_lane) {
+        // Host driver; the .cu device units come from [build] sources'
+        // accel-constrained glob, compiled by rules-cuda below.
+        mcpp::source(join(root, "src/init_cuda.cpp").c_str());
+    }
+    return true;
+}
+
+// The shader compiler of the Vulkan lane: the payload this package declares
+// under [feature-xlings.vulkan] when it is installed, or PATH in a dev tree
+// that has neither. A published package may not assume the consumer's machine
+// carries glslangValidator.
+std::string glslang_program() {
+    const char* dir = mcpp::xpkg_dir("glslang");
+    if (*dir) {
+        const std::string p = std::string(dir) + "/bin/glslangValidator";
+        std::error_code ec;
+        if (std::filesystem::exists(p, ec)) return p;
+    }
+    return "glslangValidator";
+}
+
+// The CUDA line a build names, as (major, minor); nullopt when the accel
+// names no version at all (`cuda+{sm_89}`). The accel is a comma-separated
+// set, so the chunk carrying `cuda` is the one to read — the SYCL lane may
+// legitimately name an NVIDIA AOT target beside it.
+std::optional<std::pair<int, int>> cuda_line(std::string_view accel) {
+    for (std::size_t pos = accel.find("cuda"); pos != std::string_view::npos;
+         pos = accel.find("cuda", pos + 4)) {
+        std::size_t i = pos + 4;
+        std::pair<int, int> ver{};
+        bool any = false;
+        while (i < accel.size() &&
+               std::isdigit(static_cast<unsigned char>(accel[i]))) {
+            ver.first = ver.first * 10 + (accel[i++] - '0');
+            any = true;
+        }
+        if (!any) continue;                       // `cuda+{...}`: no line
+        if (i < accel.size() && accel[i] == '.') {
+            ++i;
+            while (i < accel.size() &&
+                   std::isdigit(static_cast<unsigned char>(accel[i]))) {
+                ver.second = ver.second * 10 + (accel[i++] - '0');
+            }
+        }
+        return ver;
+    }
+    return std::nullopt;
+}
+
+bool run(const std::string& command, const char* what) {
+    const int rc = std::system(command.c_str());
+    if (rc != 0) {
+        std::cerr << "mcpp build: " << what << " failed (exit " << rc << ")\n";
+        return false;
+    }
+    return true;
+}
+
+}  // namespace
+
+int main() {
+    const std::string root = mcpp::manifest_dir();
+    const std::string out  = mcpp::out_dir();
+
+    const std::string_view accel = mcpp::accel();
+    const bool cuda_in_accel = accel.find("cuda") != std::string_view::npos;
+    const bool sycl_in_accel = accel.find("sycl") != std::string_view::npos;
+    const bool want_cuda   = mcpp::has_feature("cuda");
+    const bool want_vulkan = mcpp::has_feature("vulkan");
+    const bool want_sycl   = mcpp::has_feature("sycl");
+
+    // A backend is only "active" when the accelerator names it; `--features
+    // sycl` alone keeps building the CPU artifact (same rule as CUDA's
+    // `--no-accel` path).
+    const bool cuda_lane = cuda_in_accel && want_cuda;
+    const bool sycl_lane = sycl_in_accel && want_sycl;
+
+    // `--accel` without the matching `--features` would compile device objects
+    // that no host code links against. Say so instead of producing a half build.
+    // A cuda chunk naming an AOT target for a SYCL build is legitimate, though:
+    // `--accel "sycl, cuda12.9+{sm_89}"` asks DPC++ for the NVIDIA target.
+    if (cuda_in_accel && !want_cuda && !sycl_in_accel) {
+        std::cerr << "mcpp build: --accel names cuda but the `cuda` feature is off; "
+                     "use --features cuda\n";
+        return 1;
+    }
+    if (sycl_in_accel && !want_sycl) {
+        std::cerr << "mcpp build: --accel names sycl but the `sycl` feature is off; "
+                     "use --features sycl\n";
+        return 1;
+    }
+    // The mirror mistake, and the one a consumer makes: the feature is on but
+    // the build names no accelerator, so the device units are narrowed out and
+    // the artifact would silently be CPU-only. That is the documented behavior
+    // of `mcpp pack --features sycl` in THIS repo (pack has no --accel), so the
+    // root's program keeps taking it. A dependency's program cannot tell that
+    // case from an oversight — `graph_file()` is empty for a dependency's
+    // program — so there it is refused, naming the flag to add.
+    if (mcpp::graph_file()[0] == '\0') {
+        if (want_cuda && !cuda_in_accel) {
+            std::cerr << "tensorvia: the `cuda` feature is on but this build names no "
+                         "cuda accelerator; build the consumer with --accel "
+                         "\"cuda13.3+{sm_89}\" (architectures are yours to choose), "
+                         "or drop the feature\n";
+            return 1;
+        }
+        if (want_sycl && !sycl_in_accel) {
+            std::cerr << "tensorvia: the `sycl` feature is on but this build names no "
+                         "sycl accelerator; build the consumer with --accel sycl, "
+                         "or drop the feature\n";
+            return 1;
+        }
+    }
+    // rules-cuda takes its host-compiler compatibility path from the line the
+    // accel names, and the toolkit this package pins is the 13.3 line: an
+    // older line (or none) reaches nvcc's C23 collision with a current glibc
+    // as an error that names neither the flag nor the fix. The floor below
+    // must move together with the pin in
+    // [target.'cfg(accelerator = "cuda")'.xlings.workspace]. The SYCL lane's
+    // NVIDIA AOT target is exempt — it compiles through rules-sycl, which
+    // reads the same chunk differently.
+    if (cuda_lane) {
+        const auto line = cuda_line(accel);
+        if (!line || *line < std::pair<int, int>{13, 3}) {
+            std::cerr << "tensorvia: the CUDA lane needs --accel to name cuda 13.3 or "
+                         "newer — the toolkit line this package pins; write e.g. "
+                         "--accel \"cuda13.3+{sm_89}\" (architectures are yours to "
+                         "choose)\n";
+            return 1;
+        }
+    }
+    // nvcc has no modules and SYCL's host drivers are module implementation
+    // units; mcpp's two lanes cannot be mixed in one artifact. CMake can.
+    if (cuda_lane && sycl_lane) {
+        std::cerr << "mcpp build: one artifact cannot use both the CUDA and SYCL lanes; "
+                     "build them separately (CMake supports the combination)\n";
+        return 1;
+    }
+    if (want_cuda && want_sycl && cuda_lane) {
+        std::cerr << "mcpp build: --accel names cuda while both `cuda` and `sycl` are on; "
+                     "pick one device lane\n";
+        return 1;
+    }
+
+    // One lane: the headers are the sources of truth, so the CUDA artifact
+    // compiles the very same .cpp units against the very same headers the
+    // module wrapper includes — there is no second form of the library.
+    add_library_sources(root, want_vulkan, sycl_lane, cuda_lane);
+
+    // SYCL device units. The rule sees only the accel-constrained globs and
+    // returns immediately when this build names no sycl accelerator, so the
+    // call is harmless; gating on the lane keeps a CPU build out of the plugin.
+    if (sycl_lane) {
+        mcpp::rerun_if_changed_glob("src/backend/sycl/**/*.sycl");
+        mcpp::rerun_if_changed_glob("src/backend/sycl/**/*.h");
+
+        mcpp::rules::sycl::options opt;
+        // The seam header lives beside host/ and device/; both include it by
+        // name. Nothing here is part of the installed surface.
+        opt.includes = {root + "/src/backend/sycl"};
+        opt.flags    = {"-DBACKEND_SYCL"};
+        if (!mcpp::rules::sycl::compile(opt)) return 1;
+    }
+
+    // Vulkan: compile the GLSL compute shaders and generate the SPIR-V registry
+    // (spirv/spv_registry.{h,cpp}). Only when the feature is active, so a
+    // CPU-only build never needs glslang or Vulkan headers.
+    if (want_vulkan) {
+        const std::string script     = root + "/tools/gen_spv.py";
+        const std::string shader_dir = root + "/shader";
+        const std::string gen_dir    = out + "/gen";
+        std::filesystem::create_directories(gen_dir);
+
+        mcpp::include_dir(gen_dir.c_str());
+        mcpp::link_lib("vulkan");
+
+        mcpp::rerun_if_changed(script.c_str());
+        mcpp::rerun_if_changed_glob("shader/**/*.comp");
+
+        mcpp::action a;
+        a.id   = "spirv-registry";
+        a.role = mcpp::roles::source;
+        a.arg("python3")
+            .arg(script.c_str())
+            .arg("--out")
+            .arg(gen_dir.c_str())
+            .arg("--shader-root")
+            .arg(shader_dir.c_str())
+            .arg("--glslang")
+            .arg(glslang_program().c_str())
+            .input(script.c_str())
+            .output((gen_dir + "/spirv/spv_registry.cpp").c_str())
+            .output((gen_dir + "/spirv/spv_registry.h").c_str());
+
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(shader_dir)) {
+            if (entry.is_regular_file() && entry.path().extension() == ".comp") {
+                const std::string path = entry.path().string();
+                a.input(path.c_str());
+            }
+        }
+        a.submit();
+    }
+
+    // CUDA device units. They include the headers and the typed launch
+    // contract, so the host driver and the kernel share one translation
+    // unit; nvcc only needs C++20 and the include roots.
+    if (want_cuda) {
+        mcpp::rules::cuda::options opt;
+        opt.includes = {root + "/src", root + "/src/backend/cuda", root + "/include"};
+        opt.flags    = {"-std=c++20", "-DBACKEND_CUDA"};
+        if (!mcpp::rules::cuda::compile(opt)) return 1;
+    }
+    return 0;
+}

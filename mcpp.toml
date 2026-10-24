@@ -1,0 +1,114 @@
+[package]
+name        = "tensorvia"
+version     = "0.3.0"
+description = "Tensorvia: C++23 module tensor library with CPU, Vulkan, CUDA and SYCL backends"
+license     = "MIT"
+standard    = "c++23"
+authors     = ["Aimol-l"]
+platforms   = ["linux"]
+repo        = "https://github.com/Aimol-l/Tensorvia"
+
+#==================================编译器选择==================================
+[toolchain] # 选择不同平台的编译器
+default = "llvm@22.1.8"
+linux   = "llvm@22.1.8"
+macosx  = "llvm@22.1.8"
+windows = "msvc@system"
+
+#windows = "llvm@23.1.3"
+#windows = "msvc@14.44.35207"   #或 mcpp 托管的 toolset 包（CI 推荐，每台机器同一版本）
+#============================================================================
+[lib]
+path = "src/interface/tensorvia.ixx"  # 导出的接口文件
+
+[modules]
+exports = ["tensorvia"]     # 消费者能 import 的模块名清单
+#============================================================================
+
+#  mcpp build --features xxx 进行启用
+[features]
+default = ["cpu"]
+cpu     = { defines = ["BACKEND_CPU"] }
+cuda    = { defines = ["BACKEND_CUDA"] }
+sycl    = { defines = ["BACKEND_SYCL"] }
+vulkan  = { defines = ["BACKEND_VULKAN"] }
+
+[build]
+sources = [
+    "src/interface/tensorvia.ixx",
+    { glob = "src/backend/cuda/device/**/*.cu", accel = "cuda" },
+    { glob = "src/backend/sycl/device/**/*.sycl", accel = "sycl" },
+]
+
+include_dirs    = ["include", "src"]
+default-profile = "release"
+module_extensions = [".ixx"]
+build_program_timeout = 1800
+defines = ['TENSORVIA_VERSION="0.3.0"']
+
+[profile.release]
+opt = 3
+cxxflags = ["-DNDEBUG"]   # 否则 vulkan.hpp 等第三方头的 assert 会启用到 release 构建
+
+#==================================依赖添加==================================
+# mcpp build --features xxx 进行启用
+# 只在 xxx 激活时生效，但它自身就声明了 feature xxx——不需要再去 [features] 里登记。
+#[feature-deps.xxx]
+#compat.gtest = "1.17.0"
+
+# 所有构建命令 + 下游消费者。libtensorvia.so里面就依赖他
+#[dependencies]
+#compat.spdlog = "1.17.0"
+
+# mcpp test 的时候才会启用，libtensorvia.so里面不会有这个依赖。
+[dev-dependencies]
+compat.gtest = "1.17.0"
+
+[build-dependencies]
+mcpp.plugins = { version = "0.19.1", features = ["rules-cuda", "rules-sycl"], host-module = true }
+
+#=================================编译产物和名称================================
+[targets.tensorvia]
+kind   = "shared"
+soname = "libtensorvia.so.1"
+
+# main = "src/main.cpp" # 程序的入口文件
+# linkage = "shared"    # 库的默认链接形态。只对库有效，且不能和 kind = "shared" 同时写（mcpp 会指出矛盾）
+# exports = [xx,xx]     # 符号模式列表，或指向一个文件
+# cflags / cxxflags     # 只作用于这一个 target 的编译选项
+# defines               # 只作用于这一个 target 的宏
+# required_features     # 这些 feature 不激活，这个 target 就不参与构建
+# windows_auto_export   # Windows DLL 自动导出符号
+# windows_entry         # 入口点符号名（如 "mainCRTStartup"）
+# windows_subsystem = "console" / "windows"
+# windows_code_page     # 代码页 ID，如 "65001"（UTF-8）
+# windows_long_paths    # 是否支持长路径
+#========================================================================
+
+# 运行时适配器：把驱动/运行时库放到产物的运行搜索路径上（私有 loader 不查 /usr/lib）
+[target.'cfg(accelerator = "cuda")'.dependencies]
+compat.cuda-driver = "2026.09.10"
+
+[target.'cfg(accelerator = "sycl")'.dependencies]
+compat.sycl-runtime = "2026.09.11"
+
+# Vulkan lane 的 SDK：头文件只进本包的 TU（private，不到使用方的 -I）；
+# 运行时适配器把 loader 放到产物的运行搜索路径上（私有 loader 不查 /usr/lib）。
+# 两者都由 feature 门控——不点名 vulkan 的使用方两者都不获取。
+# （Vulkan 没有 accel 轴：shader 走 build.mcpp 的 glslang action，不需要 --accel）
+[feature-deps.vulkan]
+"compat.vulkan-headers" = { version = "1.4.357.0", visibility = "private" }
+compat.vulkan-runtime  = "2026.09.11"
+
+[target.'cfg(accelerator = "cuda")'.build]
+ldflags = ["-lcudart_static", "-lrt", "-lpthread", "-ldl"]
+
+# OpenMP 的 flag 语法随编译器而变（clang 要指定 runtime，gcc 不认这个写法），
+# 按 compiler 层条件化——库不绑定单一工具链的 flag 语法。
+[target.'cfg(compiler = "llvm")'.build]
+ldflags  = ["-fopenmp=libgomp"]
+cxxflags = ["-march=x86-64-v3", "-fopenmp=libgomp", "-fno-math-errno"]
+
+[target.'cfg(compiler = "gcc")'.build]
+ldflags  = ["-fopenmp"]
+cxxflags = ["-march=x86-64-v3", "-fopenmp", "-fno-math-errno"]

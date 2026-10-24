@@ -40,7 +40,6 @@
 #endif
 
 
-{
 using float32 = float;
 using float64 = double;
 #if TENSORVIA_HAS_STDFLOAT
@@ -419,7 +418,6 @@ inline size_t calc_numel(std::initializer_list<int64_t> shape) {
     }
     return numel;
 }
-}  // export
 
 #if !defined(RESTRICT)
     #if defined(_MSC_VER)
