@@ -14,18 +14,12 @@
 #include <variant>
 #include <vector>
 
-// Pick native std::float16_t / std::bfloat16_t when the toolchain ships <stdfloat>
-// AND we're not on MSVC (which historically lacks software-emulated std::float16_t).
-// Otherwise fall back to the bundled software-emulated ops::float16_t / ops::bfloat16_t.
-// `<stdfloat>` only declares std::float16_t/std::bfloat16_t when the compiler
-// predefines the corresponding feature macros (GCC does, clang does not), so
-// checking __has_include alone is not enough.
-//
-// TENSORVIA_FORCE_SOFTWARE_FLOAT16 pins the software types across the whole
-// CUDA artifact: nvcc's C++20 front end has no std::float16_t, while the host
-// TUs of the same artifact may compile as C++23. The macro is declared for the
-// CUDA lane in mcpp.toml and passed to the device units by build.mcpp.
-#if defined(TENSORVIA_FORCE_SOFTWARE_FLOAT16) && TENSORVIA_FORCE_SOFTWARE_FLOAT16
+// CUDA lane 钉软件类型：nvcc 的 C++20 前端没有 std::float16_t，而 host TU
+// 可能是 C++23 且有。`float16`/`bfloat16` 在 BACKEND_CUDA 构建里（host 与
+// 设备单元共享本头）统一为 ops::float16_t/ops::bfloat16_t，保一个 ABI。
+// `<stdfloat>` 只在编译器预定义特性宏时声明类型（GCC 会，clang 不会），
+// 所以光靠 __has_include 判断不够。
+#if defined(BACKEND_CUDA)
     #include "float16.hpp"
     #include "bfloat16.hpp"
     #define TENSORVIA_HAS_STDFLOAT 0

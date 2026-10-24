@@ -101,9 +101,6 @@ compat.sycl-runtime = "2026.09.11"
 compat.vulkan-runtime  = "2026.09.11"
 
 [target.'cfg(accelerator = "cuda")'.build]
-# nvcc 的 C++20 前端没有 std::float16_t，而 host TU 可能是 C++23 且有：
-# 钉住软件类型，保整个 artifact 一套 ABI（types.hpp 的同款逻辑读这个宏）。
-defines = ["TENSORVIA_FORCE_SOFTWARE_FLOAT16=1"]
 ldflags = ["-lcudart_static", "-lrt", "-lpthread", "-ldl"]
 
 # OpenMP 的 flag 语法随编译器而变（clang 要指定 runtime，gcc 不认这个写法），
