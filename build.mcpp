@@ -211,6 +211,14 @@ int main() {
         return 1;
     }
 
+    // The wrapper's export block is generated from the hand-kept list; a
+    // drifted list fails the build here, not in a consumer's.
+    mcpp::rerun_if_changed(join(root, "tools/facade_exports.def").c_str());
+    if (!run("python3 \"" + join(root, "tools/gen_facade.py") + "\" --check",
+             "facade export check")) {
+        return 1;
+    }
+
     // One lane: the headers are the sources of truth, so the CUDA artifact
     // compiles the very same .cpp units against the very same headers the
     // module wrapper includes — there is no second form of the library.
