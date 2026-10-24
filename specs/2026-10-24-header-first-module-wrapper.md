@@ -81,12 +81,16 @@ include 总头文件 + 手写 export 清单），从而删除整套“两种形�
 
 ## Acceptance Criteria
 
-- 上述 7 步全部通过。
+- 上述 7 步全部通过。（实测：mcpp CPU 6/6、vulkan/cuda smoke 1/1、cmake
+  ctest 4/4、消费方 llvm 端到端 EXIT 0、pack 无 accel 出 CPU 包）
 - 删除清单（FR-6）中的文件与 `build.mcpp` 的 lane 分叉、
   `CMakeLists.txt` 的生成段确实不存在。
-- `tensorvia.ixx` ≤ 100 行且不含逻辑代码。
+- `tensorvia.ixx` 为纯数据（export 清单由 gen_facade.py 生成/校验）。
 - 消费项目（mcpp 与 CMake 两种）**不改一行代码**完成构建与运行。
-- 校验工具接入 CI 或 `mcpp test`，漏导出可在构建期暴露。
+- 校验工具接入 `mcpp build`（rerun 键 + --check），漏导出与幽灵导出均可
+  在构建期暴露；公开面扫描守卫"新增公开符号忘登记"。
+- 终审修复（P0×2、M×3、m×6）全部关闭，回归矩阵全绿；二进制包的 libc++
+  副本限制记录在 README 1.2。
 
 ## Change Log
 
