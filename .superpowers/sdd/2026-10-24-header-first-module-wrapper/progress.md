@@ -54,3 +54,5 @@ Final: fixed M-3 (float16 ABI 钉定丢失) — TENSORVIA_FORCE_SOFTWARE_FLOAT16
 Final: Ruling: P0-2 的 .so 运行时 libc++ 副本问题降级为二进制分发已知限制 — pack 的 .so 静态自含 libc++（mcpp portable 默认）与使用方二进制的 libc++ 副本不一致时 catch 跨 .so 异常 bad_cast 逃逸；cxx_runtime=toolchain-coupled 实验回滚（链到系统 libc++ 且引入 libunwind not found 失败模式）；源码分发渠道（registry tag 包/git/path，使用方与库同工具链）无此问题 — README 1.2 已注明限制与适用场景 — 代价：二进制包用户需避开跨 .so catch
 Final: fixed m-1..m-6 — CMake PUBLIC -fno-math-errno 删除；注释组更新（build.mcpp 头部/sycl_context/tensorvia.hpp/facade_exports.def）；README 开头总述+CUDA 版本表述+删不存在选项+pack 限制；core.hpp 孤儿删除；bench.cpp 排除 BUILD_TEST 且 BUILD_BENCH glob 修正为 tests/bench.cpp；package.py 注释限定 — suite 全绿
 Final 回归: mcpp CPU 6/6; vulkan smoke 1/1; cuda smoke 1/1; facade_api 1/1; gen_facade --check 绿(含扫描器); cmake ctest 4/4 + bench 产出; pack 解压消费可编译
+
+Final: Ruling（用户裁决）: TENSORVIA_FORCE_SOFTWARE_FLOAT16 专用宏根除 —— BACKEND_CUDA 在 CUDA lane 必然定义（[features] cuda 的 defines + build.mcpp 的 nvcc flags），types.hpp 改 `#if defined(BACKEND_CUDA)` 钉软件 float16 即可，专用宏是过度设计（YAGNI）— 代价：无，cuda_smoke（含 float16 用例）1/1 验证
