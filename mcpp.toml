@@ -105,10 +105,12 @@ ldflags = ["-lcudart_static", "-lrt", "-lpthread", "-ldl"]
 
 # OpenMP 的 flag 语法随编译器而变（clang 要指定 runtime，gcc 不认这个写法），
 # 按 compiler 层条件化——库不绑定单一工具链的 flag 语法。
+# 不写 -fno-math-errno：它是私有微优化，但会进入 clang 的 BMI 兼容性检查，
+# 逼每个 import 使用方模仿它——分发兼容性优先。
 [target.'cfg(compiler = "llvm")'.build]
 ldflags  = ["-fopenmp=libgomp"]
-cxxflags = ["-march=x86-64-v3", "-fopenmp=libgomp", "-fno-math-errno"]
+cxxflags = ["-march=x86-64-v3", "-fopenmp=libgomp"]
 
 [target.'cfg(compiler = "gcc")'.build]
 ldflags  = ["-fopenmp"]
-cxxflags = ["-march=x86-64-v3", "-fopenmp", "-fno-math-errno"]
+cxxflags = ["-march=x86-64-v3", "-fopenmp"]
