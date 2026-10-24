@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-import tensorvia;
+#include "interface/tensorvia.hpp"
 
 namespace {
 
