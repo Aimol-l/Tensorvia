@@ -65,3 +65,5 @@ Final: Ruling: --features 的值是 feature 名（vulkan 而非 vulkan1.4——�
 Final: 用户提问的实证答案 —— SYCL lane 的异常类型限制根源是 llvm payload(libc++) 与 libsycl(libstdc++) 两套 C++ 运行时；解法是 SYCL lane 用 gcc 工具链（mcpp test --toolchain gcc@16.1.0 --features sycl --accel sycl 实测 4/4 全过，零 flag 冲突——compiler 层条件化修复见效）—— README 已知限制注记已升级为具体命令
 
 Final: Ruling: [toolchain] default = { configure = "build.mcpp" } 按 lane 自动切工具链实测不可行（已回滚）—— toolchain phase 的 build.mcpp 未运行：verbose 显示 plugins 库在 build.mcpp ran 之后才 Fresh 编译（toolchain phase 在依赖图解析前，import mcpp.plugins.toolchain 的库尚不可用），mcpp 静默回退；无条件 tc::use(gcc) 亦不生效。机制文档（20 章 2026.10.1.3+）与 engine 2026.10.17.1 行为存在差异，值得向 mcpp 上游报 issue — 回滚后 SYCL lane 用显式 --toolchain gcc@16.1.0（README 已有），CPU 4/4、SYCL 4/4 — 代价：无（净回滚）
+
+Final: Ruling（用户裁决，二次修正）: tests/ 改回头文件范式 —— CMake 路径应有全量测试覆盖（此前只建 header_smoke 一个冒烟是失衡的）；test.cpp/bench.cpp 改 #include "tensorvia.hpp"，header_smoke.cpp 删除（被全量 test.cpp 取代），facade_api.cpp 保持 import（导出面守卫在 include 形态下失效，仅 mcpp test 构建，CMake 排除）；CMakeLists 恢复 glob+排除模式 — 实测 mcpp test 3/3、CMake ctest 1/1（23 用例全量）— 代价：mcpp 路径的行为测试测的是头文件形态而非 import 形态（export 面由 facade_api 的符号守卫覆盖，行为等价性由共享同一份 types.hpp 保证）

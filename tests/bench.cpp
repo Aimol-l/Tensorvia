@@ -7,7 +7,7 @@
 #include <string_view>
 #include <vector>
 
-import tensorvia;
+#include "tensorvia.hpp"
 
 namespace {
 

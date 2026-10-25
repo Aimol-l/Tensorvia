@@ -271,11 +271,17 @@ if(BUILD_TEST)
     # Tests are GoogleTest suites; gtest_main supplies main().
     find_package(GTest REQUIRED)
 
-    # 只有 header_smoke.cpp 走头文件形态（#include <tensorvia.hpp>）：CMake
-    # 路径没有模块支持，tests/ 下其余文件是 import 形态（import tensorvia;），
-    # 服务 mcpp 路径的行为测试（mcpp test）。facade_api.cpp 同理，且 bench.cpp
-    # 自带 main()。
-    set(TVV_TEST_SOURCES "${PROJECT_SOURCE_DIR}/tests/header_smoke.cpp")
+    # tests/ 是头文件范式（#include "tensorvia.hpp"）：mcpp 与 CMake 两条
+    # 路径编译同一份文件。两个例外不在这里构建：
+    #   facade_api.cpp —— import 形态，专守模块导出面（mcpp test 的专属检查）
+    #   bench.cpp      —— 自带 main()，是基准不是测试（mcpp test 跑它）
+    file(GLOB TVV_TEST_INPUTS CONFIGURE_DEPENDS
+        "${PROJECT_SOURCE_DIR}/tests/*.cpp"
+    )
+    list(REMOVE_ITEM TVV_TEST_INPUTS
+        "${PROJECT_SOURCE_DIR}/tests/facade_api.cpp"
+        "${PROJECT_SOURCE_DIR}/tests/bench.cpp")
+    set(TVV_TEST_SOURCES ${TVV_TEST_INPUTS})
     foreach(test_file ${TVV_TEST_SOURCES})
         get_filename_component(test_name ${test_file} NAME_WE)
         # CTest reserves the target name "test" for the aggregate command.
