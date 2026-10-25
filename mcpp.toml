@@ -9,6 +9,11 @@ platforms   = ["linux"]
 repo        = "https://github.com/Aimol-l/Tensorvia"
 
 #==================================编译器选择==================================
+# 注意：SYCL lane 需要 gcc 工具链（libstdc++ 与 libsycl 同一个 C++ 世界；
+# llvm 的 libc++ 会让 std::exception 的类型在 .so 边界分裂）。构建时显式：
+#   mcpp build/test --features sycl --accel sycl --toolchain gcc@16.1.0
+# （[toolchain] default = { configure = "build.mcpp" } 的按 lane 自动切换实测
+# 不触发 toolchain phase——plugins 库在依赖解析后才编译，见 ledger。）
 [toolchain] # 选择不同平台的编译器
 default = "llvm@22.1.8"
 linux   = "llvm@22.1.8"
@@ -93,8 +98,8 @@ compat.cuda-driver = "2026.09.10"
 compat.sycl-runtime = "2026.09.11"
 
 [feature-deps.vulkan]
-"compat.vulkan-headers" = { version = "1.4.357.0", visibility = "private" }
 compat.vulkan-runtime  = "2026.09.11"
+"compat.vulkan-headers" = { version = "1.4.357.0", visibility = "private" }
 
 [target.'cfg(accelerator = "cuda")'.build]
 ldflags = ["-lcudart_static", "-lrt", "-lpthread", "-ldl"]

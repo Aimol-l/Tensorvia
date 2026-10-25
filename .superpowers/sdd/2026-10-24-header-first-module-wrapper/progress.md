@@ -63,3 +63,5 @@ Final: 测试命令补齐（用户指令）— README 测试节列出四 lane �
 Final: Ruling: --features 的值是 feature 名（vulkan 而非 vulkan1.4——后者是 accel 串，触发未声明 feature）；--features sycl 必须配 --accel sycl（设备编译开关是根级 accel）— 用户初版命令的两处错误按实证修正
 
 Final: 用户提问的实证答案 —— SYCL lane 的异常类型限制根源是 llvm payload(libc++) 与 libsycl(libstdc++) 两套 C++ 运行时；解法是 SYCL lane 用 gcc 工具链（mcpp test --toolchain gcc@16.1.0 --features sycl --accel sycl 实测 4/4 全过，零 flag 冲突——compiler 层条件化修复见效）—— README 已知限制注记已升级为具体命令
+
+Final: Ruling: [toolchain] default = { configure = "build.mcpp" } 按 lane 自动切工具链实测不可行（已回滚）—— toolchain phase 的 build.mcpp 未运行：verbose 显示 plugins 库在 build.mcpp ran 之后才 Fresh 编译（toolchain phase 在依赖图解析前，import mcpp.plugins.toolchain 的库尚不可用），mcpp 静默回退；无条件 tc::use(gcc) 亦不生效。机制文档（20 章 2026.10.1.3+）与 engine 2026.10.17.1 行为存在差异，值得向 mcpp 上游报 issue — 回滚后 SYCL lane 用显式 --toolchain gcc@16.1.0（README 已有），CPU 4/4、SYCL 4/4 — 代价：无（净回滚）
