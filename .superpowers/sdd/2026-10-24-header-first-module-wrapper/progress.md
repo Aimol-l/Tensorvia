@@ -58,3 +58,6 @@ Final 回归: mcpp CPU 6/6; vulkan smoke 1/1; cuda smoke 1/1; facade_api 1/1; ge
 Final: Ruling（用户裁决）: TENSORVIA_FORCE_SOFTWARE_FLOAT16 专用宏根除 —— BACKEND_CUDA 在 CUDA lane 必然定义（[features] cuda 的 defines + build.mcpp 的 nvcc flags），types.hpp 改 `#if defined(BACKEND_CUDA)` 钉软件 float16 即可，专用宏是过度设计（YAGNI）— 代价：无，cuda_smoke（含 float16 用例）1/1 验证
 
 Final: Ruling（用户裁决，强烈）: 测试不针对特定后端 —— backends/<x>/smoke.cpp（97 个 Device::X 用例）整套删除，[test] discover 恢复默认（tests/**/*.cpp）；tests/ 只留后端无关资产：test.cpp（23 用例零 Device::）/header_smoke.cpp（CMake 头文件冒烟）/facade_api.cpp（导出面）/bench.cpp；设备后端的验证 = 构建 lane 门（1.3 的 --features+--accel 命令）+ 消费方冒烟 — 代价：后端算子实现无自动行为回归守卫（用户接受，后端正确性由构建验证+使用方覆盖）
+
+Final: 测试命令补齐（用户指令）— README 测试节列出四 lane 的 mcpp test 命令；实测：CPU 4/4、vulkan 4/4、cuda 4/4、sycl 3/4（View.InPlaceRejectsNonContiguous，libc++/libstdc++ 异常类型分裂——删掉的 sycl_smoke 同根问题的公共测试蔓延，已注明为 llvm+SYCL lane 已知限制，gcc 实测全过）
+Final: Ruling: --features 的值是 feature 名（vulkan 而非 vulkan1.4——后者是 accel 串，触发未声明 feature）；--features sycl 必须配 --accel sycl（设备编译开关是根级 accel）— 用户初版命令的两处错误按实证修正

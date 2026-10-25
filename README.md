@@ -296,7 +296,10 @@ int main() {
 
 ```sh
 # mcpp：编译并运行 tests/**/*.cpp（dev-dependencies 里的 gtest 只在此时进图）
-mcpp test
+mcpp test                                          # CPU（默认）
+mcpp test --features vulkan                        # + Vulkan lane 的完整构建
+mcpp test --features sycl --accel sycl             # + SYCL lane 的完整构建
+mcpp test --features cuda --accel "cuda13.3+{sm_89}"  # + CUDA lane 的完整构建
 
 # CMake：只构建 tests/header_smoke.cpp（头文件形态冒烟）
 cmake -B build -DBUILD_TEST=ON && cmake --build build && ctest --test-dir build
@@ -304,9 +307,15 @@ cmake -B build -DBUILD_TEST=ON && cmake --build build && ctest --test-dir build
 
 `tests/` 不区分后端：`test.cpp` 是公共 API 的行为测试（CPU 上运行），
 `header_smoke.cpp` 验证 CMake 头文件消费形态，`facade_api.cpp` 守卫模块导
-出面，`bench.cpp` 是基准。测试通过 `[dev-dependencies]` 拿 GoogleTest——
-它只进测试二进制，不进 `libtensorvia.so`。各设备后端的构建验证见
-1.3 节的 `--features` + `--accel` 命令。
+出面，`bench.cpp` 是基准。上面的 lane 命令验证的是**该 lane 完整构建 + 公
+共测试通过**；各设备后端编入后的算子行为由消费方冒烟覆盖。
+
+> **已知限制（llvm 工具链 + SYCL lane）**：`mcpp test --features sycl
+> --accel sycl` 有 1 个已知失败（`View.InPlaceRejectsNonContiguous`）——
+> libsycl 的 libstdc++ 与 llvm 主体的 libc++ 是两套 C++ 运行时，`.so` 内
+> 抛出的 `std::exception` 与测试二进制的 catch 类型不匹配（mcpp 42 章
+> unwinder 问题的类型版）。CPU / Vulkan / CUDA lane 与 CMake 路径全过；
+> GCC 工具链下 SYCL lane 亦全过（同代码实测）。
 
 ## 📄 许可证
 
