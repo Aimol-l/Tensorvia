@@ -314,8 +314,14 @@ cmake -B build -DBUILD_TEST=ON && cmake --build build && ctest --test-dir build
 > --accel sycl` 有 1 个已知失败（`View.InPlaceRejectsNonContiguous`）——
 > libsycl 的 libstdc++ 与 llvm 主体的 libc++ 是两套 C++ 运行时，`.so` 内
 > 抛出的 `std::exception` 与测试二进制的 catch 类型不匹配（mcpp 42 章
-> unwinder 问题的类型版）。CPU / Vulkan / CUDA lane 与 CMake 路径全过；
-> GCC 工具链下 SYCL lane 亦全过（同代码实测）。
+> unwinder 问题的类型版）。**解法：SYCL lane 用 GCC 工具链**
+> （libstdc++ 与 libsycl 同一世界）：
+>
+> ```sh
+> mcpp test --toolchain gcc@16.1.0 --features sycl --accel sycl   # 实测 4/4
+> ```
+>
+> CPU / Vulkan / CUDA lane 与 CMake 路径在 llvm 下全过。
 
 ## 📄 许可证
 

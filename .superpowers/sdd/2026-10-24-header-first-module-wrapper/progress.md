@@ -61,3 +61,5 @@ Final: Ruling（用户裁决，强烈）: 测试不针对特定后端 —— bac
 
 Final: 测试命令补齐（用户指令）— README 测试节列出四 lane 的 mcpp test 命令；实测：CPU 4/4、vulkan 4/4、cuda 4/4、sycl 3/4（View.InPlaceRejectsNonContiguous，libc++/libstdc++ 异常类型分裂——删掉的 sycl_smoke 同根问题的公共测试蔓延，已注明为 llvm+SYCL lane 已知限制，gcc 实测全过）
 Final: Ruling: --features 的值是 feature 名（vulkan 而非 vulkan1.4——后者是 accel 串，触发未声明 feature）；--features sycl 必须配 --accel sycl（设备编译开关是根级 accel）— 用户初版命令的两处错误按实证修正
+
+Final: 用户提问的实证答案 —— SYCL lane 的异常类型限制根源是 llvm payload(libc++) 与 libsycl(libstdc++) 两套 C++ 运行时；解法是 SYCL lane 用 gcc 工具链（mcpp test --toolchain gcc@16.1.0 --features sycl --accel sycl 实测 4/4 全过，零 flag 冲突——compiler 层条件化修复见效）—— README 已知限制注记已升级为具体命令
