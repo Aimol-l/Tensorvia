@@ -56,3 +56,5 @@ Final: fixed m-1..m-6 — CMake PUBLIC -fno-math-errno 删除；注释组更新�
 Final 回归: mcpp CPU 6/6; vulkan smoke 1/1; cuda smoke 1/1; facade_api 1/1; gen_facade --check 绿(含扫描器); cmake ctest 4/4 + bench 产出; pack 解压消费可编译
 
 Final: Ruling（用户裁决）: TENSORVIA_FORCE_SOFTWARE_FLOAT16 专用宏根除 —— BACKEND_CUDA 在 CUDA lane 必然定义（[features] cuda 的 defines + build.mcpp 的 nvcc flags），types.hpp 改 `#if defined(BACKEND_CUDA)` 钉软件 float16 即可，专用宏是过度设计（YAGNI）— 代价：无，cuda_smoke（含 float16 用例）1/1 验证
+
+Final: Ruling（用户裁决，强烈）: 测试不针对特定后端 —— backends/<x>/smoke.cpp（97 个 Device::X 用例）整套删除，[test] discover 恢复默认（tests/**/*.cpp）；tests/ 只留后端无关资产：test.cpp（23 用例零 Device::）/header_smoke.cpp（CMake 头文件冒烟）/facade_api.cpp（导出面）/bench.cpp；设备后端的验证 = 构建 lane 门（1.3 的 --features+--accel 命令）+ 消费方冒烟 — 代价：后端算子实现无自动行为回归守卫（用户接受，后端正确性由构建验证+使用方覆盖）
