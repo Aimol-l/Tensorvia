@@ -8,7 +8,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
-#include "interface/tensorvia.hpp"
+import tensorvia;
 
 int main() {
     // 1. 创建张量

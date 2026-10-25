@@ -8,7 +8,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
-#include "interface/tensorvia.hpp"
+import tensorvia;
 
 int main() {
     // 热循环里复用同一个 Tensor 容器，shape+dtype 不变时零分配

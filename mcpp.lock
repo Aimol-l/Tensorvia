@@ -5,12 +5,6 @@
 # file must not change depending on which command ran last.
 version = 2
 
-[package."compat.cuda-driver"]
-namespace = "compat"
-version = "2026.09.10"
-source  = "index+compat@2026.09.10"
-hash    = "fnv1a:48db60465a688d63"
-
 [package."mcpp.plugins"]
 namespace = "mcpp"
 version = "0.19.1"

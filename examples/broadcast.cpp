@@ -8,7 +8,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
-#include "interface/tensorvia.hpp"
+import tensorvia;
 
 int main() {
     // 1. 广播：(3,1) + (4,) -> (3,4)，out[i][j] = col[i] + row[j]
