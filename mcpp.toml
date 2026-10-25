@@ -64,11 +64,6 @@ cxxflags = ["-DNDEBUG"]   # 否则 vulkan.hpp 等第三方头的 assert 会启�
 [dev-dependencies]
 compat.gtest = "1.17.0"
 
-# 测试发现：tests/ 是后端无关的公共测试区（不区分后端）；backends/<x>/ 是
-# 各后端自己的冒烟（Device::X 专属，随后端目录走）。
-[test]
-discover = ["tests/**/*.cpp", "backends/**/*.cpp"]
-
 [build-dependencies]
 mcpp.plugins = { version = "0.19.1", features = ["rules-cuda", "rules-sycl"], host-module = true }
 
