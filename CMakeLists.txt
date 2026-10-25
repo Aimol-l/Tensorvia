@@ -38,7 +38,8 @@ endif()
 option(BACKEND_CPU     "Enable the CPU backend"     ON)
 option(BACKEND_VULKAN  "Enable the Vulkan backend"  OFF)
 option(BACKEND_CUDA    "Enable the CUDA backend"    OFF)
-option(BUILD_TEST      "Build the header-path smoke test (tests/header_smoke.cpp)" OFF)
+option(BUILD_TEST      "Build the tests/ suite (bench.cpp excluded; it has its own main)" OFF)
+option(BUILD_BENCH     "Build tests/bench.cpp"          OFF)
 
 if(NOT BACKEND_CPU AND NOT BACKEND_VULKAN AND NOT BACKEND_CUDA AND NOT BACKEND_SYCL)
     message(FATAL_ERROR
@@ -272,15 +273,15 @@ if(BUILD_TEST)
     find_package(GTest REQUIRED)
 
     # tests/ 是头文件范式（#include "tensorvia.hpp"）：mcpp 与 CMake 两条
-    # 路径编译同一份文件。两个例外不在这里构建：
-    #   facade_api.cpp —— import 形态，专守模块导出面（mcpp test 的专属检查）
-    #   bench.cpp      —— 自带 main()，是基准不是测试（mcpp test 跑它）
+    # 路径编译同一份文件。bench.cpp 自带 main()（不是 gtest 套件），由
+    # BUILD_BENCH 单独构建；facade_api.cpp 已删除（导出面由 gen_facade.py
+    # 的 --check 与 tensorvia.ixx 自身编译守卫）。
     file(GLOB TVV_TEST_INPUTS CONFIGURE_DEPENDS
         "${PROJECT_SOURCE_DIR}/tests/*.cpp"
     )
     list(REMOVE_ITEM TVV_TEST_INPUTS
-        "${PROJECT_SOURCE_DIR}/tests/facade_api.cpp"
-        "${PROJECT_SOURCE_DIR}/tests/bench.cpp")
+        "${PROJECT_SOURCE_DIR}/tests/bench.cpp"
+        "${PROJECT_SOURCE_DIR}/tests/facade_api.cpp")
     set(TVV_TEST_SOURCES ${TVV_TEST_INPUTS})
     foreach(test_file ${TVV_TEST_SOURCES})
         get_filename_component(test_name ${test_file} NAME_WE)
@@ -305,6 +306,18 @@ endif()
 # tests/bench.cpp 与 examples/ 是 mcpp 路径的使用示例资产（import 形态），
 # CMake 路径没有模块支持，不构建它们；CMake 侧的行为闭环见 BUILD_TEST 的
 # header_smoke.cpp。
+
+if(BUILD_BENCH)
+    # bench.cpp 是头文件范式的基准二进制：与 BUILD_TEST 的套件同文件范式，
+    # 只是它自带 main()。mcpp test 也会运行它。
+    add_executable(bench "${PROJECT_SOURCE_DIR}/tests/bench.cpp")
+    set_target_properties(bench PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
+    target_link_libraries(bench PRIVATE tensorvia)
+    if(BACKEND_CPU)
+        target_link_libraries(bench PRIVATE OpenMP::OpenMP_CXX)
+    endif()
+endif()
 
 # ---------------------------------------------------------------------------
 # Install / export

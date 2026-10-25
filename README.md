@@ -297,15 +297,16 @@ int main() {
 ```sh
 # mcpp：编译并运行 tests/**/*.cpp（dev-dependencies 里的 gtest 只在此时进图）
 mcpp test                                          # CPU（默认）
-mcpp test --features vulkan                        # + Vulkan lane 的完整构建
-mcpp test --features sycl --accel sycl             # + SYCL lane 的完整构建
-mcpp test --features cuda --accel "cuda13.3+{sm_89}"  # + CUDA lane 的完整构建
+#mcpp test --features vulkan                        # + Vulkan lane 的完整构建
+#mcpp test --features sycl --accel sycl             # + SYCL lane 的完整构建
+#mcpp test --features cuda --accel "cuda13.3+{sm_89}"  # + CUDA lane 的完整构建
 
-# CMake：构建 tests/ 全量（facade_api.cpp 是 import 形态，仅 mcpp 路径构建）
-cmake -B build -DBUILD_TEST=ON && cmake --build build && ctest --test-dir build
+# CMake：tests/ 全量 + bench 二进制（tests/ 全是头文件范式，两条路径同一份文件）
+cmake -B build -DBUILD_TEST=ON -DBUILD_BENCH=ON && cmake --build build && ctest --test-dir build
+cmake -B build -DBACKEND_SYCL=ON -DCMAKE_BUILD_TYPE=Release -DBUILD_TEST=ON && cmake --build build --parallel
 ```
 
-`tests/` 是头文件范式（`#include "tensorvia.hpp"`），mcpp 与 CMake 两条路径编译同一份文件：`test.cpp` 是公共 API 的全量行为测试（不区分后端，CPU 上运行），`bench.cpp` 是基准（自带 main，`mcpp test` 跑它）。例外：`facade_api.cpp` 是 import 形态，专守模块导出面——include 形态下所有符号天然可见、守卫失效，故只服务 `mcpp test`。上面的 lane 命令验证的是**该 lane 完整构建 + 公共测试通过**；各设备后端编入后的算子行为由消费方冒烟覆盖。
+`tests/` 是头文件范式（`#include "tensorvia.hpp"`），mcpp 与 CMake 两条路径编译同一份文件、产出同样的两个二进制：`test`（公共 API 的全量行为测试，不区分后端，CPU 上运行）与 `bench`（基准，自带 main，`mcpp test` 与 `BUILD_BENCH` 都会构建它）。上面的 lane 命令验证的是**该 lane 完整构建 + 公共测试通过**；各设备后端编入后的算子行为由消费方冒烟覆盖。测试通过 `[dev-dependencies]` 拿 GoogleTest——它只进测试二进制，不进 `libtensorvia.so`。模块导出面（`import tensorvia;` 的符号清单）由 `tools/gen_facade.py --check` 在每次 `mcpp build` 时守卫。
 
 > **已知限制（llvm 工具链 + SYCL lane）**：`mcpp test --features sycl
 > --accel sycl` 有 1 个已知失败（`View.InPlaceRejectsNonContiguous`）——
