@@ -295,14 +295,19 @@ int main() {
 ## 🧪 测试
 
 ```sh
-# mcpp：编译并运行 tests/**/*.cpp（dev-dependencies 里的 gtest 只在此时进图）
-mcpp test
+# mcpp：tests/（不区分后端的公共测试）+ backends/<x>/（各后端冒烟）
+mcpp test                              # 全量（后端未编入时自动 Skip）
+mcpp test vulkan --features vulkan     # 指定某个后端冒烟
 
-# CMake
-cmake -B build -DBUILD_TEST=ON && cmake --build build && ctest --test-dir build
+# CMake：只构建 tests/header_smoke.cpp（头文件形态冒烟）
+cmake -B build -DBILD_TEST=ON && cmake --build build && ctest --test-dir build
 ```
 
-测试通过 `[dev-dependencies]` 拿 GoogleTest——它只进测试二进制，不进 `libtensorvia.so`。
+- **tests/** 不区分后端：`test.cpp`（CPU 上的通用 API 行为）、`header_smoke.cpp`
+  （CMake 头文件形态冒烟）、`facade_api.cpp`（模块导出面守卫）、`bench.cpp`（基准）
+- **backends/\<x\>/smoke.cpp**：各后端的专属用例（`Device::X`），随后端目录；
+  `mcpp.toml` 的 `[test] discover` 声明两条发现路径
+- 测试通过 `[dev-dependencies]` 拿 GoogleTest——它只进测试二进制，不进 `libtensorvia.so`
 
 ## 📄 许可证
 

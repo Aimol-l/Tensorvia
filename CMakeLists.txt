@@ -38,9 +38,7 @@ endif()
 option(BACKEND_CPU     "Enable the CPU backend"     ON)
 option(BACKEND_VULKAN  "Enable the Vulkan backend"  OFF)
 option(BACKEND_CUDA    "Enable the CUDA backend"    OFF)
-option(BUILD_TEST      "Build tests/ (one gtest executable per .cpp)" OFF)
-option(BUILD_BENCH     "Build benchmarks/"          OFF)
-option(BUILD_EXAMPLES  "Build examples/"            OFF)
+option(BUILD_TEST      "Build the header-path smoke test (tests/header_smoke.cpp)" OFF)
 
 if(NOT BACKEND_CPU AND NOT BACKEND_VULKAN AND NOT BACKEND_CUDA AND NOT BACKEND_SYCL)
     message(FATAL_ERROR
@@ -273,16 +271,11 @@ if(BUILD_TEST)
     # Tests are GoogleTest suites; gtest_main supplies main().
     find_package(GTest REQUIRED)
 
-    file(GLOB TVV_TEST_INPUTS CONFIGURE_DEPENDS
-        "${PROJECT_SOURCE_DIR}/tests/*.cpp"
-    )
-    # facade_api.cpp compiles only through the module wrapper (`import
-    # tensorvia;`) — it is mcpp test's surface check, not a header-path test.
-    # bench.cpp has its own main() and is a benchmark, not a test.
-    list(REMOVE_ITEM TVV_TEST_INPUTS
-        "${PROJECT_SOURCE_DIR}/tests/facade_api.cpp"
-        "${PROJECT_SOURCE_DIR}/tests/bench.cpp")
-    set(TVV_TEST_SOURCES ${TVV_TEST_INPUTS})
+    # 只有 header_smoke.cpp 走头文件形态（#include <tensorvia.hpp>）：CMake
+    # 路径没有模块支持，tests/ 下其余文件是 import 形态（import tensorvia;），
+    # 服务 mcpp 路径的行为测试（mcpp test）。facade_api.cpp 同理，且 bench.cpp
+    # 自带 main()。
+    set(TVV_TEST_SOURCES "${PROJECT_SOURCE_DIR}/tests/header_smoke.cpp")
     foreach(test_file ${TVV_TEST_SOURCES})
         get_filename_component(test_name ${test_file} NAME_WE)
         # CTest reserves the target name "test" for the aggregate command.
@@ -303,32 +296,9 @@ if(BUILD_TEST)
     endforeach()
 endif()
 
-if(BUILD_BENCH)
-    set(TVV_BENCH_SOURCES "${PROJECT_SOURCE_DIR}/tests/bench.cpp")
-    foreach(bench_file ${TVV_BENCH_SOURCES})
-        get_filename_component(bench_name ${bench_file} NAME_WE)
-        add_executable(${bench_name} "${bench_file}")
-        target_link_libraries(${bench_name} PRIVATE tensorvia)
-        if(BACKEND_CPU)
-            target_link_libraries(${bench_name} PRIVATE OpenMP::OpenMP_CXX)
-        endif()
-    endforeach()
-endif()
-
-if(BUILD_EXAMPLES)
-    file(GLOB TVV_EXAMPLE_INPUTS CONFIGURE_DEPENDS
-        "${PROJECT_SOURCE_DIR}/examples/*.cpp"
-    )
-    set(TVV_EXAMPLE_SOURCES ${TVV_EXAMPLE_INPUTS})
-    foreach(example_file ${TVV_EXAMPLE_SOURCES})
-        get_filename_component(example_name ${example_file} NAME_WE)
-        add_executable(${example_name} "${example_file}")
-        target_link_libraries(${example_name} PRIVATE tensorvia)
-        if(BACKEND_CPU)
-            target_link_libraries(${example_name} PRIVATE OpenMP::OpenMP_CXX)
-        endif()
-    endforeach()
-endif()
+# tests/bench.cpp 与 examples/ 是 mcpp 路径的使用示例资产（import 形态），
+# CMake 路径没有模块支持，不构建它们；CMake 侧的行为闭环见 BUILD_TEST 的
+# header_smoke.cpp。
 
 # ---------------------------------------------------------------------------
 # Install / export

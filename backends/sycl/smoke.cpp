@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-#include "tensorvia.hpp"
+import tensorvia;
 
 namespace {
 
@@ -24,24 +24,24 @@ Tensor host_of(const Tensor& t) {
 
 }  // namespace
 
-// The machine may have no driver or no device: probing with a one-element CUDA
+// The machine may have no driver or no device: probing with a one-element SYCL
 // tensor is the only reliable check, so every test skips when the probe fails.
-class CudaBackendTest : public ::testing::Test {
+class SyclBackendTest : public ::testing::Test {
 protected:
     void SetUp() override {
         try {
-            Tensor probe = Tensor::Fill({1}, 0.0f, DataType::FLOAT32, Device::CUDA);
+            Tensor probe = Tensor::Fill({1}, 0.0f, DataType::FLOAT32, Device::SYCL);
             (void)probe;
         } catch (const std::exception& e) {
-            GTEST_SKIP() << "no usable CUDA device: " << e.what();
+            GTEST_SKIP() << "no usable SYCL device: " << e.what();
         }
     }
 };
 
 // ---------- creation + host round trip ----------
-TEST_F(CudaBackendTest, CreationAndRoundTrip) {
-    Tensor a = Tensor::Fill({2, 3}, 2.0f, DataType::FLOAT32, Device::CUDA);
-    EXPECT_EQ(a.device(), Device::CUDA);
+TEST_F(SyclBackendTest, CreationAndRoundTrip) {
+    Tensor a = Tensor::Fill({2, 3}, 2.0f, DataType::FLOAT32, Device::SYCL);
+    EXPECT_EQ(a.device(), Device::SYCL);
     EXPECT_EQ(a.numel(), 6u);
     Tensor h = host_of(a);
     EXPECT_EQ(h.device(), Device::CPU);
@@ -50,17 +50,17 @@ TEST_F(CudaBackendTest, CreationAndRoundTrip) {
 
     std::vector<float> v{1, 2, 3, 4};
     Tensor c(v, {2, 2});
-    c.to_device(Device::CUDA);
-    EXPECT_EQ(c.device(), Device::CUDA);
+    c.to_device(Device::SYCL);
+    EXPECT_EQ(c.device(), Device::SYCL);
     c.to_host();
     EXPECT_EQ(c.device(), Device::CPU);
     EXPECT_NEAR(c.at<float>({0, 1}), 2.0f, kEps);
     EXPECT_NEAR(c.at<float>({1, 1}), 4.0f, kEps);
 }
 
-TEST_F(CudaBackendTest, FilledConstructors) {
-    Tensor z = Tensor::Zeros({3, 2}, DataType::FLOAT32, Device::CUDA);
-    Tensor o = Tensor::Ones({3, 2}, DataType::FLOAT32, Device::CUDA);
+TEST_F(SyclBackendTest, FilledConstructors) {
+    Tensor z = Tensor::Zeros({3, 2}, DataType::FLOAT32, Device::SYCL);
+    Tensor o = Tensor::Ones({3, 2}, DataType::FLOAT32, Device::SYCL);
     Tensor zh = host_of(z);
     Tensor oh = host_of(o);
     for (int64_t i = 0; i < 3; ++i) {
@@ -71,15 +71,15 @@ TEST_F(CudaBackendTest, FilledConstructors) {
     }
 
     // Integer and half-precision fills go through the same island path.
-    Tensor i64 = host_of(Tensor::Fill({4}, 3.0f, DataType::INT64, Device::CUDA));
+    Tensor i64 = host_of(Tensor::Fill({4}, 3.0f, DataType::INT64, Device::SYCL));
     EXPECT_EQ(i64.dtype(), DataType::INT64);
     EXPECT_EQ(i64.at<int64_t>({0}), 3);
-    Tensor f16 = host_of(Tensor::Fill({4}, 1.5f, DataType::FLOAT16, Device::CUDA));
+    Tensor f16 = host_of(Tensor::Fill({4}, 1.5f, DataType::FLOAT16, Device::SYCL));
     EXPECT_EQ(f16.dtype(), DataType::FLOAT16);
 }
 
-TEST_F(CudaBackendTest, RandomStaysInRange) {
-    Tensor r = host_of(Tensor::Random({64}, -2.0f, 3.0f, DataType::FLOAT32, Device::CUDA));
+TEST_F(SyclBackendTest, RandomStaysInRange) {
+    Tensor r = host_of(Tensor::Random({64}, -2.0f, 3.0f, DataType::FLOAT32, Device::SYCL));
     for (int64_t i = 0; i < 64; ++i) {
         const float v = r.at<float>({i});
         EXPECT_GE(v, -2.0f);
@@ -93,25 +93,25 @@ TEST_F(CudaBackendTest, RandomStaysInRange) {
 }
 
 // ---------- deep copy + strided materialization ----------
-TEST_F(CudaBackendTest, CloneIsDeep) {
-    Tensor a = Tensor::Fill({3, 3}, 1.0f, DataType::FLOAT32, Device::CUDA);
+TEST_F(SyclBackendTest, CloneIsDeep) {
+    Tensor a = Tensor::Fill({3, 3}, 1.0f, DataType::FLOAT32, Device::SYCL);
     Tensor b = a.clone();
-    EXPECT_EQ(b.device(), Device::CUDA);
+    EXPECT_EQ(b.device(), Device::SYCL);
     EXPECT_NE(a.data(), b.data());
     Tensor hb = host_of(b);
     EXPECT_NEAR(hb.at<float>({2, 2}), 1.0f, kEps);
 }
 
-TEST_F(CudaBackendTest, CloneOfPermutedViewRepacks) {
+TEST_F(SyclBackendTest, CloneOfPermutedViewRepacks) {
     std::vector<float> v{0, 1, 2, 3, 4, 5};
     Tensor t(v, {2, 3});
-    t.to_device(Device::CUDA);
+    t.to_device(Device::SYCL);
     Tensor p = t.permute({1, 0});
     EXPECT_FALSE(p.is_contiguous());
 
     Tensor c = p.clone();
     EXPECT_TRUE(c.is_contiguous());
-    EXPECT_EQ(c.device(), Device::CUDA);
+    EXPECT_EQ(c.device(), Device::SYCL);
     Tensor h = host_of(c);
     EXPECT_EQ(h.shape(0), 3);
     EXPECT_EQ(h.shape(1), 2);
@@ -122,8 +122,8 @@ TEST_F(CudaBackendTest, CloneOfPermutedViewRepacks) {
 }
 
 // ---------- arithmetic ----------
-TEST_F(CudaBackendTest, ScalarArithmetic) {
-    Tensor a = Tensor::Fill({2, 3}, 2.0f, DataType::FLOAT32, Device::CUDA);
+TEST_F(SyclBackendTest, ScalarArithmetic) {
+    Tensor a = Tensor::Fill({2, 3}, 2.0f, DataType::FLOAT32, Device::SYCL);
 
     // In-place forms mutate the device buffer; the result form must leave the
     // source untouched.
@@ -145,13 +145,13 @@ TEST_F(CudaBackendTest, ScalarArithmetic) {
     EXPECT_NEAR(hsrc.at<float>({0, 0}), 2.0f, kEps);
 }
 
-TEST_F(CudaBackendTest, TensorArithmeticAndBroadcast) {
+TEST_F(SyclBackendTest, TensorArithmeticAndBroadcast) {
     std::vector<float> av{1, 2, 3, 4, 5, 6};
     std::vector<float> bv{10, 20, 30, 40, 50, 60};
     Tensor a(av, {2, 3});
     Tensor b(bv, {2, 3});
-    a.to_device(Device::CUDA);
-    b.to_device(Device::CUDA);
+    a.to_device(Device::SYCL);
+    b.to_device(Device::SYCL);
 
     Tensor sum = host_of(ops::Add(a, b));
     Tensor diff = host_of(ops::Sub(a, b));
@@ -169,32 +169,32 @@ TEST_F(CudaBackendTest, TensorArithmeticAndBroadcast) {
     }
 
     // [2,3] + [3] broadcasts over rows; [2,1] + [1,3] broadcasts on both axes.
-    Tensor row = Tensor::Fill({3}, 100.0f, DataType::FLOAT32, Device::CUDA);
+    Tensor row = Tensor::Fill({3}, 100.0f, DataType::FLOAT32, Device::SYCL);
     Tensor bcast = host_of(ops::Add(a, row));
     EXPECT_NEAR(bcast.at<float>({0, 0}), 101.0f, kEps);
     EXPECT_NEAR(bcast.at<float>({1, 2}), 106.0f, kEps);
 
-    Tensor col = Tensor::Fill({2, 1}, 1.0f, DataType::FLOAT32, Device::CUDA);
-    Tensor row2 = Tensor::Fill({1, 3}, 2.0f, DataType::FLOAT32, Device::CUDA);
+    Tensor col = Tensor::Fill({2, 1}, 1.0f, DataType::FLOAT32, Device::SYCL);
+    Tensor row2 = Tensor::Fill({1, 3}, 2.0f, DataType::FLOAT32, Device::SYCL);
     Tensor grid = host_of(ops::Mul(col, row2));
     EXPECT_EQ(grid.shape(0), 2);
     EXPECT_EQ(grid.shape(1), 3);
     EXPECT_NEAR(grid.at<float>({1, 2}), 2.0f, kEps);
 
     // dst form writes into a caller-provided contiguous buffer.
-    Tensor dst({2, 3}, DataType::FLOAT32, Device::CUDA);
+    Tensor dst({2, 3}, DataType::FLOAT32, Device::SYCL);
     ops::Add(a, b, dst);
     Tensor hdst = host_of(dst);
     EXPECT_NEAR(hdst.at<float>({1, 1}), 55.0f, kEps);
 }
 
-TEST_F(CudaBackendTest, MixedDtypePromotion) {
+TEST_F(SyclBackendTest, MixedDtypePromotion) {
     std::vector<float> fv{1, 2, 3, 4};
     std::vector<double> dv{0.5, 0.5, 0.5, 0.5};
     Tensor f(fv, {4});
     Tensor d(dv, {4});
-    f.to_device(Device::CUDA);
-    d.to_device(Device::CUDA);
+    f.to_device(Device::SYCL);
+    d.to_device(Device::SYCL);
 
     Tensor mixed = host_of(ops::Add(f, d));
     EXPECT_EQ(mixed.dtype(), DataType::FLOAT64);
@@ -202,13 +202,13 @@ TEST_F(CudaBackendTest, MixedDtypePromotion) {
     EXPECT_DOUBLE_EQ(mixed.at<double>({3}), 4.5);
 }
 
-TEST_F(CudaBackendTest, IntegerDivisionByZeroIsZero) {
+TEST_F(SyclBackendTest, IntegerDivisionByZeroIsZero) {
     std::vector<int32_t> nv{1, -2, 0, 7};
     std::vector<int32_t> zv{0, 0, 0, 0};
     Tensor n(nv, {4});
     Tensor z(zv, {4});
-    n.to_device(Device::CUDA);
-    z.to_device(Device::CUDA);
+    n.to_device(Device::SYCL);
+    z.to_device(Device::SYCL);
 
     Tensor q = host_of(ops::Div(n, z));
     EXPECT_EQ(q.dtype(), DataType::INT32);
@@ -216,10 +216,10 @@ TEST_F(CudaBackendTest, IntegerDivisionByZeroIsZero) {
 }
 
 // ---------- unary ----------
-TEST_F(CudaBackendTest, UnaryOperators) {
+TEST_F(SyclBackendTest, UnaryOperators) {
     std::vector<float> v{-2.0f, -0.5f, 0.0f, 0.5f, 2.0f, 4.0f};
     Tensor t(v, {6});
-    t.to_device(Device::CUDA);
+    t.to_device(Device::SYCL);
     const Tensor& tc = t;
 
     Tensor abs_h = host_of(ops::Abs(tc));
@@ -237,13 +237,13 @@ TEST_F(CudaBackendTest, UnaryOperators) {
     }
 
     Tensor powed = host_of(ops::Pow(
-        Tensor::Fill({6}, 9.0f, DataType::FLOAT32, Device::CUDA), 2.0f));
+        Tensor::Fill({6}, 9.0f, DataType::FLOAT32, Device::SYCL), 2.0f));
     EXPECT_NEAR(powed.at<float>({0}), 81.0f, kEps);
 
     // Sqrt/Log run through the Any(a < 0) guard, which needs comparison.
     std::vector<float> pos_v{1.0f, 4.0f, 9.0f, 16.0f};
     Tensor pos(pos_v, {4});
-    pos.to_device(Device::CUDA);
+    pos.to_device(Device::SYCL);
     const Tensor& pos_c = pos;
     Tensor sqrt_h = host_of(ops::Sqrt(pos_c));
     for (int64_t i = 0; i < 4; ++i)
@@ -257,16 +257,16 @@ TEST_F(CudaBackendTest, UnaryOperators) {
     EXPECT_NEAR(clamped.at<float>({5}), 1.0f, kEps);
 
     // In-place unary keeps the buffer identity but updates the values.
-    Tensor abs_in = Tensor::Fill({4}, -3.0f, DataType::FLOAT32, Device::CUDA);
+    Tensor abs_in = Tensor::Fill({4}, -3.0f, DataType::FLOAT32, Device::SYCL);
     ops::Abs(abs_in);
     Tensor abs_h2 = host_of(abs_in);
     for (int64_t i = 0; i < 4; ++i) EXPECT_NEAR(abs_h2.at<float>({i}), 3.0f, kEps);
 }
 
-TEST_F(CudaBackendTest, UnaryIntegerPromotesToFloat32) {
+TEST_F(SyclBackendTest, UnaryIntegerPromotesToFloat32) {
     std::vector<int32_t> iv{0, 1, 2, 3};
     Tensor t(iv, {4});
-    t.to_device(Device::CUDA);
+    t.to_device(Device::SYCL);
     const Tensor& tc = t;
     Tensor out = ops::Sin(tc);
     EXPECT_EQ(out.dtype(), DataType::FLOAT32);
@@ -276,11 +276,11 @@ TEST_F(CudaBackendTest, UnaryIntegerPromotesToFloat32) {
     EXPECT_EQ(ops::Abs(tc).dtype(), DataType::INT32);
 }
 
-TEST_F(CudaBackendTest, NanPropagatesThroughClamp) {
+TEST_F(SyclBackendTest, NanPropagatesThroughClamp) {
     const float nan = std::numeric_limits<float>::quiet_NaN();
     std::vector<float> v{nan, 1.0f, -1.0f};
     Tensor t(v, {3});
-    t.to_device(Device::CUDA);
+    t.to_device(Device::SYCL);
     const Tensor& tc = t;
     Tensor hc = host_of(ops::Clamp(tc, -0.5f, 0.5f));
     EXPECT_TRUE(std::isnan(hc.at<float>({0})));
@@ -315,9 +315,9 @@ std::vector<float> naive_matmul(Tensor& A, Tensor& B) {
 
 }  // namespace
 
-TEST_F(CudaBackendTest, MatMul2D) {
-    Tensor A = Tensor::Random({17, 9}, -1.0f, 1.0f, DataType::FLOAT32, Device::CUDA);
-    Tensor B = Tensor::Random({9, 23}, -1.0f, 1.0f, DataType::FLOAT32, Device::CUDA);
+TEST_F(SyclBackendTest, MatMul2D) {
+    Tensor A = Tensor::Random({17, 9}, -1.0f, 1.0f, DataType::FLOAT32, Device::SYCL);
+    Tensor B = Tensor::Random({9, 23}, -1.0f, 1.0f, DataType::FLOAT32, Device::SYCL);
     Tensor Gh = host_of(A);
     Tensor Hh = host_of(B);
     const std::vector<float> want = naive_matmul(Gh, Hh);
@@ -332,9 +332,9 @@ TEST_F(CudaBackendTest, MatMul2D) {
     EXPECT_NEAR(max_err, 0.0f, 1e-4f);
 }
 
-TEST_F(CudaBackendTest, MatMulBatched3D) {
-    Tensor A = Tensor::Random({3, 5, 7}, -1.0f, 1.0f, DataType::FLOAT32, Device::CUDA);
-    Tensor B = Tensor::Random({3, 7, 4}, -1.0f, 1.0f, DataType::FLOAT32, Device::CUDA);
+TEST_F(SyclBackendTest, MatMulBatched3D) {
+    Tensor A = Tensor::Random({3, 5, 7}, -1.0f, 1.0f, DataType::FLOAT32, Device::SYCL);
+    Tensor B = Tensor::Random({3, 7, 4}, -1.0f, 1.0f, DataType::FLOAT32, Device::SYCL);
     Tensor Gh = host_of(A);
     Tensor Hh = host_of(B);
     const std::vector<float> want = naive_matmul(Gh, Hh);
@@ -350,10 +350,10 @@ TEST_F(CudaBackendTest, MatMulBatched3D) {
     EXPECT_NEAR(max_err, 0.0f, 1e-4f);
 }
 
-TEST_F(CudaBackendTest, MatMulHalfPromotesToFloat32) {
+TEST_F(SyclBackendTest, MatMulHalfPromotesToFloat32) {
     std::vector<float16> v{float16(1.0f), float16(2.0f), float16(3.0f), float16(4.0f)};
     Tensor hf(v, {2, 2});
-    hf.to_device(Device::CUDA);
+    hf.to_device(Device::SYCL);
     Tensor r = ops::MatMul(hf, hf);
     EXPECT_EQ(r.dtype(), DataType::FLOAT32);
     Tensor h = host_of(r);
@@ -363,20 +363,20 @@ TEST_F(CudaBackendTest, MatMulHalfPromotesToFloat32) {
     EXPECT_NEAR(h.at<float>({1, 1}), 22.0f, 1e-3f);
 }
 
-TEST_F(CudaBackendTest, NonContiguousInPlaceRejected) {
+TEST_F(SyclBackendTest, NonContiguousInPlaceRejected) {
     std::vector<float> v{0, 1, 2, 3, 4, 5};
     Tensor t(v, {2, 3});
-    t.to_device(Device::CUDA);
+    t.to_device(Device::SYCL);
     Tensor p = t.permute({1, 0});
     EXPECT_THROW(ops::Add(p, 1.0f), std::runtime_error);
     EXPECT_THROW(ops::Abs(p), std::runtime_error);
 }
 
 // ---------- activations ----------
-TEST_F(CudaBackendTest, Activations) {
+TEST_F(SyclBackendTest, Activations) {
     std::vector<float> v{-2.0f, -0.5f, 0.0f, 0.5f, 2.0f};
     Tensor t(v, {5});
-    t.to_device(Device::CUDA);
+    t.to_device(Device::SYCL);
     const Tensor& ct = t;
 
     Tensor relu = host_of(ops::Relu(ct));
@@ -399,10 +399,10 @@ TEST_F(CudaBackendTest, Activations) {
     EXPECT_NEAR(inplace.at<float>({4}), 1.0f / (1.0f + std::exp(-2.0f)), kEps);
 }
 
-TEST_F(CudaBackendTest, ActivationIntegerPromotesToFloat32) {
+TEST_F(SyclBackendTest, ActivationIntegerPromotesToFloat32) {
     std::vector<int32_t> v{-1, 0, 1};
     Tensor t(v, {3});
-    t.to_device(Device::CUDA);
+    t.to_device(Device::SYCL);
     const Tensor& ct = t;
     Tensor r = ops::Silu(ct);
     EXPECT_EQ(r.dtype(), DataType::FLOAT32);
@@ -411,10 +411,10 @@ TEST_F(CudaBackendTest, ActivationIntegerPromotesToFloat32) {
     EXPECT_NEAR(h.at<float>({2}), 1.0f / (1.0f + std::exp(-1.0f)), kEps);
 }
 
-TEST_F(CudaBackendTest, SoftmaxMatchesReference) {
+TEST_F(SyclBackendTest, SoftmaxMatchesReference) {
     std::vector<float> v{1.0f, 2.0f, 3.0f, 0.0f, 0.0f, 0.0f};
     Tensor t(v, {2, 3});
-    t.to_device(Device::CUDA);
+    t.to_device(Device::SYCL);
     Tensor r = ops::Softmax(t, 1);
     EXPECT_EQ(r.dtype(), DataType::FLOAT32);
     Tensor h = host_of(r);
@@ -433,10 +433,10 @@ TEST_F(CudaBackendTest, SoftmaxMatchesReference) {
     EXPECT_NEAR(r2.at<float>({0, 2}), e3 / denom, kEps);
 }
 
-TEST_F(CudaBackendTest, SoftmaxIntegerPromotesToFloat32) {
+TEST_F(SyclBackendTest, SoftmaxIntegerPromotesToFloat32) {
     std::vector<int32_t> v{0, 0, 0, 0};
     Tensor t(v, {2, 2});
-    t.to_device(Device::CUDA);
+    t.to_device(Device::SYCL);
     Tensor r = ops::Softmax(t, 0);
     EXPECT_EQ(r.dtype(), DataType::FLOAT32);
     Tensor h = host_of(r);
@@ -445,29 +445,29 @@ TEST_F(CudaBackendTest, SoftmaxIntegerPromotesToFloat32) {
 }
 
 // ---------- reductions ----------
-TEST_F(CudaBackendTest, GlobalReductions) {
+TEST_F(SyclBackendTest, GlobalReductions) {
     std::vector<float> v{1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
     Tensor t(v, {2, 3});
-    t.to_device(Device::CUDA);
+    t.to_device(Device::SYCL);
     EXPECT_NEAR(ops::Sum(t), 21.0f, kEps);
     EXPECT_NEAR(ops::Mean(t), 3.5f, kEps);
     EXPECT_NEAR(ops::Min(t), 1.0f, kEps);
     EXPECT_NEAR(ops::Max(t), 6.0f, kEps);
 }
 
-TEST_F(CudaBackendTest, GlobalReductionsOnNonContiguousView) {
+TEST_F(SyclBackendTest, GlobalReductionsOnNonContiguousView) {
     std::vector<float> v{1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
     Tensor t(v, {2, 3});
-    t.to_device(Device::CUDA);
+    t.to_device(Device::SYCL);
     Tensor p = t.permute({1, 0});  // 3x2 view, same six elements
     EXPECT_NEAR(ops::Sum(p), 21.0f, kEps);
     EXPECT_NEAR(ops::Max(p), 6.0f, kEps);
 }
 
-TEST_F(CudaBackendTest, AxisSumMeanMinMax) {
+TEST_F(SyclBackendTest, AxisSumMeanMinMax) {
     std::vector<float> v{1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
     Tensor t(v, {2, 3});
-    t.to_device(Device::CUDA);
+    t.to_device(Device::SYCL);
 
     Tensor col = host_of(ops::Sum(t, 0));  // over rows -> {3}
     Tensor row = host_of(ops::Sum(t, 1));  // over cols -> {2}
@@ -489,10 +489,10 @@ TEST_F(CudaBackendTest, AxisSumMeanMinMax) {
     EXPECT_NEAR(mx.at<float>({2}), 6.0f, kEps);
 }
 
-TEST_F(CudaBackendTest, AxisSumWidensIntegerAccumulator) {
+TEST_F(SyclBackendTest, AxisSumWidensIntegerAccumulator) {
     std::vector<int8_t> v{1, 2, 3, 4};
     Tensor t(v, {2, 2});
-    t.to_device(Device::CUDA);
+    t.to_device(Device::SYCL);
     Tensor r = ops::Sum(t, 1);
     EXPECT_EQ(r.dtype(), DataType::INT32);
     Tensor h = host_of(r);
@@ -500,10 +500,10 @@ TEST_F(CudaBackendTest, AxisSumWidensIntegerAccumulator) {
     EXPECT_EQ(h.at<int32_t>({1}), 7);
 }
 
-TEST_F(CudaBackendTest, AxisMinPreservesIntegerDtype) {
+TEST_F(SyclBackendTest, AxisMinPreservesIntegerDtype) {
     std::vector<int32_t> v{5, 2, 9, 1};
     Tensor t(v, {2, 2});
-    t.to_device(Device::CUDA);
+    t.to_device(Device::SYCL);
     Tensor r = ops::Min(t, 0);
     EXPECT_EQ(r.dtype(), DataType::INT32);
     Tensor h = host_of(r);
@@ -512,21 +512,21 @@ TEST_F(CudaBackendTest, AxisMinPreservesIntegerDtype) {
     EXPECT_EQ(h.at<int32_t>({1}), 1);
 }
 
-TEST_F(CudaBackendTest, ReductionsPropagateNan) {
+TEST_F(SyclBackendTest, ReductionsPropagateNan) {
     const float nan = std::numeric_limits<float>::quiet_NaN();
     std::vector<float> v{1.0f, nan, 3.0f};
     Tensor t(v, {3});
-    t.to_device(Device::CUDA);
+    t.to_device(Device::SYCL);
     EXPECT_TRUE(std::isnan(ops::Min(t)));
     EXPECT_TRUE(std::isnan(ops::Max(t)));
     Tensor axis = host_of(ops::Max(t, 0));
     EXPECT_TRUE(std::isnan(axis.at<float>({0})));
 }
 
-TEST_F(CudaBackendTest, ArgMaxArgMin) {
+TEST_F(SyclBackendTest, ArgMaxArgMin) {
     std::vector<float> v{1.0f, 5.0f, 5.0f, 2.0f, 0.0f, 7.0f};
     Tensor t(v, {2, 3});
-    t.to_device(Device::CUDA);
+    t.to_device(Device::SYCL);
 
     Tensor am = ops::Argmax(t, 1);
     EXPECT_EQ(am.dtype(), DataType::INT32);
@@ -542,11 +542,11 @@ TEST_F(CudaBackendTest, ArgMaxArgMin) {
     EXPECT_EQ(in.at<int32_t>({2}), 0);
 }
 
-TEST_F(CudaBackendTest, ArgMaxFirstNanWins) {
+TEST_F(SyclBackendTest, ArgMaxFirstNanWins) {
     const float nan = std::numeric_limits<float>::quiet_NaN();
     std::vector<float> v{1.0f, nan, 3.0f, nan};
     Tensor t(v, {2, 2});
-    t.to_device(Device::CUDA);
+    t.to_device(Device::SYCL);
     Tensor h = host_of(ops::Argmax(t, 1));
     EXPECT_EQ(h.at<int32_t>({0}), 1);
     EXPECT_EQ(h.at<int32_t>({1}), 1);
@@ -554,33 +554,33 @@ TEST_F(CudaBackendTest, ArgMaxFirstNanWins) {
     EXPECT_EQ(hmin.at<int32_t>({0}), 1);
 }
 
-TEST_F(CudaBackendTest, AllAnyAndNonzero) {
+TEST_F(SyclBackendTest, AllAnyAndNonzero) {
     std::vector<float> v{1.0f, 1.0f, 1.000001f, 2.0f};
     Tensor t(v, {2, 2});
-    t.to_device(Device::CUDA);
+    t.to_device(Device::SYCL);
     EXPECT_TRUE(ops::All(t, 1.0f) == false);  // 2.0 does not match
     EXPECT_TRUE(ops::Any(t, 2.0f));
 
     std::vector<float> ones(4, 1.0f);
     Tensor o(ones, {2, 2});
-    o.to_device(Device::CUDA);
+    o.to_device(Device::SYCL);
     EXPECT_TRUE(ops::All(o, 1.0f));
     EXPECT_FALSE(ops::Any(o, 2.0f));
 
     std::vector<float> mixed{0.0f, 1.5f, 0.0f, -2.0f};
     Tensor m(mixed, {4});
-    m.to_device(Device::CUDA);
+    m.to_device(Device::SYCL);
     EXPECT_EQ(ops::Nonzero(m), 2u);
 }
 
 // ---------- comparison / logical ----------
-TEST_F(CudaBackendTest, ComparisonsBroadcast) {
+TEST_F(SyclBackendTest, ComparisonsBroadcast) {
     std::vector<float> av{1, 2, 3, 4, 5, 6};
     std::vector<float> bv{1, 0, 7};
     Tensor a(av, {2, 3});
     Tensor b(bv, {3});
-    a.to_device(Device::CUDA);
-    b.to_device(Device::CUDA);
+    a.to_device(Device::SYCL);
+    b.to_device(Device::SYCL);
     const Tensor& ac = a;
     const Tensor& bc = b;
 
@@ -601,10 +601,10 @@ TEST_F(CudaBackendTest, ComparisonsBroadcast) {
     EXPECT_EQ(le.at<int8_t>({1, 2}), 1);
 }
 
-TEST_F(CudaBackendTest, ScalarComparisonsAndTolerance) {
+TEST_F(SyclBackendTest, ScalarComparisonsAndTolerance) {
     std::vector<float> v{1.0f, 2.0f, 3.0f, 1.0f + 1e-6f};
     Tensor t(v, {4});
-    t.to_device(Device::CUDA);
+    t.to_device(Device::SYCL);
     const Tensor& tc = t;
 
     Tensor eq = host_of(ops::Equal(tc, 1.0f));
@@ -619,13 +619,13 @@ TEST_F(CudaBackendTest, ScalarComparisonsAndTolerance) {
 }
 
 // ---------- shape / data movement ----------
-TEST_F(CudaBackendTest, ConcatAxis0And1) {
+TEST_F(SyclBackendTest, ConcatAxis0And1) {
     std::vector<float> av{1, 2, 3, 4};
     std::vector<float> bv{5, 6, 7, 8};
     Tensor a(av, {2, 2});
     Tensor b(bv, {2, 2});
-    a.to_device(Device::CUDA);
-    b.to_device(Device::CUDA);
+    a.to_device(Device::SYCL);
+    b.to_device(Device::SYCL);
 
     Tensor c0 = host_of(ops::Concat({a, b}, 0));
     EXPECT_EQ(c0.shape(0), 4);
@@ -642,10 +642,10 @@ TEST_F(CudaBackendTest, ConcatAxis0And1) {
     EXPECT_NEAR(c1.at<float>({1, 3}), 8.0f, kEps);
 }
 
-TEST_F(CudaBackendTest, SliceRowsAndCols) {
+TEST_F(SyclBackendTest, SliceRowsAndCols) {
     std::vector<float> v{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
     Tensor t(v, {3, 4});
-    t.to_device(Device::CUDA);
+    t.to_device(Device::SYCL);
     const Tensor& tc = t;
 
     Tensor s = host_of(ops::Slice(tc, {{1, 3}, {0, 2}}));
@@ -657,10 +657,10 @@ TEST_F(CudaBackendTest, SliceRowsAndCols) {
     EXPECT_NEAR(s.at<float>({1, 1}), 9.0f, kEps);
 }
 
-TEST_F(CudaBackendTest, Transpose2DInPlace) {
+TEST_F(SyclBackendTest, Transpose2DInPlace) {
     std::vector<float> v{1, 2, 3, 4, 5, 6};
     Tensor t(v, {2, 3});
-    t.to_device(Device::CUDA);
+    t.to_device(Device::SYCL);
     ops::Transpose(t);
     EXPECT_EQ(t.shape(0), 3);
     EXPECT_EQ(t.shape(1), 2);
@@ -671,11 +671,11 @@ TEST_F(CudaBackendTest, Transpose2DInPlace) {
     EXPECT_NEAR(h.at<float>({2, 1}), 6.0f, kEps);
 }
 
-TEST_F(CudaBackendTest, TransposeNDWithAxes) {
+TEST_F(SyclBackendTest, TransposeNDWithAxes) {
     std::vector<float> v(24);
     for (size_t i = 0; i < v.size(); ++i) v[i] = static_cast<float>(i);
     Tensor t(v, {2, 3, 4});
-    t.to_device(Device::CUDA);
+    t.to_device(Device::SYCL);
     const Tensor& tc = t;
 
     // axes {2, 0, 1}: output shape is {4, 2, 3}.
@@ -690,11 +690,11 @@ TEST_F(CudaBackendTest, TransposeNDWithAxes) {
                 EXPECT_NEAR(h.at<float>({k, i, j}), static_cast<float>(i * 12 + j * 4 + k), kEps);
 }
 
-TEST_F(CudaBackendTest, TransposeIntoDst) {
+TEST_F(SyclBackendTest, TransposeIntoDst) {
     std::vector<float> v{1, 2, 3, 4, 5, 6};
     Tensor t(v, {2, 3});
-    t.to_device(Device::CUDA);
-    Tensor dst = Tensor::Zeros({3, 2}, DataType::FLOAT32, Device::CUDA);
+    t.to_device(Device::SYCL);
+    Tensor dst = Tensor::Zeros({3, 2}, DataType::FLOAT32, Device::SYCL);
     ops::Transpose(t, dst, {1, 0});
     Tensor h = host_of(dst);
     EXPECT_NEAR(h.at<float>({0, 0}), 1.0f, kEps);
@@ -703,8 +703,8 @@ TEST_F(CudaBackendTest, TransposeIntoDst) {
 }
 
 // ---------- in-place fill + typecast ----------
-TEST_F(CudaBackendTest, InPlaceFillZerosOnes) {
-    Tensor t = Tensor::Random({3, 4}, -1.0f, 1.0f, DataType::FLOAT32, Device::CUDA);
+TEST_F(SyclBackendTest, InPlaceFillZerosOnes) {
+    Tensor t = Tensor::Random({3, 4}, -1.0f, 1.0f, DataType::FLOAT32, Device::SYCL);
     ops::Fill(t, 2.5f);
     Tensor h = host_of(t);
     for (int64_t i = 0; i < 3; ++i)
@@ -721,16 +721,16 @@ TEST_F(CudaBackendTest, InPlaceFillZerosOnes) {
     EXPECT_NEAR(h.at<float>({1, 2}), 1.0f, kEps);
 
     // Integer tensors take the same path.
-    Tensor i = Tensor::Zeros({4}, DataType::INT32, Device::CUDA);
+    Tensor i = Tensor::Zeros({4}, DataType::INT32, Device::SYCL);
     ops::Fill(i, 7.0f);
     Tensor ih = host_of(i);
     EXPECT_EQ(ih.at<int32_t>({3}), 7);
 }
 
-TEST_F(CudaBackendTest, InPlaceFillOnOffsetView) {
+TEST_F(SyclBackendTest, InPlaceFillOnOffsetView) {
     std::vector<float> v{0, 1, 2, 3, 4, 5, 6, 7};
     Tensor base(v, {2, 4});
-    base.to_device(Device::CUDA);
+    base.to_device(Device::SYCL);
     // Row 1 is a contiguous view whose origin has a non-zero offset.
     Tensor view = base.slice({{1, 2}, {0, 4}});
     EXPECT_TRUE(view.is_contiguous());
@@ -741,15 +741,15 @@ TEST_F(CudaBackendTest, InPlaceFillOnOffsetView) {
     EXPECT_NEAR(h.at<float>({1, 3}), 9.0f, kEps);
 }
 
-TEST_F(CudaBackendTest, TypecastRoundTrip) {
+TEST_F(SyclBackendTest, TypecastRoundTrip) {
     std::vector<float> v{0.5f, -1.25f, 4.0f, 12.75f};
     Tensor t(v, {4});
-    t.to_device(Device::CUDA);
+    t.to_device(Device::SYCL);
     const Tensor& tc = t;
 
     Tensor f16 = ops::Typecast(tc, DataType::FLOAT16);
     EXPECT_EQ(f16.dtype(), DataType::FLOAT16);
-    EXPECT_EQ(f16.device(), Device::CUDA);
+    EXPECT_EQ(f16.device(), Device::SYCL);
     const Tensor& f16c = f16;
     Tensor back = host_of(ops::Typecast(f16c, DataType::FLOAT32));
     for (int64_t i = 0; i < 4; ++i)
@@ -762,8 +762,8 @@ TEST_F(CudaBackendTest, TypecastRoundTrip) {
     EXPECT_EQ(i32.at<int32_t>({3}), 12);
 }
 
-TEST_F(CudaBackendTest, TypecastInPlace) {
-    Tensor t = Tensor::Fill({3}, 2.5f, DataType::FLOAT32, Device::CUDA);
+TEST_F(SyclBackendTest, TypecastInPlace) {
+    Tensor t = Tensor::Fill({3}, 2.5f, DataType::FLOAT32, Device::SYCL);
     ops::Typecast(t, DataType::FLOAT64);
     EXPECT_EQ(t.dtype(), DataType::FLOAT64);
     Tensor h = host_of(t);
@@ -772,14 +772,14 @@ TEST_F(CudaBackendTest, TypecastInPlace) {
     EXPECT_EQ(t.dtype(), DataType::FLOAT64);
 }
 
-TEST_F(CudaBackendTest, RandomOtherDtypesStayInRange) {
-    Tensor i = host_of(Tensor::Random({32}, 0.0f, 10.0f, DataType::INT32, Device::CUDA));
+TEST_F(SyclBackendTest, RandomOtherDtypesStayInRange) {
+    Tensor i = host_of(Tensor::Random({32}, 0.0f, 10.0f, DataType::INT32, Device::SYCL));
     for (int64_t n = 0; n < 32; ++n) {
         const int32_t v = i.at<int32_t>({n});
         EXPECT_GE(v, 0);
         EXPECT_LT(v, 10);
     }
-    Tensor h = host_of(Tensor::Random({32}, -1.0f, 1.0f, DataType::FLOAT16, Device::CUDA));
+    Tensor h = host_of(Tensor::Random({32}, -1.0f, 1.0f, DataType::FLOAT16, Device::SYCL));
     EXPECT_EQ(h.dtype(), DataType::FLOAT16);
     const Tensor& hc = h;
     Tensor f32 = host_of(ops::Typecast(hc, DataType::FLOAT32));
@@ -790,11 +790,11 @@ TEST_F(CudaBackendTest, RandomOtherDtypesStayInRange) {
 }
 
 // ---------- unimplemented operators fail loudly ----------
-TEST_F(CudaBackendTest, UnimplementedOperatorThrows) {
-    Tensor a = Tensor::Ones({2, 2}, DataType::FLOAT32, Device::CUDA);
-    Tensor w = Tensor::Ones({2}, DataType::FLOAT32, Device::CUDA);
-    Tensor b = Tensor::Zeros({2}, DataType::FLOAT32, Device::CUDA);
-    // LayerNorm is outside the ported operator set; it must report CUDA as
+TEST_F(SyclBackendTest, UnimplementedOperatorThrows) {
+    Tensor a = Tensor::Ones({2, 2}, DataType::FLOAT32, Device::SYCL);
+    Tensor w = Tensor::Ones({2}, DataType::FLOAT32, Device::SYCL);
+    Tensor b = Tensor::Zeros({2}, DataType::FLOAT32, Device::SYCL);
+    // LayerNorm is outside the ported operator set; it must report SYCL as
     // unimplemented rather than silently running on the CPU.
     EXPECT_THROW((void)ops::LayerNorm(a, w, b, 1), std::runtime_error);
 }

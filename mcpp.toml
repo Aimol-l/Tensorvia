@@ -64,6 +64,11 @@ cxxflags = ["-DNDEBUG"]   # 否则 vulkan.hpp 等第三方头的 assert 会启�
 [dev-dependencies]
 compat.gtest = "1.17.0"
 
+# 测试发现：tests/ 是后端无关的公共测试区（不区分后端）；backends/<x>/ 是
+# 各后端自己的冒烟（Device::X 专属，随后端目录走）。
+[test]
+discover = ["tests/**/*.cpp", "backends/**/*.cpp"]
+
 [build-dependencies]
 mcpp.plugins = { version = "0.19.1", features = ["rules-cuda", "rules-sycl"], host-module = true }
 
@@ -92,10 +97,6 @@ compat.cuda-driver = "2026.09.10"
 [target.'cfg(accelerator = "sycl")'.dependencies]
 compat.sycl-runtime = "2026.09.11"
 
-# Vulkan lane 的 SDK：头文件只进本包的 TU（private，不到使用方的 -I）；
-# 运行时适配器把 loader 放到产物的运行搜索路径上（私有 loader 不查 /usr/lib）。
-# 两者都由 feature 门控——不点名 vulkan 的使用方两者都不获取。
-# （Vulkan 没有 accel 轴：shader 走 build.mcpp 的 glslang action，不需要 --accel）
 [feature-deps.vulkan]
 "compat.vulkan-headers" = { version = "1.4.357.0", visibility = "private" }
 compat.vulkan-runtime  = "2026.09.11"
@@ -103,10 +104,6 @@ compat.vulkan-runtime  = "2026.09.11"
 [target.'cfg(accelerator = "cuda")'.build]
 ldflags = ["-lcudart_static", "-lrt", "-lpthread", "-ldl"]
 
-# OpenMP 的 flag 语法随编译器而变（clang 要指定 runtime，gcc 不认这个写法），
-# 按 compiler 层条件化——库不绑定单一工具链的 flag 语法。
-# 不写 -fno-math-errno：它是私有微优化，但会进入 clang 的 BMI 兼容性检查，
-# 逼每个 import 使用方模仿它——分发兼容性优先。
 [target.'cfg(compiler = "llvm")'.build]
 ldflags  = ["-fopenmp=libgomp"]
 cxxflags = ["-march=x86-64-v3", "-fopenmp=libgomp"]

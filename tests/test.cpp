@@ -7,7 +7,7 @@
 #include <exception>
 #include <vector>
 
-#include "tensorvia.hpp"
+import tensorvia;
 
 namespace {
 
