@@ -309,18 +309,11 @@ cmake -B build -DBACKEND_CPU=ON -DCMAKE_BUILD_TYPE=Release -DBUILD_TEST=ON && cm
 
 `tests/` 是头文件范式（`#include "tensorvia.hpp"`），mcpp 与 CMake 两条路径编译同一份文件、产出同样的两个二进制：`test`（公共 API 的全量行为测试，不区分后端，CPU 上运行）与 `bench`（基准，自带 main，`mcpp test` 与 `BUILD_BENCH` 都会构建它）。上面的 lane 命令验证的是**该 lane 完整构建 + 公共测试通过**；各设备后端编入后的算子行为由消费方冒烟覆盖。测试通过 `[dev-dependencies]` 拿 GoogleTest——它只进测试二进制，不进 `libtensorvia.so`。模块导出面（`import tensorvia;` 的符号清单）由 `tools/gen_facade.py --check` 在每次 `mcpp build` 时守卫。
 
-> **已知限制（llvm 工具链 + SYCL lane）**：`mcpp test --features sycl
-> --accel sycl` 有 1 个已知失败（`View.InPlaceRejectsNonContiguous`）——
-> libsycl 的 libstdc++ 与 llvm 主体的 libc++ 是两套 C++ 运行时，`.so` 内
-> 抛出的 `std::exception` 与测试二进制的 catch 类型不匹配（mcpp 42 章
-> unwinder 问题的类型版）。**解法：SYCL lane 用 GCC 工具链**
-> （libstdc++ 与 libsycl 同一世界）：
->
-> ```sh
-> mcpp test --toolchain gcc@16.1.0 --features sycl --accel sycl   # 实测 4/4
-> ```
->
-> CPU / Vulkan / CUDA lane 与 CMake 路径在 llvm 下全过。
+> **SYCL lane 的 llvm 构建需要 mcpp ≥ 2026.10.26.1**：该版本起 mcpp 把
+> libsycl 带来的 libstdc++ 识别为 C++ ABI island 并做链接后验证，`.so` 内
+> 异常类型恢复匹配（此前 llvm + SYCL lane 有 1 个 `View.
+> InPlaceRejectsNonContiguous` 异常类型失败，需 `--toolchain gcc@16.1.0`
+> 绕过；现已实测 23/23 全过）。
 
 ## 📄 许可证
 

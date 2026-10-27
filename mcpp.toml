@@ -9,11 +9,6 @@ platforms   = ["linux"]
 repo        = "https://github.com/Aimol-l/Tensorvia"
 
 #==================================编译器选择==================================
-# 注意：SYCL lane 需要 gcc 工具链（libstdc++ 与 libsycl 同一个 C++ 世界；
-# llvm 的 libc++ 会让 std::exception 的类型在 .so 边界分裂）。构建时显式：
-#   mcpp build/test --features sycl --accel sycl --toolchain gcc@16.1.0
-# （[toolchain] default = { configure = "build.mcpp" } 的按 lane 自动切换实测
-# 不触发 toolchain phase——plugins 库在依赖解析后才编译，见 ledger。）
 [toolchain] # 选择不同平台的编译器
 default = "llvm@22.1.8"
 linux   = "llvm@22.1.8"
@@ -53,7 +48,8 @@ defines = ['TENSORVIA_VERSION="0.3.0"']
 
 [profile.release]
 opt = 3
-cxxflags = ["-DNDEBUG"]   # 否则 vulkan.hpp 等第三方头的 assert 会启用到 release 构建
+# NDEBUG 由 mcpp 2026.10.26.1+ 的 release 内置提供（更早版本需在此加
+# cxxflags = ["-DNDEBUG"]，否则 vulkan.hpp 等第三方头的 assert 会进 release）
 
 #==================================依赖添加==================================
 # mcpp build --features xxx 进行启用
