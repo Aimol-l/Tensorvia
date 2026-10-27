@@ -3,5 +3,9 @@
   // cpptools 的语法高亮与 mcpp-vscode 注入的模块语法自动生效。
   "files.associations": {
     "*.sycl": "cpp"
-  }
+  },
+  // 语义层统一走 mcppls（内置 clangd，懂 mcpp 的模块与 lane）；
+  // cpptools 只保留 TextMate 语法高亮（含 mcpp 模块语法注入）。
+  // .sycl 的 flags 兜底见项目根 .clangd（PathMatch）。
+  "C_Cpp.intelliSenseEngine": "disabled"
 }

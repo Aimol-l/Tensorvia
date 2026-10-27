@@ -1,0 +1,17 @@
+# .sycl 设备单元的语义兜底。
+#
+# mcppls 的编译数据库不含 .sycl（rules-sycl 用 dpcpp payload 编译设备单元，
+# action 不进 compile_commands），clangd 会 fallback 到 CPU lane 的命令，
+# 找不到 sycl/sycl.hpp。这里按路径补上设备侧的 flags。
+#
+# 注意：dpcpp payload 路径人人相同（用户级 ~/.mcpp/registry）；项目绝对路径
+# 随 clone 位置而变——团队其他成员请把最后一行改成自己的 clone 路径。
+If:
+  PathMatch: .*\.sycl
+CompileFlags:
+  Add:
+    - -fsycl
+    - -std=c++20
+    - -DBACKEND_SYCL
+    - -I/home/aimol/.mcpp/registry/data/xpkgs/xim-x-dpcpp/7.1.0/include
+    - -I/home/aimol/Documents/C++/Workspace/MCPP/Tensorvia/src/backend/sycl
