@@ -42,6 +42,7 @@ sources = [
 
 include_dirs    = ["include"]
 default-profile = "release"
+compile_commands = "compile_commands.json"   # 在项目根放一份构建数据库副本（cpptools/clangd 语义层用）
 module_extensions = [".ixx"]
 build_program_timeout = 1800
 defines = ['TENSORVIA_VERSION="0.3.0"']

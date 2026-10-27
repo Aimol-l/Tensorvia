@@ -1,0 +1,7 @@
+{
+  // .sycl 设备单元就是 C++（SYCL 方言）：关联到 cpp 语言后，
+  // cpptools 的语法高亮与 mcpp-vscode 注入的模块语法自动生效。
+  "files.associations": {
+    "*.sycl": "cpp"
+  }
+}
