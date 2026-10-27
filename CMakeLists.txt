@@ -308,15 +308,21 @@ endif()
 # header_smoke.cpp。
 
 if(BUILD_BENCH)
-    # bench.cpp 是头文件范式的基准二进制：与 BUILD_TEST 的套件同文件范式，
-    # 只是它自带 main()。mcpp test 也会运行它。
-    add_executable(bench "${PROJECT_SOURCE_DIR}/tests/bench.cpp")
-    set_target_properties(bench PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
-    target_link_libraries(bench PRIVATE tensorvia)
-    if(BACKEND_CPU)
-        target_link_libraries(bench PRIVATE OpenMP::OpenMP_CXX)
-    endif()
+    # benchmark/ 是头文件范式的基准二进制目录：与 BUILD_TEST 的套件同文件
+    # 范式，各自带 main()。mcpp test 也会运行它们（见 [test] discover）。
+    file(GLOB TVV_BENCH_INPUTS CONFIGURE_DEPENDS
+        "${PROJECT_SOURCE_DIR}/benchmark/*.cpp"
+    )
+    foreach(bench_file ${TVV_BENCH_INPUTS})
+        get_filename_component(bench_name ${bench_file} NAME_WE)
+        add_executable(${bench_name} "${bench_file}")
+        set_target_properties(${bench_name} PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
+        target_link_libraries(${bench_name} PRIVATE tensorvia)
+        if(BACKEND_CPU)
+            target_link_libraries(${bench_name} PRIVATE OpenMP::OpenMP_CXX)
+        endif()
+    endforeach()
 endif()
 
 # ---------------------------------------------------------------------------

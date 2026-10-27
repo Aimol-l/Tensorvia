@@ -181,8 +181,8 @@ int sycl_c_launch_fill(void* ctx, void* out, int64_t numel, int dtype, double va
 int sycl_c_launch_random(void* ctx, void* out, int64_t numel, int dtype,
                          float lo, float hi, uint64_t seed);
 
-int sycl_c_launch_scalar(void* ctx, void* buf, int64_t numel, int dtype,
-                         int op, double scalar);
+int sycl_c_launch_scalar(void* ctx, void* buf, int64_t numel, int dtype,int op, double scalar);
+
 int sycl_c_launch_binary(void* ctx, const void* a, const void* b, void* out,
                          int dtype, int op, const tvv::sycl::Bcast* p);
 int sycl_c_launch_unary(void* ctx, const void* in, void* out, int64_t numel,

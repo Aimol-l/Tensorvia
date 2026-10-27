@@ -1,9 +1,11 @@
 .vscode
 .cache
 .github
+.superpowers
 target/
 compile_commands.json
 dist/
+specs/
 
 # CMake build trees
 build/

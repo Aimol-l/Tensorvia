@@ -15,18 +15,12 @@
 #include "tensorvia/tensor.hpp"
 #include "tensorvia/ops.hpp"
 #include "tensorvia/cpu_ops.hpp"
-#include "tensorvia/backend/vulkan/vulkan_ops.hpp"  // declarations only; definitions are compiled under BACKEND_VULKAN
-#include "tensorvia/backend/cuda/cuda_ops.hpp"    // declarations only; definitions are compiled under BACKEND_CUDA
-#include "tensorvia/backend/sycl/sycl_ops.hpp"    // declarations only; definitions are compiled under BACKEND_SYCL
+#include "tensorvia/backend/vulkan/vulkan_ops.hpp"
+#include "tensorvia/backend/cuda/cuda_ops.hpp"
+#include "tensorvia/backend/sycl/sycl_ops.hpp"
 
 namespace {
 
-// Route an op to the backend that owns the tensor(s). Only backends compiled
-// into this artifact are listed; asking for anything else is an error, never a
-// silent fallback (CPU kernels cannot dereference device buffers).
-// The primary Impl templates are declared but not defined, so an unsupported
-// backend is detectable without instantiating execute(). This matters because
-// :vulkan_ops / :cuda_ops only declare the operators their backend implements.
 template <template <Device> class Impl>
 concept has_vulkan_impl = requires { sizeof(Impl<Device::VULKAN>); };
 

@@ -65,6 +65,11 @@ opt = 3
 [dev-dependencies]
 compat.gtest = "1.17.0"
 
+# 测试与基准的发现路径：tests/ 是测试套件，benchmark/ 是基准二进制
+# （各自带 main，都由 mcpp test 运行）。
+[test]
+discover = ["tests/**/*.cpp", "benchmark/**/*.cpp"]
+
 [build-dependencies]
 mcpp.plugins = { version = "0.19.1", features = ["rules-cuda", "rules-sycl"], host-module = true }
 
