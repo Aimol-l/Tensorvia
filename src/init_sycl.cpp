@@ -1,7 +1,6 @@
 #include <cstddef>
 #include <memory>
 
-#include "tensorvia.hpp"
 #include "tensorvia/types.hpp"
 #include "tensorvia/factory.hpp"
 #include "tensorvia/backend/sycl/sycl_context.hpp"

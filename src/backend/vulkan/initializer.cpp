@@ -20,10 +20,14 @@ namespace {
 template <class Params>
 void fill_like(const Tensor& temp, const char* what, OpType op, const Params& params) {
     auto src_impl = std::dynamic_pointer_cast<VKTensor>(temp.get_impl());
-    if (!src_impl) throw std::runtime_error(std::string("vulkan ") + what + ": expected a VKTensor");
+    if (!src_impl) 
+        throw std::runtime_error(std::string("vulkan ") + what + ": expected a VKTensor");
+    
     auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
+
     if (!ctx_impl)
         throw std::runtime_error(std::string("vulkan ") + what + ": missing VulkanContext");
+
     ctx_impl->submitCompute(op, temp.dtype(), {src_impl->buffer()},
                             static_cast<uint32_t>((temp.numel() + 255) / 256), 1, 1, &params,
                             sizeof(params));
@@ -62,7 +66,11 @@ Tensor RandomImpl<Device::VULKAN>::execute(const std::vector<int64_t>& shape, Da
     Tensor temp(shape, dtype, Device::VULKAN);
     std::random_device rd;
     RandomParams params{
-        .min = min, .max = max, .seed = rd(), .numel = static_cast<int64_t>(temp.numel())};
+        .min = min,
+        .max = max,
+        .seed = rd(),
+        .numel = static_cast<int64_t>(temp.numel())
+    };
     fill_like(temp, "Random", OpType::Random, params);
     return temp;
 }

@@ -18,6 +18,15 @@
 
 namespace ops {
 
+// matmul 的并行度上限：12×8 微内核超过 16 线程后收益为负。
+// 以前用 omp_set_num_threads() 限流，那是进程级的副作用——之后所有并行区
+// （randn、sum、layer_norm…）都被顺带压到 16 线程。改用 num_threads 子句，
+// 只作用于下面这几个循环。
+#ifdef _OPENMP
+#define TV_GEMM_THREADS num_threads(std::min(omp_get_max_threads(), 16))
+#else
+#define TV_GEMM_THREADS
+#endif
 namespace {
 
 // f32 批量 GEMM micro-kernel：out[b,i,j] = Σ_k a[b,i,k]·b[b,k,j]（行主序）。
@@ -30,7 +39,7 @@ void gemm_micro_f32(const float* RESTRICT A, const float* RESTRICT B, float* RES
     constexpr int64_t NR = 8;   // 列分块：8 × f32 = 256bit
     constexpr int64_t KR = 256; // K 维缓存分块
 
-    #pragma omp parallel for collapse(2) schedule(static)
+    #pragma omp parallel for collapse(2) schedule(static) TV_GEMM_THREADS
     for (int64_t bi = 0; bi < batch; ++bi) {
         for (int64_t i0 = 0; i0 < rows; i0 += MR) {
             const float* RESTRICT A_b = A + bi * rows * common;
@@ -105,7 +114,7 @@ void gemm_micro_f32(const float* RESTRICT A, const float* RESTRICT B, float* RES
 
 template <typename T, typename R, typename S>
 void mul_kernel_basic(const T* a_ptr, const R* b_ptr, S* res_ptr, size_t batch, size_t rows, size_t common, size_t cols) {
-    #pragma omp parallel for collapse(2)
+    #pragma omp parallel for collapse(2) TV_GEMM_THREADS
     for (size_t b = 0; b < batch; ++b) {
         for (size_t i = 0; i < rows; ++i) {
             for (size_t j = 0; j < cols; ++j) {
@@ -128,7 +137,7 @@ void mul_kernel_tiled(const T* a_ptr, const R* b_ptr, S* result, size_t batch, s
     const size_t A_batch_stride = rows * common;
     const size_t B_batch_stride = common * cols;
     const size_t C_batch_stride = rows * cols;
-    #pragma omp parallel for collapse(3)
+    #pragma omp parallel for collapse(3) TV_GEMM_THREADS
     for (size_t b = 0; b < batch; ++b) {
         for (size_t by = 0; by < rows; by += TILE) {
             for (size_t bx = 0; bx < cols; bx += TILE) {
@@ -235,9 +244,6 @@ Tensor MatMulImpl<Device::CPU>::execute(const Tensor& a, const Tensor& b) {
     const Tensor& b_ = *b_p;
     DataType res_type = compute_type(a_.dtype(),b_.dtype());
     Tensor result(newshape,res_type,Device::CPU);
-#ifdef _OPENMP
-    omp_set_num_threads(std::min(omp_get_max_threads(), 16));
-#endif
     auto c_visitor = [&]<typename T, typename R>(const T* a_ptr,const R* b_ptr) {
         switch (res_type) {
             case DataType::INT8:

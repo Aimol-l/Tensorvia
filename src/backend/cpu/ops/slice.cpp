@@ -30,10 +30,11 @@ void slice_kernel(Tensor& out, const Tensor& in, const std::vector<std::pair<int
     // 获取数据指针
     const T* src_data = static_cast<const T*>(in.data());
     T* dest_data = static_cast<T*>(out.data());
-    // 准备一个临时 index 缓冲区
-    std::vector<int64_t> indices(new_shape.size(), 0);
     const size_t total_elem = out.numel();
+    #pragma omp parallel for if (total_elem > 4096)  // 4096 是一个经验值
     for (size_t linear_idx = 0; linear_idx < total_elem; ++linear_idx) {
+        // 坐标缓冲放在栈上：每个迭代独立，并行时不会互相踩，也不产生堆分配
+        int64_t indices[kMaxTensorDims] = {};
         // 将线性 idx 展开成多维坐标
         size_t remaining = linear_idx;
         for (int i = static_cast<int>(new_shape.size()) - 1; i >= 0; --i) {

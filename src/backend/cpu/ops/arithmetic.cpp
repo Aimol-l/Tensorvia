@@ -21,7 +21,7 @@ namespace ops {
 
 template <typename T>
 void add_kernel(const T* RESTRICT a, const T* RESTRICT b, T* RESTRICT out, size_t size) {
-    #pragma omp parallel for
+    #pragma omp parallel for if (size > 4096)  // 4096 是一个经验值
     for (size_t i = 0; i < size; ++i) {
         out[i] = a[i] + b[i];
     }
@@ -31,12 +31,14 @@ template <typename T> // T = int8_t ~ int64_t ,float16 ~ float64,bfloat16
 void add_kernel(T* a, float b, size_t size) {
     const T b_cast = static_cast<T>(b); // 注意类型转换
     // 让编译器去优化速度
+    #pragma omp parallel for if (size > 4096)
     for (size_t i = 0; i < size; ++i) {
         a[i] += b_cast;
     }
 }
 template <typename T>
 void sub_kernel(const T* RESTRICT a, const T* RESTRICT b, T* RESTRICT out, size_t size) {
+    #pragma omp parallel for if (size > 4096)
     for (size_t i = 0; i < size; ++i) {
         out[i] = static_cast<T>(a[i] - b[i]);  // 注意类型转换
     }
@@ -45,12 +47,14 @@ void sub_kernel(const T* RESTRICT a, const T* RESTRICT b, T* RESTRICT out, size_
 template <typename T>
 void sub_kernel(T* a, float b, size_t size) {
     const T b_cast = static_cast<T>(b); // 注意类型转换
+    #pragma omp parallel for if (size > 4096)
     for (size_t i = 0; i < size; ++i) {
         a[i] -= b_cast;  // 注意类型转换
     }
 }
 template <typename T>
 void mul_kernel(const T* RESTRICT a, const T* RESTRICT b, T* RESTRICT out, size_t size) {
+    #pragma omp parallel for if (size > 4096)
     for (size_t i = 0; i < size; ++i) {
         out[i] = static_cast<T>(a[i] * b[i]);  // 注意类型转换
     }
@@ -59,12 +63,14 @@ void mul_kernel(const T* RESTRICT a, const T* RESTRICT b, T* RESTRICT out, size_
 template <typename T>
 void mul_kernel(T* a, float b, size_t size) {
     const T b_cast = static_cast<T>(b); // 注意类型转换
+    #pragma omp parallel for if (size > 4096)
     for (size_t i = 0; i < size; ++i) {
         a[i] *= b_cast;  // 注意类型转换
     }
 }
 template <typename T>
 void div_kernel(const T* RESTRICT a, const T* RESTRICT b, T* RESTRICT out, size_t size) {
+    #pragma omp parallel for if (size > 4096)
     for (size_t i = 0; i < size; ++i) {
         if (b[i] != T(0))
             out[i] = static_cast<T>(a[i] / b[i]);  // 注意类型转换
@@ -75,6 +81,7 @@ void div_kernel(const T* RESTRICT a, const T* RESTRICT b, T* RESTRICT out, size_
 template <typename T>
 void div_kernel(T* a, float b, size_t size) {
     const T b_cast = T(b); // 注意类型转换
+    #pragma omp parallel for if (size > 4096)
     for (size_t i = 0; i < size; ++i) {
         a[i] /=b_cast;  // 注意类型转换
     }
@@ -98,6 +105,7 @@ void clamp_kernel(const T* src_ptr, T* dst_ptr, size_t n, float min, float max) 
 }
 template <typename T, typename R = T>
 void sin_kernel(const T* src_ptr, R* dst_ptr, size_t n) {
+#pragma omp parallel for
     for (size_t i = 0; i < n; ++i) {
         if constexpr (std::is_same_v<T, bfloat16> || std::is_same_v<T, float16>) {
             float val = std::sinf(float(src_ptr[i]));
@@ -245,6 +253,7 @@ struct AbsOp {
     // 条件式取代原来的非限定 abs() 调用（后者对 float 走 <cstdlib> 的 int 版本）
     template <class T, class R = T>
     static void kernel(const T* src, R* dst, size_t n) {
+        #pragma omp parallel for if (n > 4096)  // 4096 是一个经验值
         for (size_t i = 0; i < n; ++i)
             dst[i] = static_cast<R>(src[i] < T(0) ? -src[i] : src[i]);
     }

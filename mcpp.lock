@@ -5,6 +5,12 @@
 # file must not change depending on which command ran last.
 version = 2
 
+[package."compat.openmp"]
+namespace = "compat"
+version = "22.1.8"
+source  = "index+compat@22.1.8"
+hash    = "fnv1a:d769c475fd4d5817"
+
 [package."mcpp.plugins"]
 namespace = "mcpp"
 version = "0.19.1"

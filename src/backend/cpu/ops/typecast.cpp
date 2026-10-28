@@ -54,6 +54,7 @@ namespace ops {
 
 template <typename T, typename R>
 void cast_kernel(const T* src, R* dst, size_t size) {
+    #pragma omp parallel for if (size > 4096)  // 4096 是一个经验值
     for (size_t i = 0; i < size; i++) {
         dst[i] = static_cast<R>(src[i]);
     }

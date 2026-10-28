@@ -31,10 +31,13 @@ VulkanContext::VulkanContext() {
     this->createDescriptorPool();
     this->registerPipelines();
 
+    // 设备信息只属于调试输出：release（NDEBUG）不能污染调用方的 stdout。
+    // 与 CPUContext 的同一段打印保持一致。
+#ifndef NDEBUG
     auto props    = m_phydevice.getProperties();
     auto memProps = m_phydevice.getMemoryProperties();
     std::println("*************************Vulkan Device Info******************");
-    std::println("Selected Vulkan Device:{}", std::string_view(props.deviceName));
+    std::println("Selected Vulkan Device: {}", std::string_view(props.deviceName));
     for (uint32_t i = 0; i < memProps.memoryHeapCount; ++i) {
         auto heap = memProps.memoryHeaps[i];
         bool isDeviceLocal =
@@ -47,6 +50,7 @@ VulkanContext::VulkanContext() {
     std::println("Max Compute Work Invocations Size: {}",
                  props.limits.maxComputeWorkGroupInvocations);
     std::println("*************************************************************");
+#endif
 }
 
 VulkanContext::~VulkanContext() {
@@ -248,7 +252,9 @@ void VulkanContext::createInstance() {
         createInfo.setPApplicationInfo(&appInfo).setPEnabledLayerNames(m_validationLayers);
     }
     createInfo.setPApplicationInfo(&appInfo).setPEnabledExtensionNames(instanceExtensions);
-    this->m_instance = vk::UniqueInstance(vk::createInstance(createInfo));
+    // 同 createLogicalDevice：createInstanceUnique 会存好 dispatcher，裸句柄
+    // 构造的 UniqueInstance 在 debug 析构时会触发 VULKAN_HPP_ASSERT(m_dispatch)。
+    this->m_instance = vk::createInstanceUnique(createInfo);
 }
 
 bool VulkanContext::checkLayerSupport() {
@@ -424,7 +430,11 @@ void VulkanContext::createLogicalDevice() {
         .setPpEnabledExtensionNames(m_deviceExtensions.data())
         .setPNext(&features2);
 
-    m_device        = vk::UniqueDevice(m_phydevice.createDevice(createInfo));
+    // createDeviceUnique 会把 dispatcher 一起存进 UniqueDevice；裸句柄构造的
+    // UniqueDevice 其 ObjectDestroy 里 m_dispatch 是空指针，debug 下析构时
+    // vulkan.hpp 的 VULKAN_HPP_ASSERT(m_dispatch) 直接 abort，release 下则是
+    // 对空指针解引用的 UB。
+    m_device        = m_phydevice.createDeviceUnique(createInfo);
     m_compute_queue = m_device->getQueue(m_queuefamily, 0);
 }
 

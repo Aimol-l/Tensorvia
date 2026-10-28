@@ -42,10 +42,10 @@ sources = [
 
 include_dirs    = ["include"]
 default-profile = "release"
-compile_commands = "compile_commands.json"   # 在项目根放一份构建数据库副本（cpptools/clangd 语义层用）
 module_extensions = [".ixx"]
 build_program_timeout = 1800
 defines = ['TENSORVIA_VERSION="0.3.0"']
+compile_commands = "./target/compile_commands.json"
 
 [profile.release]
 opt = 3
@@ -72,7 +72,7 @@ compat.gtest = "1.17.0"
 discover = ["tests/**/*.cpp", "benchmark/**/*.cpp"]
 
 [build-dependencies]
-mcpp.plugins = { version = "0.19.1", features = ["rules-cuda", "rules-sycl"], host-module = true }
+mcpp.plugins = { version = "0.19.1", features = ["rules-cuda", "rules-sycl","rules-spirv"], host-module = true }
 
 #=================================编译产物和名称================================
 [targets.tensorvia]
@@ -92,23 +92,26 @@ soname = "libtensorvia.so.1"
 # windows_long_paths    # 是否支持长路径
 #========================================================================
 
-# 运行时适配器：把驱动/运行时库放到产物的运行搜索路径上（私有 loader 不查 /usr/lib）
 [target.'cfg(accelerator = "cuda")'.dependencies]
 compat.cuda-driver = "2026.09.10"
 
 [target.'cfg(accelerator = "sycl")'.dependencies]
 compat.sycl-runtime = "2026.09.11"
+gcc.libstdcxx = "16.1.0.1"
 
-[feature-deps.vulkan]
+[target.'cfg(accelerator = "vulkan")'.dependencies]
 compat.vulkan-runtime  = "2026.09.11"
-"compat.vulkan-headers" = { version = "1.4.357.0", visibility = "private" }
+compat.vulkan-headers =  { version = "1.4.357.0", visibility = "private" }
 
 [target.'cfg(accelerator = "cuda")'.build]
 ldflags = ["-lcudart_static", "-lrt", "-lpthread", "-ldl"]
 
+[dependencies]
+compat.openmp = "22.1.8"
+
 [target.'cfg(compiler = "llvm")'.build]
-ldflags  = ["-fopenmp=libgomp"]
-cxxflags = ["-march=x86-64-v3", "-fopenmp=libgomp"]
+ldflags  = ["-fopenmp"]
+cxxflags = ["-march=x86-64-v3", "-fopenmp"]
 
 [target.'cfg(compiler = "gcc")'.build]
 ldflags  = ["-fopenmp"]

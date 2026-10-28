@@ -15,9 +15,9 @@
 
 namespace ops {
 template <OpType Op, typename T, typename R>
-void comparison_kernel(int8_t *res, const T *a_ptr, const R *b_ptr, int size) {
+void comparison_kernel(int8_t *res, const T *a_ptr, const R *b_ptr, size_t size) {
 #pragma omp parallel for if (size > 4096)  // 4096 是一个经验值
-    for (int i = 0; i < size; ++i) {
+    for (size_t i = 0; i < size; ++i) {
         if constexpr (std::is_integral_v<T> && std::is_integral_v<R>) {
             // 对整数直接进行比较，速度最快
             const auto val_a = a_ptr[i];
@@ -122,32 +122,32 @@ void comparison_scalar_kernel(int8_t *res, const T *a_ptr, float scalar, size_t 
 
 // --- 包装函数，提供清晰的 API ---
 template <typename T, typename R>
-void equal_kernel(int8_t *res, const T *a_ptr, const R *b_ptr, int size) {
+void equal_kernel(int8_t *res, const T *a_ptr, const R *b_ptr, size_t size) {
     comparison_kernel<OpType::Equal>(res, a_ptr, b_ptr, size);
 }
 
 template <typename T, typename R>
-void not_equal_kernel(int8_t *res, const T *a_ptr, const R *b_ptr, int size) {
+void not_equal_kernel(int8_t *res, const T *a_ptr, const R *b_ptr, size_t size) {
     comparison_kernel<OpType::NotEqual>(res, a_ptr, b_ptr, size);
 }
 
 template <typename T, typename R>
-void greater_kernel(int8_t *res, const T *a_ptr, const R *b_ptr, int size) {
+void greater_kernel(int8_t *res, const T *a_ptr, const R *b_ptr, size_t size) {
     comparison_kernel<OpType::Greater>(res, a_ptr, b_ptr, size);
 }
 
 template <typename T, typename R>
-void greater_equal_kernel(int8_t *res, const T *a_ptr, const R *b_ptr, int size) {
+void greater_equal_kernel(int8_t *res, const T *a_ptr, const R *b_ptr, size_t size) {
     comparison_kernel<OpType::GreaterEqual>(res, a_ptr, b_ptr, size);
 }
 
 template <typename T, typename R>
-void less_kernel(int8_t *res, const T *a_ptr, const R *b_ptr, int size) {
+void less_kernel(int8_t *res, const T *a_ptr, const R *b_ptr, size_t size) {
     comparison_kernel<OpType::Less>(res, a_ptr, b_ptr, size);
 }
 
 template <typename T, typename R>
-void less_equal_kernel(int8_t *res, const T *a_ptr, const R *b_ptr, int size) {
+void less_equal_kernel(int8_t *res, const T *a_ptr, const R *b_ptr, size_t size) {
     comparison_kernel<OpType::LessEqual>(res, a_ptr, b_ptr, size);
 }
 

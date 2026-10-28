@@ -20,20 +20,20 @@
 namespace ops {
 
 template <typename T>
-void transpose_2d_kernel(const T* RESTRICT input, T* RESTRICT output, int rows, int cols) {
+void transpose_2d_kernel(const T* RESTRICT input, T* RESTRICT output, int64_t rows, int64_t cols) {
     constexpr int TILE_M = 64;  // 每块输出行数（可调）
     constexpr int TILE_N = 64; // 每块输出列数（尽量大）
     // OpenMP 并行：按输出行分块
     #pragma omp parallel for schedule(dynamic, 1)
-    for (int j0 = 0; j0 < cols; j0 += TILE_M) {
-        const int j1 = std::min(j0 + TILE_M, cols);
-        for (int i0 = 0; i0 < rows; i0 += TILE_N) {
-            const int i1 = std::min(i0 + TILE_N, rows);
+    for (int64_t j0 = 0; j0 < cols; j0 += TILE_M) {
+        const int64_t j1 = std::min<int64_t>(j0 + TILE_M, cols);
+        for (int64_t i0 = 0; i0 < rows; i0 += TILE_N) {
+            const int64_t i1 = std::min<int64_t>(i0 + TILE_N, rows);
             // 转置当前块: output[j][i] = input[i][j]
-            for (int j = j0; j < j1; ++j) {
+            for (int64_t j = j0; j < j1; ++j) {
                 T* out_row = output + j * rows + i0;      // 连续写入（缓存友好）
                 const T* in_col = input + i0 * cols + j;  // 跨步读取
-                for (int i = i0; i < i1; ++i) {
+                for (int64_t i = i0; i < i1; ++i) {
                     out_row[i - i0] = in_col[(i - i0) * cols];
                 }
             }
@@ -41,8 +41,8 @@ void transpose_2d_kernel(const T* RESTRICT input, T* RESTRICT output, int rows, 
     }
 }
 void TransposeImpl<Device::CPU>::execute(Tensor& a) {
-    int rows = a.shape(0);
-    int cols = a.shape(1);
+    const int64_t rows = a.shape(0);
+    const int64_t cols = a.shape(1);
     Tensor output({cols, rows}, a.dtype(), a.device());
     dispatch_dtype(a.dtype(), [&](auto type_id) {
         using T = typename decltype(type_id)::type;
@@ -59,8 +59,8 @@ template <typename T>
 void transpose_nd_kernel(T* dst_data,const T* src_data, const std::vector<int64_t>& axes, std::vector<int64_t> in_strides, std::vector<int64_t> out_strides, size_t size, int dim) {
     // 并行处理每个元素(使用OpenMP模拟并行)
     #pragma omp parallel for
-    for (int i = 0; i < size; ++i) {
-        int tmp = i;
+    for (size_t i = 0; i < size; ++i) {
+        int64_t tmp = static_cast<int64_t>(i);
         std::vector<int64_t> coord(dim);        // 存储解码后的多维坐标 (i,j,k, ...)
         std::vector<int64_t> trans_coord(dim);  // 存储重新排列后的多维坐标 (a,b,c, ...)
         // 解码坐标，将线性索引转换为多维坐标
@@ -73,7 +73,7 @@ void transpose_nd_kernel(T* dst_data,const T* src_data, const std::vector<int64_
             trans_coord[d] = coord[axes[d]];
         }
         // 编码坐标
-        int out_index = 0;
+        int64_t out_index = 0;
         for (int d = 0; d < dim; ++d) {
             out_index += trans_coord[d] * out_strides[d];  // 根据新的坐标计算线性索引
         }
@@ -94,11 +94,11 @@ void transpose_nd_kernel(T* dst, const T* src, std::span<const int64_t> shape, c
     }
     if (prefix == dim - 2) {
         // 最后两维需要转置 → 2D 分块转置
-        int rows = shape[dim - 2];
-        int cols = shape[dim - 1];
-        int batch = std::accumulate(shape.begin(), shape.begin() + prefix, 1LL, std::multiplies<>());
+        const int64_t rows = shape[dim - 2];
+        const int64_t cols = shape[dim - 1];
+        const int64_t batch = std::accumulate(shape.begin(), shape.begin() + prefix, int64_t{1}, std::multiplies<>());
         #pragma omp parallel for
-        for (int b = 0; b < batch; ++b) {
+        for (int64_t b = 0; b < batch; ++b) {
             const T* src_batch = src + b * rows * cols;
             T* dst_batch = dst + b * cols * rows;
             transpose_2d_kernel(src_batch, dst_batch, rows, cols);
@@ -106,7 +106,7 @@ void transpose_nd_kernel(T* dst, const T* src, std::span<const int64_t> shape, c
         return;
     }
     // 递归：按最外层维度分片
-    int outer_dim = shape[0];
+    const int64_t outer_dim = shape[0];
     std::vector<int64_t> inner_shape(shape.begin() + 1, shape.end());
     std::vector<int64_t> inner_axes;
     for (int ax : axes) {
@@ -116,7 +116,7 @@ void transpose_nd_kernel(T* dst, const T* src, std::span<const int64_t> shape, c
     std::sort(inner_axes.begin(), inner_axes.end());
     // 实际需要重排 inner_axes 以匹配原 axes，此处简化
     int64_t inner_size = std::accumulate(inner_shape.begin(), inner_shape.end(), 1LL, std::multiplies<>());
-    for (int i = 0; i < outer_dim; ++i) {
+    for (int64_t i = 0; i < outer_dim; ++i) {
         transpose_nd_kernel(
             dst + i * inner_size,
             src + i * inner_size,

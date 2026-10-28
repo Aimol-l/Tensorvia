@@ -33,19 +33,25 @@ void concat_kernel(Tensor& res, const std::vector<Tensor>& tensors, int dim) {
         std::vector<int64_t> stride(t_dim, 1);
         for (int k = t_dim - 2; k >= 0; --k)
             stride[k] = stride[k + 1] * t_shape[k + 1];
-        for (size_t j = 0; j < t_numl; ++j) {
-            size_t temp = j;
+        // 输入块在输出里互不重叠，所以按 i 拆线程安全；coord 每线程一份，
+        // 省掉原来"每个元素 new 一个 vector"的堆分配
+        #pragma omp parallel if (t_numl > 4096)  // 4096 是一个经验值
+        {
             std::vector<size_t> coord(t_dim);
-            for (size_t k = 0; k < t_dim; ++k) {
-                coord[k] = temp / stride[k];
-                temp %= stride[k];
+            #pragma omp for schedule(static)
+            for (size_t j = 0; j < t_numl; ++j) {
+                size_t temp = j;
+                for (size_t k = 0; k < t_dim; ++k) {
+                    coord[k] = temp / stride[k];
+                    temp %= stride[k];
+                }
+                coord[dim] += offsets[i];
+                size_t linear_coord = 0;
+                for (size_t k = 0; k < t_dim; ++k) {
+                    linear_coord += coord[k] * res_coord_weight[k];
+                }
+                pr[linear_coord] = static_cast<T>(pt[j]);
             }
-            coord[dim] += offsets[i];
-            size_t linear_coord = 0;
-            for (size_t k = 0; k < t_dim; ++k) {
-                linear_coord += coord[k] * res_coord_weight[k];
-            }
-            pr[linear_coord] = static_cast<T>(pt[j]);
         }
     }
 }

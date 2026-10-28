@@ -1,10 +1,13 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <print>
+#include <string_view>
 #include <vector>
 
 #include "tensorvia.hpp"
@@ -13,13 +16,184 @@ namespace {
 
 constexpr float kEps = 1e-5f;
 
+constexpr std::array<Device, 4> kAllDevices{Device::CPU, Device::CUDA,
+                                            Device::SYCL, Device::VULKAN};
+
+// 本次编译启用的后端就是被测后端，优先级与 Tensor::to_device(uint32_t) 一致：
+// Vulkan > CUDA > SYCL > CPU。设备相关的用例全部跑在它上面。
+constexpr Device kTestDevice =
+#if defined(BACKEND_VULKAN)
+    Device::VULKAN;
+#elif defined(BACKEND_CUDA)
+    Device::CUDA;
+#elif defined(BACKEND_SYCL)
+    Device::SYCL;
+#else
+    Device::CPU;
+#endif
+
 // Recreate the [[1,2,3],[4,5,6],[7,8,9]] fixture shared by several view tests.
 Tensor matrix_3x3() {
     static std::vector<float> values{1, 2, 3, 4, 5, 6, 7, 8, 9};
     return Tensor(values, {3, 3});
 }
 
+// 探测一个后端能否真的用：既要有编译进来的实现（否则 execute_on 抛
+// "no implementation compiled for device"），又要 context 能建起来（驱动/
+// 运行时缺失时 Vulkan/SYCL 的构造函数会抛）。两种失败都归为"不可用"。
+bool backend_available(Device device) {
+    try {
+        auto probe = Tensor::Zeros({1}, DataType::FLOAT32, device);
+        return probe.numel() == 1;
+    } catch (...) {
+        return false;
+    }
+}
+
+// 把张量搬回 host，按连续内存取出元素。
+template <typename T>
+std::vector<T> host_values(Tensor tensor) {
+    tensor.to_host();
+    const T* begin = static_cast<const T*>(tensor.data());
+    return {begin, begin + tensor.numel()};
+}
+
+// 拷贝一份放到目标设备；入参按值传递，调用方的 host 张量不受影响。
+Tensor moved_to(Tensor tensor, Device device) {
+    if (device != Device::CPU) tensor.to_device(device);
+    return tensor;
+}
+
+template <typename T>
+void expect_close(const std::vector<T>& got, const std::vector<T>& want,
+                  std::string_view what) {
+    ASSERT_EQ(got.size(), want.size()) << what;
+    for (std::size_t i = 0; i < got.size(); ++i) {
+        EXPECT_NEAR(got[i], want[i], kEps) << what << " at index " << i;
+    }
+}
+
 }  // namespace
+
+// ---------- 0. 被测后端 ----------
+// 先报告这次构建选中的后端在这台机器上能不能跑，避免把 CPU 的结果误当成
+// 加速器路径的结果。
+TEST(Backend, AvailableDevices) {
+    std::size_t available = 0;
+    std::println("[tensorvia] compiled backend under test: {}", device_to_string(kTestDevice));
+    for (Device device : kAllDevices) {
+        const bool ok = backend_available(device);
+        available += ok ? 1 : 0;
+        std::println("[tensorvia]   {:<7}{}", device_to_string(device),ok ? "✅" : "❌");
+    }
+    EXPECT_GE(available, 1u) << "no tensor backend is usable in this build";
+}
+
+// ---------- 0b. 设备相关用例：跑在本次编译启用的后端上 ----------
+// CPU 参考值由同一份代码在 host 算一遍，再逐值对比；后端不可用时整组 SKIP。
+class DeviceOps : public ::testing::Test {
+protected:
+    void SetUp() override {
+        if (!backend_available(kTestDevice)) {
+            GTEST_SKIP() << device_to_string(kTestDevice) << " is unavailable in this build";
+        }
+    }
+    static constexpr Device dev = kTestDevice;
+};
+
+TEST_F(DeviceOps, ElementwiseAndMatMul) {
+    std::vector<float> av{1, 2, 3, 4, 5, 6};  // 2x3
+    std::vector<float> bv{6, 5, 4, 3, 2, 1};  // 2x3
+    std::vector<float> cv{1, 0, 2, 1, 0, 1};  // 3x2，matmul 的右操作数
+
+    const Tensor a_cpu(av, {2, 3}), b_cpu(bv, {2, 3}), c_cpu(cv, {3, 2});
+    const auto add_ref = host_values<float>(a_cpu + b_cpu);
+    const auto sub_ref = host_values<float>(a_cpu - b_cpu);
+    const auto mul_ref = host_values<float>(a_cpu * b_cpu);
+    const auto div_ref = host_values<float>(a_cpu / b_cpu);
+    const auto sca_ref = host_values<float>(a_cpu * 2.0f);
+    const auto mm_ref  = host_values<float>(ops::MatMul(a_cpu, c_cpu));
+
+    const Tensor a = moved_to(a_cpu, dev);
+    const Tensor b = moved_to(b_cpu, dev);
+    const Tensor c = moved_to(c_cpu, dev);
+
+    const auto sum = a + b;
+    EXPECT_TRUE(sum.device() == dev) << "result must stay on " << device_to_string(dev);
+    expect_close(host_values<float>(sum), add_ref, "add");
+    expect_close(host_values<float>(a - b), sub_ref, "sub");
+    expect_close(host_values<float>(a * b), mul_ref, "mul");
+    expect_close(host_values<float>(a / b), div_ref, "div");
+    expect_close(host_values<float>(a * 2.0f), sca_ref, "mul-scalar");
+    expect_close(host_values<float>(ops::MatMul(a, c)), mm_ref, "matmul");
+}
+
+TEST_F(DeviceOps, UnaryMath) {
+    std::vector<float> av{0.5f, 1.0f, 1.5f, 2.0f, 2.5f, 3.0f};  // log/sqrt 需要正数
+    const Tensor a_cpu(av, {2, 3});
+
+    const auto exp_ref  = host_values<float>(ops::Exp(a_cpu));
+    const auto sqrt_ref = host_values<float>(ops::Sqrt(a_cpu));
+    const auto log_ref  = host_values<float>(ops::Log(a_cpu, 2.0f));
+    const auto abs_ref  = host_values<float>(ops::Abs(a_cpu));
+    const auto relu_ref = host_values<float>(ops::Relu(a_cpu));
+
+    const Tensor a = moved_to(a_cpu, dev);
+    expect_close(host_values<float>(ops::Exp(a)), exp_ref, "exp");
+    expect_close(host_values<float>(ops::Sqrt(a)), sqrt_ref, "sqrt");
+    expect_close(host_values<float>(ops::Log(a, 2.0f)), log_ref, "log");
+    expect_close(host_values<float>(ops::Abs(a)), abs_ref, "abs");
+    expect_close(host_values<float>(ops::Relu(a)), relu_ref, "relu");
+}
+
+TEST_F(DeviceOps, ReductionAndSoftmax) {
+    std::vector<float> av{1, 2, 3, 4, 5, 6};
+    const Tensor a_cpu(av, {2, 3});
+    const float sum_ref  = ops::Sum(a_cpu);
+    const float mean_ref = ops::Mean(a_cpu);
+    const float min_ref  = ops::Min(a_cpu);
+    const float max_ref  = ops::Max(a_cpu);
+    const auto axis_ref  = host_values<float>(ops::Sum(a_cpu, 1));
+    const auto sm_ref    = host_values<float>(ops::Softmax(a_cpu, 1));
+
+    const Tensor a = moved_to(a_cpu, dev);
+    EXPECT_NEAR(ops::Sum(a), sum_ref, kEps) << "sum on " << device_to_string(dev);
+    EXPECT_NEAR(ops::Mean(a), mean_ref, kEps) << "mean on " << device_to_string(dev);
+    EXPECT_NEAR(ops::Min(a), min_ref, kEps) << "min on " << device_to_string(dev);
+    EXPECT_NEAR(ops::Max(a), max_ref, kEps) << "max on " << device_to_string(dev);
+    expect_close(host_values<float>(ops::Sum(a, 1)), axis_ref, "sum-axis");
+    expect_close(host_values<float>(ops::Softmax(a, 1)), sm_ref, "softmax");
+}
+
+TEST_F(DeviceOps, ComparisonTypecastConcat) {
+    std::vector<float> av{1, 2, 3, 4, 5, 6};
+    std::vector<float> bv{6, 5, 4, 3, 2, 1};
+    const Tensor a_cpu(av, {2, 3}), b_cpu(bv, {2, 3});
+
+    const auto gt_ref   = host_values<std::int8_t>(ops::Greater(a_cpu, b_cpu));
+    const auto gt0_ref  = host_values<std::int8_t>(ops::Greater(a_cpu, 3.0f));
+    const auto cast_ref = host_values<double>(ops::Typecast(a_cpu, DataType::FLOAT64));
+    const auto cat_ref  = host_values<float>(ops::Concat({a_cpu, b_cpu}, 0));
+
+    const Tensor a = moved_to(a_cpu, dev);
+    const Tensor b = moved_to(b_cpu, dev);
+    expect_close(host_values<std::int8_t>(ops::Greater(a, b)), gt_ref, "greater");
+    expect_close(host_values<std::int8_t>(ops::Greater(a, 3.0f)), gt0_ref, "greater-scalar");
+    expect_close(host_values<double>(ops::Typecast(a, DataType::FLOAT64)), cast_ref, "typecast");
+    expect_close(host_values<float>(ops::Concat({a, b}, 0)), cat_ref, "concat");
+}
+
+TEST_F(DeviceOps, SliceAndTranspose) {
+    std::vector<float> av{1, 2, 3, 4, 5, 6};
+    const Tensor a_cpu(av, {2, 3});
+
+    const auto slice_ref  = host_values<float>(ops::Slice(a_cpu, {{0, 1}, {1, 3}}));
+    const auto transp_ref = host_values<float>(ops::Transpose(a_cpu, {1, 0}));
+
+    const Tensor a = moved_to(a_cpu, dev);
+    expect_close(host_values<float>(ops::Slice(a, {{0, 1}, {1, 3}})), slice_ref, "slice");
+    expect_close(host_values<float>(ops::Transpose(a, {1, 0})), transp_ref, "transpose");
+}
 
 // ---------- 原有冒烟 ----------
 TEST(Tensorvia, BasicArithmetic) {

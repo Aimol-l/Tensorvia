@@ -164,7 +164,7 @@ float mean_kernel(const Tensor& src) {
 template <typename T>
 float min_kernel(const T *ptr, size_t size) {
     float min_val = std::numeric_limits<float>::max();
-    #pragma omp simd reduction(min:min_val)
+    #pragma omp parallel for simd reduction(min:min_val) schedule(static)
     for (size_t i = 0; i < size; ++i) {
         float val = static_cast<float>(ptr[i]);
         min_val = std::min(min_val, val);
@@ -175,7 +175,7 @@ float min_kernel(const T *ptr, size_t size) {
 template <typename T>
 float max_kernel(const T *ptr, size_t size) {
     float max_val = std::numeric_limits<float>::lowest();
-    #pragma omp simd reduction(max:max_val)
+    #pragma omp parallel for simd reduction(max:max_val) schedule(static)
     for (size_t i = 0; i < size; ++i) {
         float val = static_cast<float>(ptr[i]);
         max_val = std::max(max_val, val);

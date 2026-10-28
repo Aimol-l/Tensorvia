@@ -24,9 +24,9 @@ void TypecastImpl<Device::VULKAN>::execute(Tensor& a, DataType dst_type) {
     a.to_host();
     a.to_type_(dst_type);
     a.to_device(Device::VULKAN);
-    std::println(stderr,
-                 "warning: Vulkan Typecast is implemented as a host round-trip (no compute "
-                 "shader)");
+#ifndef NDEBUG
+    std::println(stderr,"warning: Vulkan Typecast is implemented as a host round-trip (no compute ""shader)");
+#endif
 }
 
 }  // namespace ops

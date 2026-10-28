@@ -7,8 +7,7 @@ using namespace tvv::sycl_dev;
 namespace {
 
 template <class T, class R>
-void softmax_kernel(sycl::queue& q, const T* in, R* out,
-                    const tvv::sycl::ReduceAxis& p) {
+void softmax_kernel(sycl::queue& q, const T* in, R* out,const tvv::sycl::ReduceAxis& p) {
     using C = std::conditional_t<std::is_same_v<R, double>, double, float>;
     const int64_t total = p.outer * p.inner;
     q.parallel_for(range_of(total), [=](sycl::id<1> idx) {
