@@ -1,5 +1,6 @@
-#include <spirv/spv_registry.h>
 #include <vulkan/vulkan.hpp>
+
+#include "tensorvia/backend/vulkan/spv_registry.hpp"
 
 #include <array>
 #include <cstdint>
@@ -75,10 +76,14 @@ void VulkanContext::registerOp(OpType ops, std::vector<DataType>& dtypes,
                                int tensor_count, int params_size) {
     std::string ori_op = op_to_string(ops);
     for (auto& type : dtypes) {
-        std::string key = std::format("{}_{}", ori_op, dtype_to_string(type));
-        auto spvCode = vkspv::get_spv_code(key);
+        const std::string key = make_pipeline_key(ops, type);
+        // 视图直接指向编译进产物的静态数组：不拷贝。setCode 收的是
+        // ArrayProxyNoTemporaries，所以代理得先落成一个具名对象。
+        const auto spv = vkspv::get_spv_code(key);
+        const vk::ArrayProxyNoTemporaries<const std::uint32_t> code(
+            static_cast<std::uint32_t>(spv.words), spv.data);
         vk::ShaderModuleCreateInfo createInfo;
-        createInfo.setCode(spvCode);
+        createInfo.setCode(code);
 
         vk::UniqueShaderModule shaderModule;
         try {

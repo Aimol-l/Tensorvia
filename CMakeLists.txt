@@ -94,16 +94,21 @@ if(BACKEND_VULKAN)
     )
     list(APPEND TVV_SOURCE_INPUTS ${TVV_VULKAN_INPUTS})
     # SPIR-V registry: generated into the build tree so the source tree stays
-    # clean. This is the same generator mcpp's build.mcpp invokes.
+    # clean. CMake has no rule engine, so this lane keeps the script; the mcpp
+    # lane compiles the same shaders through mcpp.rules.spirv.
+    # `glslangValidator` must know GL_EXT_bfloat16 — glslang 15.1.0 does not,
+    # 16.6.0 does.
     file(GLOB_RECURSE TVV_SHADERS CONFIGURE_DEPENDS
         "${PROJECT_SOURCE_DIR}/shader/*.comp"
     )
     set(TVV_SPV_GEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/gen")
+    # Only the translation unit is generated; the declarations live in
+    # include/tensorvia/backend/vulkan/spv_registry.hpp and are shared with the
+    # mcpp lane (where build.mcpp writes the table instead).
     set(TVV_SPV_REGISTRY_CPP "${TVV_SPV_GEN_DIR}/spirv/spv_registry.cpp")
-    set(TVV_SPV_REGISTRY_H   "${TVV_SPV_GEN_DIR}/spirv/spv_registry.h")
 
     add_custom_command(
-        OUTPUT ${TVV_SPV_REGISTRY_CPP} ${TVV_SPV_REGISTRY_H}
+        OUTPUT ${TVV_SPV_REGISTRY_CPP}
         COMMAND ${CMAKE_COMMAND} -E make_directory "${TVV_SPV_GEN_DIR}/spirv"
         COMMAND ${Python3_EXECUTABLE} "${PROJECT_SOURCE_DIR}/tools/gen_spv.py"
                 --out "${TVV_SPV_GEN_DIR}"

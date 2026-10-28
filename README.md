@@ -52,7 +52,7 @@
 | mcpp | 仅 [mcpp](https://github.com/mcpp-community/mcpp)（自带隔离工具链） |
 | CMake | CMake ≥ 3.28、支持 C++23 的 GCC/Clang、OpenMP |
 | 测试 | GoogleTest（`BUILD_TEST=ON` 或 `mcpp test`） |
-| Vulkan | Vulkan 1.4 头文件/loader、`glslangValidator`、Python 3（构建期编译 SPIR-V） |
+| Vulkan | Vulkan 1.4 头文件/loader；shader 编译器由 mcpp 按需安装（`xim:shaderc`，即 `glslc`）。CMake 构建需自行提供 Python 3 + 支持 `GL_EXT_bfloat16` 的 `glslangValidator`（≥ 16.5） |
 | CUDA | CUDA Toolkit（mcpp 按 `--accel` 声明的线自动安装 payload；CMake 需自行提供 `nvcc`） |
 | SYCL | DPC++（mcpp 自动安装 `dpcpp` payload；CMake 需 `icpx` 在 `PATH` 上）与 SYCL 运行时 |
 
@@ -177,11 +177,13 @@ cd Tensorvia
 mcpp build --dev                                                  # CPU 后端（默认）
 mcpp build --dev --features cuda   --accel "cuda13.3+{sm_89}"     # CPU + CUDA
 mcpp build --dev --features sycl   --accel "sycl"                 # CPU + SYCL
-mcpp build --dev --features vulkan                                 # CPU + Vulkan（无需 --accel）
+mcpp build --dev --features vulkan --accel vulkan1.4               # CPU + Vulkan
 ```
 
-**`--features` 和 `--accel` 是两个轴，CUDA/SYCL 必须配对给**（Vulkan 无 `--accel`
-轴：它的 shader 由 `build.mcpp` 调 glslang 编译后嵌入）：
+**`--features` 和 `--accel` 是两个轴，三个设备后端都必须配对给**。Vulkan 的
+shader 由 `mcpp.rules.spirv` 编译（规则自带 `xim:shaderc`/`glslc`，构建时不需要
+Python，也不需要宿主机上装 shader 编译器）；规则从 `[build] sources` 里
+`accel = "vulkan1.4"` 的 glob 取 shader 集合，所以这个轴现在也是 Vulkan 必需的：
 
 | 轴 | 控制什么 |
 |---|---|
@@ -209,7 +211,9 @@ mcpp build --dev --features vulkan                                 # CPU + Vulka
 | `BUILD_BENCH` | 构建 `tests/bench.cpp` | OFF |
 | `CMAKE_BUILD_TYPE` | 构建类型 (Release/Debug) | Release |
 
-Vulkan 后端需要 `glslangValidator` 与 Vulkan 头文件（同 mcpp 路径）；SYCL 需要
+Vulkan 后端需要 `glslangValidator`（≥ 16.5，`GL_EXT_bfloat16`）与 Vulkan 头文件；
+这条路径用 `tools/gen_spv.py` 生成 SPIR-V 登记表（CMake 没有规则引擎），mcpp
+那条路径则由 `mcpp.rules.spirv` 编译 shader，两者共用同一个运行时接口；SYCL 需要
 `icpx` 可被 `find_program` 找到（或在 `PATH` 上）。`-march=x86-64-v3` 随库的
 PUBLIC 编译选项传给使用方。
 

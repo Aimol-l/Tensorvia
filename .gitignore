@@ -5,6 +5,7 @@
 .github
 .superpowers
 target/
+.mcpp/
 compile_commands.json
 dist/
 specs/
