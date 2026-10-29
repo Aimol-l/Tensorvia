@@ -14,32 +14,8 @@
 #include "tensorvia/backend/vulkan/vulkan_context.hpp"
 #include "tensorvia/backend/vulkan/vulkan_tensor.hpp"
 
-namespace {
-
-// Owns buffer+memory while init() is still building the object: if init throws
-// (no suitable memory type, fence timeout, staging failure) the destructor of
-// the object never runs, so raw handles would leak. The success path calls
-// release() and hands ownership to the members.
-struct VKBufferMemGuard {
-    vk::Device       device{};
-    vk::Buffer       buffer{};
-    vk::DeviceMemory memory{};
-    void release() {
-        buffer = vk::Buffer{};
-        memory = vk::DeviceMemory{};
-    }
-    ~VKBufferMemGuard() {
-        if (memory) device.freeMemory(memory);
-        if (buffer) device.destroyBuffer(buffer);
-    }
-};
-
-}  // namespace
-
 VKTensor::~VKTensor() {
-    vk::Device device = m_context->getDevice();
-    if (m_buffer) device.destroyBuffer(m_buffer);
-    if (m_memory) device.freeMemory(m_memory);
+    if (m_buffer) m_context->destroyBuffer(m_buffer, m_allocation);
 }
 
 void VKTensor::init(void* ptr, size_t numel, DataType dtype,
@@ -49,48 +25,20 @@ void VKTensor::init(void* ptr, size_t numel, DataType dtype,
     this->m_context = std::move(context);
     if (!m_context) throw std::runtime_error("VKTensor: null VulkanContext");
 
-    // Shares the device queue/command pool with submitCompute, so it must
-    // serialize on the same recursive mutex.
     std::lock_guard<std::recursive_mutex> lock(m_context->submitMutex());
-    vk::Device device            = m_context->getDevice();
-    vk::PhysicalDevice phyDevice = m_context->getPhysicalDevice();
+    vk::Device device = m_context->getDevice();
 
-    // This backend's shaders index with 32-bit integers. This is the single
-    // allocation entry point, so the invariant is enforced here rather than in
-    // every operator.
     vulkan_detail::require_int32_indexable(static_cast<int64_t>(numel), "VKTensor::init");
 
     const size_t size_bytes = numel * calc_dtype_size(dtype);
 
-    vk::BufferCreateInfo bufferInfo{};
-    bufferInfo.setSize(size_bytes)
-        .setUsage(vk::BufferUsageFlagBits::eStorageBuffer |
-                  vk::BufferUsageFlagBits::eTransferDst |   // clone / copy_from_host
-                  vk::BufferUsageFlagBits::eTransferSrc);   // copy_to / clone
-    VKBufferMemGuard guard{device};
-    guard.buffer   = device.createBuffer(bufferInfo);
-    this->m_buffer = guard.buffer;
-
-    vk::MemoryRequirements memReqs = device.getBufferMemoryRequirements(m_buffer);
-    vk::PhysicalDeviceMemoryProperties memProps = phyDevice.getMemoryProperties();
-    uint32_t memoryTypeIndex = 0;
-    bool found = false;
-    vk::MemoryPropertyFlags desiredFlags = vk::MemoryPropertyFlagBits::eDeviceLocal;
-    for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
-        if ((memReqs.memoryTypeBits & (1 << i)) &&
-            (memProps.memoryTypes[i].propertyFlags & desiredFlags) == desiredFlags) {
-            memoryTypeIndex = i;
-            found = true;
-            break;
-        }
-    }
-    if (!found) throw std::runtime_error("Can't allocate device memory");
-
-    vk::MemoryAllocateInfo allocInfo{};
-    allocInfo.setAllocationSize(memReqs.size).setMemoryTypeIndex(memoryTypeIndex);
-    guard.memory   = device.allocateMemory(allocInfo);
-    this->m_memory = guard.memory;
-    device.bindBufferMemory(m_buffer, m_memory, 0);
+    VKBufferGuard guard = m_context->createDeviceBuffer(
+        size_bytes,
+        vk::BufferUsageFlagBits::eStorageBuffer |
+            vk::BufferUsageFlagBits::eTransferDst |   // clone / copy_from_host
+            vk::BufferUsageFlagBits::eTransferSrc);   // copy_to / clone
+    this->m_buffer     = guard.buffer();
+    this->m_allocation = guard.allocation();
 
     if (ptr == nullptr) {
         guard.release();
@@ -98,12 +46,10 @@ void VKTensor::init(void* ptr, size_t numel, DataType dtype,
     }
 
     // Stage host data through a host-visible buffer, then copy on the queue.
-    void* staging = nullptr;
     {
         auto staging_guard = m_context->createStagingBuffer(size_bytes);
-        staging = device.mapMemory(staging_guard.memory(), 0, size_bytes);
-        std::memcpy(staging, ptr, size_bytes);
-        device.unmapMemory(staging_guard.memory());
+        std::memcpy(staging_guard.mapped(), ptr, size_bytes);
+        vmaFlushAllocation(m_context->allocator(), staging_guard.allocation(), 0, VK_WHOLE_SIZE);
 
         vk::CommandBufferAllocateInfo cmdAlloc{};
         cmdAlloc.setCommandPool(m_context->commandPool())
@@ -125,8 +71,7 @@ void VKTensor::init(void* ptr, size_t numel, DataType dtype,
         const vk::Result wait_result = vulkan_detail::wait_fence(device, fence);
         device.destroyFence(fence);
         device.freeCommandBuffers(m_context->commandPool(), 1, &cmd);
-        vulkan_detail::check_fence(wait_result, "VKTensor::init: waitForFences", __FILE__,
-                                   __LINE__);
+        vulkan_detail::check_fence(wait_result, "VKTensor::init: waitForFences", __FILE__,__LINE__);
     }
     guard.release();
 }

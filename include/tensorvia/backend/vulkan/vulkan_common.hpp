@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vulkan/vulkan.hpp>
+#include <vk_mem_alloc.h>
 
 #include <array>
 #include <concepts>
@@ -129,15 +130,23 @@ struct BcastVecParams {
 };
 
 // ---------------------------------------------------------------------------
-// Buffer + device-memory owner. The old createBuffer returned a bare vk::Buffer
-// and dropped its VkDeviceMemory on return: every call leaked one buffer and
-// one allocation.
+// Buffer owner backed by VMA.
+//
+// Vulkan hands out a handful of heaps and expects the application to
+// sub-allocate; allocating one VkDeviceMemory per tensor additionally runs into
+// maxMemoryAllocationCount (typically 4096). VMA owns the sub-allocation, so a
+// guard holds a (buffer, allocation) pair and releases both through it.
+//
+// `mapped()` is non-null only for buffers created with
+// VMA_ALLOCATION_CREATE_MAPPED_BIT (the staging buffers); it is the persistent
+// host pointer and must not be freed by the caller.
 // ---------------------------------------------------------------------------
 class VKBufferGuard {
 public:
     VKBufferGuard() = default;
-    VKBufferGuard(vk::Device device, vk::Buffer buffer, vk::DeviceMemory memory)
-        : m_device(device), m_buffer(buffer), m_memory(memory) {}
+    VKBufferGuard(VmaAllocator allocator, vk::Buffer buffer, VmaAllocation allocation,
+                  void* mapped = nullptr)
+        : m_allocator(allocator), m_buffer(buffer), m_allocation(allocation), m_mapped(mapped) {}
 
     ~VKBufferGuard() { reset(); }
 
@@ -153,33 +162,41 @@ public:
         return *this;
     }
 
-    vk::Buffer       buffer() const { return m_buffer; }
-    vk::DeviceMemory memory() const { return m_memory; }
+    vk::Buffer    buffer() const { return m_buffer; }
+    VmaAllocation allocation() const { return m_allocation; }
+    void*         mapped() const { return m_mapped; }
+
+    // Hands ownership to the caller without destroying anything. Used by
+    // VKTensor::init, which moves the pair into its own members.
+    void release() {
+        m_buffer     = nullptr;
+        m_allocation = nullptr;
+        m_mapped     = nullptr;
+    }
 
     // Early release. No in-flight command buffer may still reference it.
     void reset() {
         if (m_buffer) {
-            m_device.destroyBuffer(m_buffer);
-            m_buffer = nullptr;
-        }
-        if (m_memory) {
-            m_device.freeMemory(m_memory);
-            m_memory = nullptr;
+            vmaDestroyBuffer(m_allocator, static_cast<VkBuffer>(m_buffer), m_allocation);
+            m_buffer     = nullptr;
+            m_allocation = nullptr;
+            m_mapped     = nullptr;
         }
     }
 
 private:
     void take_from(VKBufferGuard& other) {
-        m_device      = other.m_device;
-        m_buffer      = other.m_buffer;
-        m_memory      = other.m_memory;
-        other.m_buffer = nullptr;
-        other.m_memory = nullptr;
+        m_allocator  = other.m_allocator;
+        m_buffer     = other.m_buffer;
+        m_allocation = other.m_allocation;
+        m_mapped     = other.m_mapped;
+        other.release();
     }
 
-    vk::Device       m_device{};
-    vk::Buffer       m_buffer{};
-    vk::DeviceMemory m_memory{};
+    VmaAllocator  m_allocator = nullptr;
+    vk::Buffer    m_buffer{};
+    VmaAllocation m_allocation = nullptr;
+    void*         m_mapped     = nullptr;
 };
 
 class VulkanContext;
@@ -227,6 +244,13 @@ inline void require_int32_indexable(int64_t numel, const char* what) {
         "vulkan {}: {} elements exceed this backend's limit of {} (shader element "
         "indices are 32-bit)",
         what, numel, max_elems()));
+}
+
+// VMA reports through VkResult, not vk::Result.
+inline void check_vma(VkResult r, const char* what, const char* file, int line) {
+    if (r == VK_SUCCESS) return;
+    throw std::runtime_error(std::format("VMA error at {}:{}: {} -> VkResult {}", file, line,
+                                         what, static_cast<int>(r)));
 }
 
 inline void check_result(vk::Result r, const char* what, const char* file, int line) {

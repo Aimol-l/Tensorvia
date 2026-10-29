@@ -16,7 +16,7 @@ private:
     size_t                        m_numel;
     DataType                      m_dtype;
     vk::Buffer                    m_buffer;
-    vk::DeviceMemory              m_memory;
+    VmaAllocation                 m_allocation = nullptr;
     std::shared_ptr<VulkanContext> m_context;
 
 public:
@@ -38,9 +38,10 @@ public:
     size_t numel() const override { return m_numel; }
 
     void copy_to(std::shared_ptr<TensorImpl> dst) const override;
-    std::unique_ptr<TensorImpl> clone() const override;
+    
+    std::unique_ptr<TensorImpl> clone() const;
     std::shared_ptr<ContextImpl> context() const override;
-    std::unique_ptr<TensorImpl> clone_as_contiguous(const Metadata&) const override;
+    std::unique_ptr<TensorImpl> clone_as_contiguous(const Metadata&) const;
 
     // Host staging transfers (device-local memory -> host and back).
     void copy_to_host(void* dst, DataType dtype) const override;

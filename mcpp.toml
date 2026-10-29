@@ -105,6 +105,7 @@ gcc.libstdcxx = "16.1.0.1"
 
 [target.'cfg(accelerator = "vulkan")'.dependencies]
 compat.vulkan-runtime  = "2026.09.11"
+compat.vulkan-memory-allocator = "3.4.0"
 compat.vulkan-headers =  { version = "1.4.357.0", visibility = "private" }
 
 [target.'cfg(accelerator = "vulkan")'.xlings.workspace]

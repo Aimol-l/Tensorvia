@@ -28,6 +28,7 @@ VulkanContext::VulkanContext() {
     this->setupDebugMessenger();
     this->choosePhysicalDevice();
     this->createLogicalDevice();
+    this->createVmaAllocator();
     this->createCommandPool();
     this->createDescriptorPool();
     this->registerPipelines();
@@ -443,6 +444,26 @@ void VulkanContext::createLogicalDevice() {
     m_compute_queue = m_device->getQueue(m_queuefamily, 0);
 }
 
+void VulkanContext::createVmaAllocator() {
+    // The package builds VMA with VMA_DYNAMIC_VULKAN_FUNCTIONS=1 and
+    // VMA_STATIC_VULKAN_FUNCTIONS=0, so VMA resolves every entry point itself
+    // starting from these two: without them vmaCreateAllocator dereferences a
+    // null function pointer instead of failing cleanly.
+    VmaVulkanFunctions functions{};
+    functions.vkGetInstanceProcAddr = &vkGetInstanceProcAddr;
+    functions.vkGetDeviceProcAddr   = &vkGetDeviceProcAddr;
+
+    VmaAllocatorCreateInfo info{};
+    info.instance         = *m_instance;
+    info.physicalDevice   = m_phydevice;
+    info.device           = *m_device;
+    info.vulkanApiVersion = VK_API_VERSION_1_4;
+    info.pVulkanFunctions = &functions;
+
+    vulkan_detail::check_vma(vmaCreateAllocator(&info, &m_vma.handle),
+                             "vmaCreateAllocator", __FILE__, __LINE__);
+}
+
 void VulkanContext::createCommandPool() {
     vk::CommandPoolCreateInfo poolInfo;
     poolInfo.setQueueFamilyIndex(m_queuefamily).setFlags(
@@ -471,34 +492,58 @@ void VulkanContext::createDescriptorPool() {
     }
 }
 
+VKBufferGuard VulkanContext::createDeviceBuffer(size_t bytes, vk::BufferUsageFlags usage) {
+    std::lock_guard<std::recursive_mutex> lock(m_submit_mutex);
+
+    vk::BufferCreateInfo bufferInfo;
+    bufferInfo.setSize(bytes).setUsage(usage);
+    // No host-access flags: VMA_MEMORY_USAGE_AUTO then prefers device-local
+    // memory, which is what a storage buffer wants.
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+
+    const VkBufferCreateInfo ci = static_cast<VkBufferCreateInfo>(bufferInfo);
+
+    VkBuffer      buffer     = VK_NULL_HANDLE;
+    VmaAllocation allocation = nullptr;
+    vulkan_detail::check_vma(
+        vmaCreateBuffer(m_vma.handle, &ci, &allocInfo, &buffer, &allocation, nullptr),
+        "vmaCreateBuffer(device)", __FILE__, __LINE__);
+    return VKBufferGuard(m_vma.handle, vk::Buffer(buffer), allocation);
+}
+
+void VulkanContext::destroyBuffer(vk::Buffer buffer, VmaAllocation allocation) noexcept {
+    if (!buffer) return;
+    vmaDestroyBuffer(m_vma.handle, static_cast<VkBuffer>(buffer), allocation);
+}
+
 VKBufferGuard VulkanContext::createStagingBuffer(size_t bytes) {
     std::lock_guard<std::recursive_mutex> lock(m_submit_mutex);
-    vk::Device device = *m_device;
+
     vk::BufferCreateInfo bufferInfo;
     bufferInfo.setSize(bytes).setUsage(vk::BufferUsageFlagBits::eTransferSrc |
                                        vk::BufferUsageFlagBits::eTransferDst);
-    vk::Buffer buffer = device.createBuffer(bufferInfo);
-    vk::MemoryRequirements memReqs = device.getBufferMemoryRequirements(buffer);
-    auto memProps   = m_phydevice.getMemoryProperties();
-    const auto want = vk::MemoryPropertyFlagBits::eHostVisible |
-                      vk::MemoryPropertyFlagBits::eHostCoherent;
-    uint32_t index = UINT32_MAX;
-    for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
-        if ((memReqs.memoryTypeBits & (1u << i)) &&
-            (memProps.memoryTypes[i].propertyFlags & want) == want) {
-            index = i;
-            break;
-        }
+    // Random access covers both directions (upload writes, download reads).
+    // MAPPED_BIT keeps the pointer alive for the guard's lifetime, so callers
+    // never map/unmap per transfer.
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+    allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
+                      VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+    const VkBufferCreateInfo ci = static_cast<VkBufferCreateInfo>(bufferInfo);
+
+    VkBuffer      buffer     = VK_NULL_HANDLE;
+    VmaAllocation allocation = nullptr;
+    VmaAllocationInfo info{};
+    vulkan_detail::check_vma(
+        vmaCreateBuffer(m_vma.handle, &ci, &allocInfo, &buffer, &allocation, &info),
+        "vmaCreateBuffer(staging)", __FILE__, __LINE__);
+    if (info.pMappedData == nullptr) {
+        vmaDestroyBuffer(m_vma.handle, buffer, allocation);
+        throw std::runtime_error("createStagingBuffer: VMA returned an unmapped allocation");
     }
-    if (index == UINT32_MAX) {
-        device.destroyBuffer(buffer);
-        throw std::runtime_error("Can't find host-visible, coherent memory type");
-    }
-    vk::MemoryAllocateInfo allocInfo{};
-    allocInfo.setAllocationSize(memReqs.size).setMemoryTypeIndex(index);
-    vk::DeviceMemory memory = device.allocateMemory(allocInfo);
-    device.bindBufferMemory(buffer, memory, 0);
-    return VKBufferGuard(device, buffer, memory);
+    return VKBufferGuard(m_vma.handle, vk::Buffer(buffer), allocation, info.pMappedData);
 }
 
 void VulkanContext::uploadBuffer(vk::Buffer dst, const void* src, size_t bytes) {
@@ -506,9 +551,9 @@ void VulkanContext::uploadBuffer(vk::Buffer dst, const void* src, size_t bytes) 
     std::lock_guard<std::recursive_mutex> lock(m_submit_mutex);
     vk::Device device = *m_device;
     auto staging = createStagingBuffer(bytes);
-    void* mapped = device.mapMemory(staging.memory(), 0, bytes);
-    std::memcpy(mapped, src, bytes);
-    device.unmapMemory(staging.memory());
+    std::memcpy(staging.mapped(), src, bytes);
+    // No-op for the coherent memory VMA prefers; required when it is not.
+    vmaFlushAllocation(m_vma.handle, staging.allocation(), 0, VK_WHOLE_SIZE);
 
     vk::CommandBufferAllocateInfo cmdAlloc{};
     cmdAlloc.setCommandPool(*m_command_pool)
@@ -561,9 +606,8 @@ void VulkanContext::downloadBuffer(vk::Buffer src, void* dst, size_t bytes) {
     device.freeCommandBuffers(*m_command_pool, 1, &cmd);
     check_fence(wait_result, "downloadBuffer: waitForFences", __FILE__, __LINE__);
 
-    void* mapped = device.mapMemory(staging.memory(), 0, bytes);
-    std::memcpy(dst, mapped, bytes);
-    device.unmapMemory(staging.memory());
+    vmaInvalidateAllocation(m_vma.handle, staging.allocation(), 0, VK_WHOLE_SIZE);
+    std::memcpy(dst, staging.mapped(), bytes);
 }
 
 void VulkanContext::submitCompute(OpType op, DataType dtype,
