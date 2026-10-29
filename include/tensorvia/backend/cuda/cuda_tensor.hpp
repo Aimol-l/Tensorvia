@@ -17,6 +17,10 @@ private:
     void*                         m_data = nullptr;
     size_t                        m_numel = 0;
     DataType                      m_dtype = DataType::FLOAT32;
+    // The stream the buffer was allocated on; its release is recorded there, so
+    // another thread reusing the block waits for this stream rather than for a
+    // device-wide barrier.
+    CUDAContext::CUDAStream       m_stream;
     std::shared_ptr<CUDAContext>  m_context;
 
     void init(void* ptr, size_t numel, DataType dtype,

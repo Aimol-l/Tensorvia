@@ -17,6 +17,14 @@ private:
     Impl* m_impl = nullptr;
 
 public:
+    // Value handle for a stream. Two handles name the same stream iff their
+    // `handle` values match; `device` is carried along so a mismatch is
+    // detectable without asking the driver.
+    struct CUDAStream {
+        void* handle = nullptr;   // cudaStream_t
+        int   device = -1;
+    };
+
     // Picks the device with the largest global memory.
     CUDAContext();
     explicit CUDAContext(int device_index);
@@ -27,9 +35,10 @@ public:
     CUDAContext(CUDAContext&&) = delete;
     CUDAContext& operator=(CUDAContext&&) = delete;
 
-    // Opaque stream handle; the pimpl owns the stream.
+    // Opaque stream handle; the pimpl owns the streams.
     void* ctx_raw_ptr() override;
-    // Same handle, for launches. Callers in .cu files cast it to cudaStream_t.
+    // The calling thread's current stream, for launches. Callers in .cu files
+    // cast it to cudaStream_t.
     void* stream() const;
     int   device_id() const;
 
@@ -37,7 +46,57 @@ public:
     // launches calls this first.
     void activate() const;
 
+    // ---------------------------------------------------------------------
+    // Streams. The current stream is per thread: two threads sharing one
+    // context do not queue behind each other. A thread that never sets one
+    // uses the context's default stream.
+    // ---------------------------------------------------------------------
+
+    // The calling thread's current stream, or the default until it sets one.
+    CUDAStream current_stream() const;
+    CUDAStream default_stream() const;
+    // Round-robin from the context's stream pool (32 lazily created,
+    // non-blocking streams), for callers that want a stream of their own.
+    CUDAStream stream_from_pool();
+    // Thread-local: affects only the calling thread. Const because it changes
+    // no context state.
+    void set_current_stream(CUDAStream stream) const;
+
+    // Runs `stream` as the current stream for the enclosing scope, restoring
+    // the previous one on exit — the counterpart of torch.cuda.stream(s).
+    class StreamGuard {
+    public:
+        StreamGuard(const CUDAContext& context, CUDAStream stream);
+        ~StreamGuard();
+        StreamGuard(const StreamGuard&) = delete;
+        StreamGuard& operator=(const StreamGuard&) = delete;
+
+    private:
+        const CUDAContext* m_context = nullptr;
+        CUDAStream         m_previous;
+    };
+
     // The host drivers are synchronous: every launch is followed by wait(), so
-    // callers never observe a half-computed tensor.
+    // callers never observe a half-computed tensor. Both of these wait for the
+    // calling thread's current stream; synchronize_all() also covers the
+    // context's other streams, which is what teardown and debugging need.
     void wait() const;
+    void synchronize() const;
+    void synchronize_all() const;
+
+    // Device memory goes through the context's caching allocator: repeated
+    // tensor creation reuses blocks instead of paying a synchronizing
+    // cudaMalloc each time. The stream argument is the one the memory is used
+    // on, so a block handed to a different stream waits for its release event.
+    // Both make this device current first; deallocate() is noexcept because
+    // tensors release from their destructor.
+    void* allocate(size_t bytes, CUDAStream stream);
+    void  deallocate(void* ptr, CUDAStream stream) noexcept;
+
+    // Returns every free device block to the driver. Tensors still holding
+    // memory are untouched. Called by the backend initializer at process exit:
+    // the factory's static registry (which keeps the context alive) is
+    // destroyed after the CUDA runtime's own teardown, and cudaFree from there
+    // fails silently, so the cache has to go earlier.
+    void empty_cache() noexcept;
 };

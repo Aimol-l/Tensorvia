@@ -2,15 +2,24 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <memory>
 #include <print>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include "tensorvia.hpp"
+
+#if defined(BACKEND_CUDA)
+// 流相关用例要看 CUDAContext 本身，无法只靠公开的张量 API 表达。
+#include "tensorvia/backend/cuda/cuda_context.hpp"
+#include "tensorvia/backend/cuda/cuda_tensor.hpp"
+#endif
 
 namespace {
 
@@ -38,9 +47,6 @@ Tensor matrix_3x3() {
     return Tensor(values, {3, 3});
 }
 
-// 探测一个后端能否真的用：既要有编译进来的实现（否则 execute_on 抛
-// "no implementation compiled for device"），又要 context 能建起来（驱动/
-// 运行时缺失时 Vulkan/SYCL 的构造函数会抛）。两种失败都归为"不可用"。
 bool backend_available(Device device) {
     try {
         auto probe = Tensor::Zeros({1}, DataType::FLOAT32, device);
@@ -194,6 +200,86 @@ TEST_F(DeviceOps, SliceAndTranspose) {
     expect_close(host_values<float>(ops::Slice(a, {{0, 1}, {1, 3}})), slice_ref, "slice");
     expect_close(host_values<float>(ops::Transpose(a, {1, 0})), transp_ref, "transpose");
 }
+
+// 分配器的复用路径：多个线程各自反复建小张量、写值、读回。块常常由一个线程
+// 释放、被另一个线程取走，所以只要复用时的同步或记账有偏差，读回的值就会错。
+TEST_F(DeviceOps, ConcurrentSmallTensorChurn) {
+    constexpr int kThreads = 8;
+    constexpr int kRounds  = 64;
+    std::atomic<int> failures{0};
+
+    std::vector<std::thread> workers;
+    workers.reserve(kThreads);
+    for (int t = 0; t < kThreads; ++t) {
+        workers.emplace_back([&, t] {
+            std::vector<float> pattern(64, static_cast<float>(t) + 1.0f);
+            try {
+                for (int i = 0; i < kRounds; ++i) {
+                    Tensor a(pattern, {8, 8});
+                    a.to_device(dev);
+                    const auto back = host_values<float>(a);
+                    if (!std::equal(back.begin(), back.end(), pattern.begin())) ++failures;
+                }
+            } catch (const std::exception& e) {
+                std::println("churn thread {} threw: {}", t, e.what());
+                ++failures;
+            }
+        });
+    }
+    for (auto& w : workers) w.join();
+    EXPECT_EQ(failures.load(), 0);
+}
+
+// ---------- 0c. CUDA 流：current stream 按线程取值（P2） ----------
+#if defined(BACKEND_CUDA)
+namespace {
+
+std::shared_ptr<CUDAContext> cuda_context_of(const Tensor& t) {
+    auto impl = std::dynamic_pointer_cast<CUDATensor>(t.get_impl());
+    return impl == nullptr ? nullptr
+                           : std::dynamic_pointer_cast<CUDAContext>(impl->context());
+}
+
+}  // namespace
+
+TEST(CudaStream, CurrentStreamIsPerThreadAndOpsStayCorrect) {
+    if (!backend_available(Device::CUDA)) GTEST_SKIP() << "CUDA is unavailable in this build";
+
+    Tensor probe = Tensor::Ones({4, 4}, DataType::FLOAT32, Device::CUDA);
+    auto   ctx   = cuda_context_of(probe);
+    ASSERT_NE(ctx, nullptr);
+
+    const auto dflt = ctx->default_stream();
+    // 没设置过的线程就用 context 的 default stream。
+    EXPECT_EQ(ctx->current_stream().handle, dflt.handle);
+
+    const auto pooled = ctx->stream_from_pool();
+    EXPECT_NE(pooled.handle, dflt.handle);
+    {
+        CUDAContext::StreamGuard guard(*ctx, pooled);
+        EXPECT_EQ(ctx->current_stream().handle, pooled.handle);
+
+        // 算子落在 current stream 上，结果仍必须正确。
+        Tensor a = Tensor::Ones({2, 3}, DataType::FLOAT32, Device::CUDA);
+        a = a + a;
+        for (float v : host_values<float>(a)) EXPECT_FLOAT_EQ(v, 2.0f);
+        ctx->synchronize();   // 同步的就是这条流
+    }
+    EXPECT_EQ(ctx->current_stream().handle, dflt.handle);
+
+    // current stream 是线程私有：另一个线程看不到本线程的选择。
+    std::atomic<bool> other_thread_saw_default{false};
+    std::thread other([&] {
+        other_thread_saw_default = ctx->current_stream().handle == dflt.handle;
+    });
+    other.join();
+    EXPECT_TRUE(other_thread_saw_default);
+
+    // 池按 round-robin 发号，连续两次拿到不同的流。
+    EXPECT_NE(ctx->stream_from_pool().handle, ctx->stream_from_pool().handle);
+    ctx->synchronize_all();
+}
+#endif  // BACKEND_CUDA
 
 // ---------- 原有冒烟 ----------
 TEST(Tensorvia, BasicArithmetic) {
