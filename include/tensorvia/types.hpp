@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <format>
 #include <initializer_list>
@@ -150,6 +151,25 @@ enum class OpType {
 
 enum class Device { CPU, CUDA, SYCL, VULKAN };
 
+// 运行期的设备身份：种类 + 序号。种类仍然决定编译期派发（`Impl<Device::D>`），
+// 序号只在运行期挑后端实例——第几张卡。没有从 `Device` 到 `DeviceId` 的隐式
+// 转换：序号是有意义的信息，不该被一个隐式的 0 吞掉。
+struct DeviceId {
+    Device kind  = Device::CPU;
+    int    index = 0;
+
+    constexpr DeviceId() = default;
+    constexpr DeviceId(Device k, int i) : kind(k), index(i) {}
+
+    friend constexpr bool operator==(const DeviceId&, const DeviceId&) = default;
+};
+
+struct DeviceIdHash {
+    size_t operator()(const DeviceId& id) const noexcept {
+        return static_cast<size_t>(id.kind) * 31u + static_cast<size_t>(id.index);
+    }
+};
+
 enum class DataType {
     INT8 = 0,
     INT16,
@@ -224,6 +244,12 @@ constexpr std::string_view device_to_string(Device d) {
         case Device::VULKAN: return "VULKAN";
         default:             return "UNKNOWN";
     }
+}
+
+// "CUDA:0" — used in every cross-device error message, so a mismatch names the
+// index rather than just the backend.
+inline std::string device_id_to_string(const DeviceId& id) {
+    return std::format("{}:{}", device_to_string(id.kind), id.index);
 }
 
 constexpr std::string_view dtype_to_string(DataType t) {

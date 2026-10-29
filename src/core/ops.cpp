@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstring>
 #include <format>
+#include <functional>
 #include <initializer_list>
 #include <iostream>
 #include <string>
@@ -14,6 +15,7 @@
 #include "tensorvia/types.hpp"
 #include "tensorvia/tensor.hpp"
 #include "tensorvia/ops.hpp"
+#include "tensorvia/factory.hpp"
 #include "tensorvia/cpu_ops.hpp"
 #include "tensorvia/backend/vulkan/vulkan_ops.hpp"
 #include "tensorvia/backend/cuda/cuda_ops.hpp"
@@ -31,8 +33,15 @@ template <template <Device> class Impl>
 concept has_sycl_impl = requires { sizeof(Impl<Device::SYCL>); };
 
 template <template <Device> class Impl, typename... Args>
-decltype(auto) execute_on(Device device, Args&&... args) {
-    switch (device) {
+decltype(auto) execute_on(DeviceId device, Args&&... args) {
+    // Make `device` this thread's current one for the duration of the call.
+    // Backend op bodies allocate their outputs with a bare `Device` literal
+    // (there are ~100 of them), which resolves through the current device; the
+    // guard is what keeps those outputs on the input's GPU without touching a
+    // single backend line. Core Tensor paths that run outside execute_on must
+    // propagate the index explicitly instead.
+    ops::DeviceGuard guard(device);
+    switch (device.kind) {
     case Device::CPU:
         return Impl<Device::CPU>::execute(std::forward<Args>(args)...);
 #if defined(BACKEND_VULKAN)
@@ -61,16 +70,14 @@ decltype(auto) execute_on(Device device, Args&&... args) {
 #endif
     default:
         throw std::runtime_error(std::format(
-            "no implementation compiled for device {}", device_to_string(device)));
+            "no implementation compiled for device {}", device_to_string(device.kind)));
     }
 }
 
-inline void require_same_device(std::string_view op, std::initializer_list<Device> devices) {
-    const Device first = *devices.begin();
-    for (Device d : devices) {
-        if (d != first)
-            throw std::runtime_error(std::format("{}: tensors must live on the same device", op));
-    }
+// A bare `Device` names a backend, not an instance: creation ops land on the
+// calling thread's current one for that backend, like torch factory functions.
+inline DeviceId current_id(Device device) {
+    return DeviceId{device, current_device_index(device)};
 }
 
 inline void require_cpu(const Tensor& t, std::string_view op) {
@@ -174,22 +181,22 @@ void export_csv(Tensor&& a, const std::string& path) {
 
 Tensor Ones(const std::vector<int64_t>& shape, DataType dtype, Device device) {
     if (shape.empty()) throw std::runtime_error("ops::Ones: shape is empty");
-    return execute_on<OnesImpl>(device, shape, dtype);
+    return execute_on<OnesImpl>(current_id(device), shape, dtype);
 }
 
 Tensor Zeros(const std::vector<int64_t>& shape, DataType dtype, Device device) {
     if (shape.empty()) throw std::runtime_error("ops::Zeros: shape is empty");
-    return execute_on<ZerosImpl>(device, shape, dtype);
+    return execute_on<ZerosImpl>(current_id(device), shape, dtype);
 }
 
 Tensor Fill(const std::vector<int64_t>& shape, DataType dtype, float val, Device device) {
     if (shape.empty()) throw std::runtime_error("ops::Fill: shape is empty");
-    return execute_on<FillImpl>(device, shape, dtype, val);
+    return execute_on<FillImpl>(current_id(device), shape, dtype, val);
 }
 
 Tensor Random(const std::vector<int64_t>& shape, DataType dtype, float min, float max, Device device) {
     if (shape.empty()) throw std::runtime_error("ops::Random: shape is empty");
-    return execute_on<RandomImpl>(device, shape, dtype, min, max);
+    return execute_on<RandomImpl>(current_id(device), shape, dtype, min, max);
 }
 
 Tensor Randn(const std::vector<int64_t>& shape, DataType dtype, float mean, float std, Device device) {
@@ -197,7 +204,7 @@ Tensor Randn(const std::vector<int64_t>& shape, DataType dtype, float mean, floa
     if (std < 0.0f) throw std::runtime_error("randn: std must be non-negative");
     if (device != Device::CPU)
         throw std::runtime_error("randn: only the CPU backend implements this op");
-    return execute_on<RandnImpl>(device, shape, dtype, mean, std);
+    return execute_on<RandnImpl>(current_id(device), shape, dtype, mean, std);
 }
 
 Tensor Arange(float start, float stop, float step, DataType dtype) {
@@ -233,101 +240,101 @@ Tensor Slice(const Tensor& t, const std::vector<std::pair<int64_t, int64_t>>& ra
         if (ranges[i].second > t.shape(i))
             throw std::runtime_error(std::format("second must be less than {}", t.shape(i)));
     }
-    return execute_on<SliceImpl>(t.device(), t, ranges);
+    return execute_on<SliceImpl>(t.device_id(), t, ranges);
 }
 
 void Add(Tensor& a, float b) {
     if (a.numel() == 0 || b == 0.0f) return;
-    execute_on<AddImpl>(a.device(), a, b);
+    execute_on<AddImpl>(a.device_id(), a, b);
 }
 void Sub(Tensor& a, float b) {
     if (a.numel() == 0 || b == 0.0f) return;
-    execute_on<SubImpl>(a.device(), a, b);
+    execute_on<SubImpl>(a.device_id(), a, b);
 }
 void Mul(Tensor& a, float b) {
     if (a.numel() == 0 || b == 1.0f) return;
-    execute_on<MulImpl>(a.device(), a, b);
+    execute_on<MulImpl>(a.device_id(), a, b);
 }
 void Div(Tensor& a, float b) {
     if (a.numel() == 0 || b == 1.0f) return;
     if (b == 0.0f) throw std::runtime_error("div: Cann't division by zero");
-    execute_on<DivImpl>(a.device(), a, b);
+    execute_on<DivImpl>(a.device_id(), a, b);
 }
 
 Tensor Add(const Tensor& a, float b) {
     if (a.numel() == 0 || b == 0.0f) return a.clone();
-    return execute_on<AddImpl>(a.device(), a, b);
+    return execute_on<AddImpl>(a.device_id(), a, b);
 }
 Tensor Sub(const Tensor& a, float b) {
     if (a.numel() == 0 || b == 0.0f) return a.clone();
-    return execute_on<SubImpl>(a.device(), a, b);
+    return execute_on<SubImpl>(a.device_id(), a, b);
 }
 Tensor Mul(const Tensor& a, float b) {
     if (a.numel() == 0 || b == 1.0f) return a.clone();
-    return execute_on<MulImpl>(a.device(), a, b);
+    return execute_on<MulImpl>(a.device_id(), a, b);
 }
 Tensor Div(const Tensor& a, float b) {
     if (a.numel() == 0 || b == 1.0f) return a.clone();
     if (b == 0.0f) throw std::runtime_error("Division by zero");
-    return execute_on<DivImpl>(a.device(), a, b);
+    return execute_on<DivImpl>(a.device_id(), a, b);
 }
 
 Tensor Add(const Tensor& a, const Tensor& b) {
-    if (a.device() != b.device()) throw std::runtime_error("Tensor Device mismatch!");
+    if (a.device_id() != b.device_id()) throw std::runtime_error("Tensor Device mismatch!");
 
     // shape 校验由 ufunc 框架的广播规则处理
-    return execute_on<AddImpl>(a.device(), a, b);
+    return execute_on<AddImpl>(a.device_id(), a, b);
 }
 Tensor Sub(const Tensor& a, const Tensor& b) {
-    if (a.device() != b.device()) throw std::runtime_error("Tensor Device mismatch!");
+    if (a.device_id() != b.device_id()) throw std::runtime_error("Tensor Device mismatch!");
 
     // shape 校验由 ufunc 框架的广播规则处理
-    return execute_on<SubImpl>(a.device(), a, b);
+    return execute_on<SubImpl>(a.device_id(), a, b);
 }
 Tensor Mul(const Tensor& a, const Tensor& b) {
-    if (a.device() != b.device()) throw std::runtime_error("Tensor Device mismatch!");
+    if (a.device_id() != b.device_id()) throw std::runtime_error("Tensor Device mismatch!");
 
     // shape 校验由 ufunc 框架的广播规则处理
-    return execute_on<MulImpl>(a.device(), a, b);
+    return execute_on<MulImpl>(a.device_id(), a, b);
 }
 Tensor Div(const Tensor& a, const Tensor& b) {
-    if (a.device() != b.device()) throw std::runtime_error("Device mismatch!");
+    if (a.device_id() != b.device_id()) throw std::runtime_error("Device mismatch!");
 
     // shape 校验由 ufunc 框架的广播规则处理
-    return execute_on<DivImpl>(a.device(), a, b);
+    return execute_on<DivImpl>(a.device_id(), a, b);
 }
 
 void Add(const Tensor& a, const Tensor& b, Tensor& dst) {
-    if (a.device() != b.device() || dst.device() != a.device() || dst.device() != b.device())
+    if (a.device_id() != b.device_id() || dst.device_id() != a.device_id() || dst.device_id() != b.device_id())
         throw std::runtime_error("Tensor Device mismatch!");
 
     // dst 形状须等于广播结果，由 ufunc 框架校验
-    execute_on<AddImpl>(a.device(), a, b, dst);
+    execute_on<AddImpl>(a.device_id(), a, b, dst);
 }
 void Sub(const Tensor& a, const Tensor& b, Tensor& dst) {
-    if (a.device() != b.device() || dst.device() != a.device() || dst.device() != b.device())
+    if (a.device_id() != b.device_id() || dst.device_id() != a.device_id() || dst.device_id() != b.device_id())
         throw std::runtime_error("Tensor Device mismatch!");
 
     // dst 形状须等于广播结果，由 ufunc 框架校验
-    execute_on<SubImpl>(a.device(), a, b, dst);
+    execute_on<SubImpl>(a.device_id(), a, b, dst);
 }
 void Mul(const Tensor& a, const Tensor& b, Tensor& dst) {
-    if (a.device() != b.device() || dst.device() != a.device() || dst.device() != b.device())
+    if (a.device_id() != b.device_id() || dst.device_id() != a.device_id() || dst.device_id() != b.device_id())
         throw std::runtime_error("Tensor Device mismatch!");
 
     // dst 形状须等于广播结果，由 ufunc 框架校验
-    execute_on<MulImpl>(a.device(), a, b, dst);
+    execute_on<MulImpl>(a.device_id(), a, b, dst);
 }
 void Div(const Tensor& a, const Tensor& b, Tensor& dst) {
-    if (a.device() != b.device() || dst.device() != a.device() || dst.device() != b.device())
+    if (a.device_id() != b.device_id() || dst.device_id() != a.device_id() || dst.device_id() != b.device_id())
         throw std::runtime_error("Tensor Device mismatch!");
 
     // dst 形状须等于广播结果，由 ufunc 框架校验
-    execute_on<DivImpl>(a.device(), a, b, dst);
+    execute_on<DivImpl>(a.device_id(), a, b, dst);
 }
 
 Tensor MatMul(const Tensor& a, const Tensor& b) {
-    if (a.device() != b.device())
+    if (a.device_id() != b.device_id())
         throw std::runtime_error("Tensors a and b device mismatch!");
     if (a.shape().size() != b.shape().size())
         throw std::runtime_error(std::format("Tensors a and b must have the same rank,but got {} and {}", a.shape().size(), b.shape().size()));
@@ -345,66 +352,66 @@ Tensor MatMul(const Tensor& a, const Tensor& b) {
     Tensor storage_a, storage_b;
     const Tensor& A = linearize(a, storage_a);
     const Tensor& B = linearize(b, storage_b);
-    return execute_on<MatMulImpl>(A.device(), A, B);
+    return execute_on<MatMulImpl>(A.device_id(), A, B);
 }
 
 Tensor Abs(const Tensor& a) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
-    return execute_on<AbsImpl>(a.device(), a);
+    return execute_on<AbsImpl>(a.device_id(), a);
 }
 Tensor Sin(const Tensor& a) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
-    return execute_on<SinImpl>(a.device(), a);
+    return execute_on<SinImpl>(a.device_id(), a);
 }
 Tensor Cos(const Tensor& a) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
-    return execute_on<CosImpl>(a.device(), a);
+    return execute_on<CosImpl>(a.device_id(), a);
 }
 Tensor Tan(const Tensor& a) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
-    return execute_on<TanImpl>(a.device(), a);
+    return execute_on<TanImpl>(a.device_id(), a);
 }
 Tensor Exp(const Tensor& a) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
-    return execute_on<ExpImpl>(a.device(), a);
+    return execute_on<ExpImpl>(a.device_id(), a);
 }
 Tensor Relu(const Tensor& a) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
-    return execute_on<ReluImpl>(a.device(), a);
+    return execute_on<ReluImpl>(a.device_id(), a);
 }
 Tensor Silu(const Tensor& a) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
-    return execute_on<SiluImpl>(a.device(), a);
+    return execute_on<SiluImpl>(a.device_id(), a);
 }
 Tensor Tanh(const Tensor& a) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
-    return execute_on<TanhImpl>(a.device(), a);
+    return execute_on<TanhImpl>(a.device_id(), a);
 }
 Tensor Sqrt(const Tensor& a) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
     if (ops::Any((a < 0), 1)) throw std::runtime_error("tensor must be non-negative");
-    return execute_on<SqrtImpl>(a.device(), a);
+    return execute_on<SqrtImpl>(a.device_id(), a);
 }
 Tensor Sigmoid(const Tensor& a) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
-    return execute_on<SigmoidImpl>(a.device(), a);
+    return execute_on<SigmoidImpl>(a.device_id(), a);
 }
 Tensor Pow(const Tensor& a, float val) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
-    return execute_on<PowImpl>(a.device(), a, val);
+    return execute_on<PowImpl>(a.device_id(), a, val);
 }
 Tensor Log(const Tensor& a, float val) {
     if (val < 0 || val == 1) throw std::runtime_error("The base cannot be less than or equal to 0, and it cannot be 1");
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
     if (ops::Any((a < 0), 1)) throw std::runtime_error("log: tensor must be non-negative");
-    return execute_on<LogImpl>(a.device(), a, val);
+    return execute_on<LogImpl>(a.device_id(), a, val);
 }
 Tensor Softmax(const Tensor& a, int axis) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
     if (std::abs(axis) >= static_cast<int>(a.shape().size())) throw std::runtime_error("axis out of range");
     Tensor storage;
     const Tensor& A = linearize(a, storage);
-    return execute_on<SoftmaxImpl>(A.device(), A, axis);
+    return execute_on<SoftmaxImpl>(A.device_id(), A, axis);
 }
 Tensor LogSoftmax(const Tensor& a, int axis) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
@@ -462,14 +469,14 @@ Tensor RmsNorm(const Tensor& a, const Tensor& weight, int axis, float eps) {
 Tensor Clamp(const Tensor& a, float min, float max) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
     if (min > max) throw std::runtime_error("min must be less than max");
-    return execute_on<ClampImpl>(a.device(), a, min, max);
+    return execute_on<ClampImpl>(a.device_id(), a, min, max);
 }
 
 void Zeros(Tensor& a) {
     require_contiguous(a, "zeros");
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
     if (a.device() != Device::CPU) {
-        execute_on<FillImpl>(a.device(), a, 0.0f);
+        execute_on<FillImpl>(a.device_id(), a, 0.0f);
         return;
     }
     // 所有支持 dtype（int / float / float16 / bfloat16）的零表示都是全零 bit pattern，
@@ -481,7 +488,7 @@ void Fill(Tensor& a, float value) {
     require_contiguous(a, "fill");
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
     if (a.device() != Device::CPU) {
-        execute_on<FillImpl>(a.device(), a, value);
+        execute_on<FillImpl>(a.device_id(), a, value);
         return;
     }
     dispatch_dtype(a.dtype(), [&](auto type_id) {
@@ -497,81 +504,81 @@ void Ones(Tensor& a) {
 
 void Abs(Tensor& a) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
-    execute_on<AbsImpl>(a.device(), a);
+    execute_on<AbsImpl>(a.device_id(), a);
 }
 void Sin(Tensor& a) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
     if (a.dtype() < DataType::BFLOAT16)
         throw std::runtime_error(std::format("{} of tensor a is not supported", dtype_to_string(a.dtype())));
-    execute_on<SinImpl>(a.device(), a);
+    execute_on<SinImpl>(a.device_id(), a);
 }
 void Cos(Tensor& a) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
     if (a.dtype() < DataType::BFLOAT16)
         throw std::runtime_error(std::format("{} of tensor a is not supported", dtype_to_string(a.dtype())));
-    execute_on<CosImpl>(a.device(), a);
+    execute_on<CosImpl>(a.device_id(), a);
 }
 void Tan(Tensor& a) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
     if (a.dtype() < DataType::BFLOAT16)
         throw std::runtime_error(std::format("{} of tensor a is not supported", dtype_to_string(a.dtype())));
-    execute_on<TanImpl>(a.device(), a);
+    execute_on<TanImpl>(a.device_id(), a);
 }
 void Relu(Tensor& a) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
-    execute_on<ReluImpl>(a.device(), a);
+    execute_on<ReluImpl>(a.device_id(), a);
 }
 void Silu(Tensor& a) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
     if (a.dtype() < DataType::BFLOAT16)
         throw std::runtime_error(std::format("{} of tensor a is not supported", dtype_to_string(a.dtype())));
-    execute_on<SiluImpl>(a.device(), a);
+    execute_on<SiluImpl>(a.device_id(), a);
 }
 void Tanh(Tensor& a) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
     if (a.dtype() < DataType::BFLOAT16)
         throw std::runtime_error(std::format("{} of tensor a is not supported", dtype_to_string(a.dtype())));
-    execute_on<TanhImpl>(a.device(), a);
+    execute_on<TanhImpl>(a.device_id(), a);
 }
 void Pow(Tensor& a, float val) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
-    execute_on<PowImpl>(a.device(), a, val);
+    execute_on<PowImpl>(a.device_id(), a, val);
 }
 void Sigmoid(Tensor& a) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
     if (a.dtype() < DataType::BFLOAT16)
         throw std::runtime_error(std::format("{} of tensor a is not supported", dtype_to_string(a.dtype())));
-    execute_on<SigmoidImpl>(a.device(), a);
+    execute_on<SigmoidImpl>(a.device_id(), a);
 }
 void Clamp(Tensor& a, float min, float max) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
     if (min > max) throw std::runtime_error("min must be less than max");
-    execute_on<ClampImpl>(a.device(), a, min, max);
+    execute_on<ClampImpl>(a.device_id(), a, min, max);
 }
 
 float Sum(const Tensor& a) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
     Tensor storage;
     const Tensor& A = linearize(a, storage);
-    return execute_on<SumImpl>(A.device(), A);
+    return execute_on<SumImpl>(A.device_id(), A);
 }
 float Min(const Tensor& a) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
     Tensor storage;
     const Tensor& A = linearize(a, storage);
-    return execute_on<MinImpl>(A.device(), A);
+    return execute_on<MinImpl>(A.device_id(), A);
 }
 float Max(const Tensor& a) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
     Tensor storage;
     const Tensor& A = linearize(a, storage);
-    return execute_on<MaxImpl>(A.device(), A);
+    return execute_on<MaxImpl>(A.device_id(), A);
 }
 float Mean(const Tensor& a) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
     Tensor storage;
     const Tensor& A = linearize(a, storage);
-    return execute_on<MeanImpl>(A.device(), A);
+    return execute_on<MeanImpl>(A.device_id(), A);
 }
 float Prod(const Tensor& a) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
@@ -609,7 +616,7 @@ Tensor Sum(const Tensor& a, int axis) {
     if (axis >= static_cast<int>(a.shape().size())) throw std::runtime_error("axis is out of range");
     Tensor storage;
     const Tensor& A = linearize(a, storage);
-    return execute_on<SumImpl>(A.device(), A, axis);
+    return execute_on<SumImpl>(A.device_id(), A, axis);
 }
 Tensor Min(const Tensor& a, int axis) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
@@ -617,7 +624,7 @@ Tensor Min(const Tensor& a, int axis) {
     if (axis >= static_cast<int>(a.shape().size())) throw std::runtime_error("axis is out of range");
     Tensor storage;
     const Tensor& A = linearize(a, storage);
-    return execute_on<MinImpl>(A.device(), A, axis);
+    return execute_on<MinImpl>(A.device_id(), A, axis);
 }
 Tensor Max(const Tensor& a, int axis) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
@@ -625,7 +632,7 @@ Tensor Max(const Tensor& a, int axis) {
     if (axis >= static_cast<int>(a.shape().size())) throw std::runtime_error("axis is out of range");
     Tensor storage;
     const Tensor& A = linearize(a, storage);
-    return execute_on<MaxImpl>(A.device(), A, axis);
+    return execute_on<MaxImpl>(A.device_id(), A, axis);
 }
 Tensor Mean(const Tensor& a, int axis) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
@@ -633,7 +640,7 @@ Tensor Mean(const Tensor& a, int axis) {
     if (axis >= static_cast<int>(a.shape().size())) throw std::runtime_error("axis is out of range");
     Tensor storage;
     const Tensor& A = linearize(a, storage);
-    return execute_on<MeanImpl>(A.device(), A, axis);
+    return execute_on<MeanImpl>(A.device_id(), A, axis);
 }
 Tensor Prod(const Tensor& a, int axis) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
@@ -683,7 +690,7 @@ Tensor Cumsum(const Tensor& a, int axis) {
 }
 
 float MseLoss(const Tensor& input, const Tensor& target) {
-    if (input.device() != target.device()) throw std::runtime_error("Tensor Device mismatch!");
+    if (input.device_id() != target.device_id()) throw std::runtime_error("Tensor Device mismatch!");
     if (input.numel() == 0) throw std::runtime_error("mse_loss: empty input");
     if (input.dtype() != target.dtype()) throw std::runtime_error("mse_loss: input and target must have same dtype");
     if (input.shape().size() != target.shape().size() || input.numel() != target.numel())
@@ -695,7 +702,7 @@ float MseLoss(const Tensor& input, const Tensor& target) {
     return MseLossImpl<Device::CPU>::execute(A, B);
 }
 float NllLoss(const Tensor& input, const Tensor& target) {
-    if (input.device() != target.device()) throw std::runtime_error("Tensor Device mismatch!");
+    if (input.device_id() != target.device_id()) throw std::runtime_error("Tensor Device mismatch!");
     if (input.numel() == 0) throw std::runtime_error("nll_loss: empty input");
     if (input.shape().size() != 2) throw std::runtime_error("nll_loss: input must be 2D (N, C)");
     if (target.dtype() != DataType::INT64) throw std::runtime_error("nll_loss: target must be INT64");
@@ -719,7 +726,7 @@ void Typecast(Tensor& a, DataType dst_type) {
     if (!is_cast_valid(a.dtype(), dst_type))
         throw std::runtime_error(std::format("Invalid typecast from {} to {}", dtype_to_string(a.dtype()), dtype_to_string(dst_type)));
     if (a.dtype() == dst_type) return;
-    execute_on<TypecastImpl>(a.device(), a, dst_type);
+    execute_on<TypecastImpl>(a.device_id(), a, dst_type);
 }
 Tensor Typecast(const Tensor& a, DataType dst_type) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
@@ -728,7 +735,7 @@ Tensor Typecast(const Tensor& a, DataType dst_type) {
     if (a.dtype() == dst_type) return a;
     Tensor storage;
     const Tensor& A = linearize(a, storage);
-    return execute_on<TypecastImpl>(A.device(), A, dst_type);
+    return execute_on<TypecastImpl>(A.device_id(), A, dst_type);
 }
 
 Tensor Concat(const std::vector<Tensor>& tensors, int dim) {
@@ -736,8 +743,15 @@ Tensor Concat(const std::vector<Tensor>& tensors, int dim) {
     if (tensors.size() == 1) return tensors[0];
     DataType dtype = tensors[0].dtype();
     const auto& first_shape = tensors[0].shape();
+    const DeviceId first_device = tensors[0].device_id();
     for (const auto& t : tensors) {
         if (t.dtype() != dtype) throw std::invalid_argument("tensors must have same dtype");
+        // Kind is not enough: two CUDA instances would make the kernel read the
+        // other GPU's pointer through this GPU's context.
+        if (t.device_id() != first_device)
+            throw std::invalid_argument(std::format(
+                "Concat: all tensors must live on the same device ({} vs {})",
+                device_id_to_string(first_device), device_id_to_string(t.device_id())));
         if (t.shape().size() != first_shape.size()) throw std::invalid_argument("tensors must have same number of dimensions");
         for (int i = 0; i < static_cast<int>(first_shape.size()); ++i) {
             if (i != dim && t.shape()[i] != first_shape[i])
@@ -756,14 +770,14 @@ Tensor Concat(const std::vector<Tensor>& tensors, int dim) {
         }
     }
     if (inputs->empty()) throw std::runtime_error("Concat: input list is empty");
-    return execute_on<ConcatImpl>((*inputs)[0].device(), *inputs, dim);
+    return execute_on<ConcatImpl>((*inputs)[0].device_id(), *inputs, dim);
 }
 
 void Transpose(Tensor& a) {
     require_contiguous(a, "transpose");
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
     if (a.shape().size() != 2) throw std::runtime_error("transpose only support 2D tensor");
-    execute_on<TransposeImpl>(a.device(), a);
+    execute_on<TransposeImpl>(a.device_id(), a);
 }
 void Transpose(const Tensor& a, Tensor& dst, std::initializer_list<int64_t> axes) {
     if (a.shape().empty()) throw std::runtime_error("Input tensor must be not null.");
@@ -771,74 +785,74 @@ void Transpose(const Tensor& a, Tensor& dst, std::initializer_list<int64_t> axes
     if (a.numel() != dst.numel()) throw std::runtime_error("dst numel not enough");
     Tensor storage;
     const Tensor& A = linearize(a, storage);
-    execute_on<TransposeImpl>(A.device(), A, dst, axes);
+    execute_on<TransposeImpl>(A.device_id(), A, dst, axes);
 }
 Tensor Transpose(const Tensor& a, std::initializer_list<int64_t> axes) {
     if (a.shape().empty()) throw std::runtime_error("Input tensor must be not null.");
     if (a.shape().size() != axes.size()) throw std::runtime_error("transpose shape and axes size not match");
     Tensor storage;
     const Tensor& A = linearize(a, storage);
-    return execute_on<TransposeImpl>(A.device(), A, axes);
+    return execute_on<TransposeImpl>(A.device_id(), A, axes);
 }
 
 Tensor Equal(const Tensor& a, const Tensor& b) {
-    if (a.device() != b.device()) throw std::runtime_error("Tensors a and b device mismatch!");
+    if (a.device_id() != b.device_id()) throw std::runtime_error("Tensors a and b device mismatch!");
 
     // 形状由 ufunc 框架的广播规则校验
-    return execute_on<EqualImpl>(a.device(), a, b);
+    return execute_on<EqualImpl>(a.device_id(), a, b);
 }
 Tensor NotEqual(const Tensor& a, const Tensor& b) {
-    if (a.device() != b.device()) throw std::runtime_error("Tensors a and b device mismatch!");
+    if (a.device_id() != b.device_id()) throw std::runtime_error("Tensors a and b device mismatch!");
 
     // 形状由 ufunc 框架的广播规则校验
-    return execute_on<NotEqualImpl>(a.device(), a, b);
+    return execute_on<NotEqualImpl>(a.device_id(), a, b);
 }
 Tensor Greater(const Tensor& a, const Tensor& b) {
-    if (a.device() != b.device()) throw std::runtime_error("Tensors a and b device mismatch!");
+    if (a.device_id() != b.device_id()) throw std::runtime_error("Tensors a and b device mismatch!");
 
     // 形状由 ufunc 框架的广播规则校验
-    return execute_on<GreaterImpl>(a.device(), a, b);
+    return execute_on<GreaterImpl>(a.device_id(), a, b);
 }
 Tensor Less(const Tensor& a, const Tensor& b) {
-    if (a.device() != b.device()) throw std::runtime_error("Tensors a and b device mismatch!");
+    if (a.device_id() != b.device_id()) throw std::runtime_error("Tensors a and b device mismatch!");
 
     // 形状由 ufunc 框架的广播规则校验
-    return execute_on<LessImpl>(a.device(), a, b);
+    return execute_on<LessImpl>(a.device_id(), a, b);
 }
 Tensor GreaterEqual(const Tensor& a, const Tensor& b) {
-    if (a.device() != b.device()) throw std::runtime_error("Tensors a and b device mismatch!");
+    if (a.device_id() != b.device_id()) throw std::runtime_error("Tensors a and b device mismatch!");
 
     // 形状由 ufunc 框架的广播规则校验
-    return execute_on<GreaterEqualImpl>(a.device(), a, b);
+    return execute_on<GreaterEqualImpl>(a.device_id(), a, b);
 }
 Tensor LessEqual(const Tensor& a, const Tensor& b) {
-    if (a.device() != b.device()) throw std::runtime_error("Tensors a and b device mismatch!");
+    if (a.device_id() != b.device_id()) throw std::runtime_error("Tensors a and b device mismatch!");
 
     // 形状由 ufunc 框架的广播规则校验
-    return execute_on<LessEqualImpl>(a.device(), a, b);
+    return execute_on<LessEqualImpl>(a.device_id(), a, b);
 }
 
-Tensor Equal(const Tensor& a, float val) { return execute_on<EqualImpl>(a.device(), a, val); }
-Tensor NotEqual(const Tensor& a, float val) { return execute_on<NotEqualImpl>(a.device(), a, val); }
-Tensor Greater(const Tensor& a, float val) { return execute_on<GreaterImpl>(a.device(), a, val); }
-Tensor Less(const Tensor& a, float val) { return execute_on<LessImpl>(a.device(), a, val); }
-Tensor GreaterEqual(const Tensor& a, float val) { return execute_on<GreaterEqualImpl>(a.device(), a, val); }
-Tensor LessEqual(const Tensor& a, float val) { return execute_on<LessEqualImpl>(a.device(), a, val); }
+Tensor Equal(const Tensor& a, float val) { return execute_on<EqualImpl>(a.device_id(), a, val); }
+Tensor NotEqual(const Tensor& a, float val) { return execute_on<NotEqualImpl>(a.device_id(), a, val); }
+Tensor Greater(const Tensor& a, float val) { return execute_on<GreaterImpl>(a.device_id(), a, val); }
+Tensor Less(const Tensor& a, float val) { return execute_on<LessImpl>(a.device_id(), a, val); }
+Tensor GreaterEqual(const Tensor& a, float val) { return execute_on<GreaterEqualImpl>(a.device_id(), a, val); }
+Tensor LessEqual(const Tensor& a, float val) { return execute_on<LessEqualImpl>(a.device_id(), a, val); }
 
 Tensor Where(const Tensor& cond, const Tensor& a, const Tensor& b) {
-    if (cond.device() != a.device() || cond.device() != b.device())
+    if (cond.device_id() != a.device_id() || cond.device_id() != b.device_id())
         throw std::runtime_error("Tensor Device mismatch!");
     require_cpu(cond, "where");
     return WhereImpl<Device::CPU>::execute(cond, a, b);
 }
 Tensor Where(const Tensor& cond, const Tensor& a, float b) {
-    if (cond.device() != a.device())
+    if (cond.device_id() != a.device_id())
         throw std::runtime_error("Tensor Device mismatch!");
     require_cpu(cond, "where");
     return WhereImpl<Device::CPU>::execute(cond, a, b);
 }
 Tensor Where(const Tensor& cond, float a, const Tensor& b) {
-    if (cond.device() != b.device())
+    if (cond.device_id() != b.device_id())
         throw std::runtime_error("Tensor Device mismatch!");
     require_cpu(cond, "where");
     return WhereImpl<Device::CPU>::execute(cond, a, b);
@@ -848,19 +862,19 @@ bool All(const Tensor& a, float val) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
     Tensor storage;
     const Tensor& A = linearize(a, storage);
-    return execute_on<AllImpl>(A.device(), A, val);
+    return execute_on<AllImpl>(A.device_id(), A, val);
 }
 bool Any(const Tensor& a, float val) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
     Tensor storage;
     const Tensor& A = linearize(a, storage);
-    return execute_on<AnyImpl>(A.device(), A, val);
+    return execute_on<AnyImpl>(A.device_id(), A, val);
 }
 size_t Nonzero(const Tensor& a) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
     Tensor storage;
     const Tensor& A = linearize(a, storage);
-    return execute_on<NonZeroImpl>(A.device(), A);
+    return execute_on<NonZeroImpl>(A.device_id(), A);
 }
 Tensor Argmax(const Tensor& a, int axis) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
@@ -868,7 +882,7 @@ Tensor Argmax(const Tensor& a, int axis) {
     if (axis >= static_cast<int>(a.shape().size())) throw std::runtime_error("axis is out of range");
     Tensor storage;
     const Tensor& A = linearize(a, storage);
-    return execute_on<ArgMaxImpl>(A.device(), A, axis);
+    return execute_on<ArgMaxImpl>(A.device_id(), A, axis);
 }
 Tensor Argmin(const Tensor& a, int axis) {
     if (a.data() == nullptr || a.numel() == 0) throw std::runtime_error("tensor a is null");
@@ -876,11 +890,11 @@ Tensor Argmin(const Tensor& a, int axis) {
     if (axis >= static_cast<int>(a.shape().size())) throw std::runtime_error("axis is out of range");
     Tensor storage;
     const Tensor& A = linearize(a, storage);
-    return execute_on<ArgMinImpl>(A.device(), A, axis);
+    return execute_on<ArgMinImpl>(A.device_id(), A, axis);
 }
 
 Tensor IndexSelect(const Tensor& input, int dim, const Tensor& index) {
-    if (input.device() != index.device())
+    if (input.device_id() != index.device_id())
         throw std::runtime_error("Tensor Device mismatch!");
     if (index.dtype() != DataType::INT32 && index.dtype() != DataType::INT64)
         throw std::runtime_error("index_select: index must be INT32 or INT64");
@@ -894,7 +908,7 @@ Tensor IndexSelect(const Tensor& input, int dim, const Tensor& index) {
 }
 
 Tensor Gather(const Tensor& input, int dim, const Tensor& index) {
-    if (input.device() != index.device())
+    if (input.device_id() != index.device_id())
         throw std::runtime_error("Tensor Device mismatch!");
     if (index.dtype() != DataType::INT32 && index.dtype() != DataType::INT64)
         throw std::runtime_error("gather: index must be INT32 or INT64");
@@ -911,6 +925,57 @@ void Temp(Tensor& t) {
     require_contiguous(t, "temp");
     require_cpu(t, "temp");
     TempImpl<Device::CPU>::execute(t);
+}
+
+namespace {
+
+// Every backend that is up, so a call covers whichever devices this program
+// actually used without the caller naming any of them.
+void for_each_live_control(std::function<void()> DeviceControl::*fn) {
+    for (const auto& entry : live_device_controls()) {
+        const std::function<void()>& callback = entry.second.*fn;
+        if (callback) callback();
+    }
+}
+
+}  // namespace
+
+void synchronize() {
+    for_each_live_control(&DeviceControl::synchronize);
+}
+
+void empty_cache() {
+    for_each_live_control(&DeviceControl::empty_cache);
+}
+
+int device_count(Device kind) {
+    return device_probe(kind).count;
+}
+
+int current_device(Device kind) {
+    return current_device_index(kind);
+}
+
+void set_device(Device kind, int index) {
+    set_current_device_index(kind, index);
+}
+
+DeviceGuard::DeviceGuard(DeviceId id)
+    : m_previous{id.kind, current_device_index(id.kind)} {
+    // The common case is an op on the device that is already current; skipping
+    // the set keeps the per-op guard to a thread-local lookup.
+    if (m_previous.index != id.index) set_current_device_index(id.kind, id.index);
+}
+
+DeviceGuard::~DeviceGuard() {
+    // Destructors do not throw. The index was valid when this guard was
+    // constructed, so the restore only fails if the device set shrank under us,
+    // which this library never does.
+    try {
+        if (current_device_index(m_previous.kind) != m_previous.index)
+            set_current_device_index(m_previous.kind, m_previous.index);
+    } catch (...) {
+    }
 }
 
 }  // namespace ops

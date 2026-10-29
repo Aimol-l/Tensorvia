@@ -30,6 +30,13 @@ public:
     explicit CUDAContext(int device_index);
     ~CUDAContext() override;
 
+    // How many GPUs this process can see, and which one a caller that names no
+    // index should get (the largest-memory one, matching the default ctor).
+    // Both are static and CUDA-only, so the init TU can probe without compiling
+    // against the runtime itself.
+    static int device_count();
+    static int preferred_device_index();
+
     CUDAContext(const CUDAContext&) = delete;
     CUDAContext& operator=(const CUDAContext&) = delete;
     CUDAContext(CUDAContext&&) = delete;
@@ -40,7 +47,7 @@ public:
     // The calling thread's current stream, for launches. Callers in .cu files
     // cast it to cudaStream_t.
     void* stream() const;
-    int   device_id() const;
+    int   device_index() const;
 
     // CUDA's current device is per-thread; every entry point that allocates or
     // launches calls this first.
@@ -77,11 +84,13 @@ public:
     };
 
     // The host drivers are synchronous: every launch is followed by wait(), so
-    // callers never observe a half-computed tensor. Both of these wait for the
-    // calling thread's current stream; synchronize_all() also covers the
-    // context's other streams, which is what teardown and debugging need.
+    // callers never observe a half-computed tensor. wait() and
+    // synchronize_current_stream() wait for the calling thread's current
+    // stream; synchronize_all() covers the context's other streams as well.
+    // The device-wide entry point the rest of the library calls is
+    // ops::synchronize(), which routes to synchronize_all().
     void wait() const;
-    void synchronize() const;
+    void synchronize_current_stream() const;
     void synchronize_all() const;
 
     // Device memory goes through the context's caching allocator: repeated

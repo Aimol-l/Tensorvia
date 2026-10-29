@@ -230,7 +230,153 @@ TEST_F(DeviceOps, ConcurrentSmallTensorChurn) {
     EXPECT_EQ(failures.load(), 0);
 }
 
-// ---------- 0c. CUDA 流：current stream 按线程取值（P2） ----------
+// ---------- 0c. ops::synchronize / empty_cache 覆盖所有已起后端 ----------
+TEST(DeviceControl, EveryLiveBackendAnswersBothCalls) {
+    // CPU 上两者都是合法的 no-op，泛型代码不必先判断设备。
+    EXPECT_NO_THROW(ops::synchronize());
+    EXPECT_NO_THROW(ops::empty_cache());
+
+    // 先把各后端拉起来，再确认没人漏注册。
+    for (const Device dev : {Device::CUDA, Device::VULKAN, Device::SYCL}) {
+        if (!backend_available(dev)) continue;
+        EXPECT_NO_THROW(Tensor::Ones({2, 2}, DataType::FLOAT32, dev)) << device_to_string(dev);
+    }
+    EXPECT_NO_THROW(ops::synchronize());
+    EXPECT_NO_THROW(ops::empty_cache());
+}
+
+// ---------- 0e. 多设备寻址：current device / DeviceGuard ----------
+// 单卡机器上这些用例验证的是"序号空间的边界与状态机"，不是第二张卡的实际行为。
+TEST(DeviceId, CpuIsAlwaysIndexZero) {
+    EXPECT_EQ(ops::device_count(Device::CPU), 1);
+    EXPECT_EQ(ops::current_device(Device::CPU), 0);
+    EXPECT_THROW(ops::set_device(Device::CPU, 1), std::exception);
+    // 每张 CPU 张量都带序号 0，视图与克隆也不例外。
+    std::vector<float> v{1.0f, 2.0f};
+    Tensor t(v, {2});
+    EXPECT_EQ(t.device_index(), 0);
+    EXPECT_EQ(t.device_id(), (DeviceId{Device::CPU, 0}));
+}
+
+TEST(DeviceId, SetDeviceRejectsOutOfRange) {
+    if (!backend_available(kTestDevice)) GTEST_SKIP() << "test backend unavailable";
+    const int count = ops::device_count(kTestDevice);
+    ASSERT_GE(count, 1);
+    const int before = ops::current_device(kTestDevice);
+    EXPECT_THROW(ops::set_device(kTestDevice, count), std::exception);
+    EXPECT_THROW(ops::set_device(kTestDevice, count + 7), std::exception);
+    // 失败不改变当前设备。
+    EXPECT_EQ(ops::current_device(kTestDevice), before);
+}
+
+TEST(DeviceId, SetDeviceRejectsNegative) {
+    if (!backend_available(kTestDevice)) GTEST_SKIP() << "test backend unavailable";
+    EXPECT_THROW(ops::set_device(kTestDevice, -1), std::exception);
+    EXPECT_THROW(ops::set_device(Device::CPU, -1), std::exception);
+}
+
+TEST(DeviceId, GuardRestoresPrevious) {
+    if (!backend_available(kTestDevice)) GTEST_SKIP() << "test backend unavailable";
+    const int before = ops::current_device(kTestDevice);
+    {
+        ops::DeviceGuard guard(kTestDevice, before);
+        EXPECT_EQ(ops::current_device(kTestDevice), before);
+        {
+            ops::DeviceGuard nested(DeviceId{kTestDevice, before});
+            EXPECT_EQ(ops::current_device(kTestDevice), before);
+        }
+        EXPECT_EQ(ops::current_device(kTestDevice), before);
+    }
+    EXPECT_EQ(ops::current_device(kTestDevice), before);
+}
+
+TEST(DeviceId, CurrentDeviceIsThreadLocal) {
+    if (!backend_available(kTestDevice)) GTEST_SKIP() << "test backend unavailable";
+    const int main_view = ops::current_device(kTestDevice);
+    int child_view = -1;
+    std::thread child([&] { child_view = ops::current_device(kTestDevice); });
+    child.join();
+    // 子线程没见过主线程的设置，拿到的是后端自己的默认值。单卡上两者数值
+    // 相同，真正有区分力的是多卡机上的 [multi] 用例。
+    EXPECT_EQ(child_view, ops::current_device(kTestDevice));
+    EXPECT_EQ(main_view, ops::current_device(kTestDevice));
+}
+
+TEST(DeviceId, OpOutputsFollowInput) {
+    if (!backend_available(kTestDevice)) GTEST_SKIP() << "test backend unavailable";
+    const Tensor a = Tensor::Ones({2, 3}, DataType::FLOAT32, kTestDevice);
+    const Tensor b = Tensor::Ones({2, 3}, DataType::FLOAT32, kTestDevice);
+    const DeviceId want = a.device_id();
+
+    EXPECT_EQ((a + b).device_id(), want);
+    EXPECT_EQ((a - b).device_id(), want);
+    EXPECT_EQ((a * b).device_id(), want);
+    EXPECT_EQ((a / b).device_id(), want);
+    EXPECT_EQ(ops::Relu(a).device_id(), want);
+    EXPECT_EQ(ops::Sum(a, 1).device_id(), want);
+    EXPECT_EQ(ops::Typecast(a, DataType::FLOAT64).device_id(), want);
+    EXPECT_EQ(ops::Concat({a, b}, 0).device_id(), want);
+}
+
+TEST(DeviceId, ViewsCloneTypecastPreserveIndex) {
+    if (!backend_available(kTestDevice)) GTEST_SKIP() << "test backend unavailable";
+    Tensor a = Tensor::Ones({2, 3}, DataType::FLOAT32, kTestDevice);
+    const int want_index = a.device_index();
+
+    // 视图共享 impl，但元数据里的序号必须跟着走：丢掉它，后续 clone() 会分到
+    // 另一张卡上。
+    EXPECT_EQ(a.slice({{0, 1}, {0, 2}}).device_index(), want_index);
+    EXPECT_EQ(a.t().device_index(), want_index);
+    EXPECT_EQ(a.permute({1, 0}).device_index(), want_index);
+    EXPECT_EQ(a.t().contiguous().device_index(), want_index);
+    EXPECT_EQ(a.clone().device_index(), want_index);
+    EXPECT_EQ(a.to_type(DataType::FLOAT64).device_index(), want_index);
+
+    // 回到 host 就是 CPU:0，不再是加速器的序号。
+    Tensor host = a.clone();
+    host.to_host();
+    EXPECT_EQ(host.device_id(), (DeviceId{Device::CPU, 0}));
+}
+
+TEST(DeviceId, SynchronizeCoversAllIndices) {
+    for (const Device dev : kAllDevices) {
+        const int count = ops::device_count(dev);
+        for (int index = 0; index < count; ++index) {
+            ops::DeviceGuard guard(dev, index);
+            EXPECT_NO_THROW(Tensor::Ones({2, 2}, DataType::FLOAT32, dev))
+                << device_to_string(dev) << ":" << index;
+        }
+    }
+    EXPECT_NO_THROW(ops::synchronize());
+    EXPECT_NO_THROW(ops::empty_cache());
+}
+
+TEST(DeviceId, MultiIndexCrossOperandRejected) {
+    const int count = ops::device_count(kTestDevice);
+    if (count < 2) GTEST_SKIP() << "needs at least two " << device_to_string(kTestDevice)
+                                << " devices";
+    const DeviceId second{kTestDevice, 1};
+    Tensor a = Tensor::Ones({4}, DataType::FLOAT32, kTestDevice);
+    Tensor b = Tensor::Ones({4}, DataType::FLOAT32, kTestDevice);
+    b.to_device(second);
+    ASSERT_EQ(b.device_id(), second);
+    // 同一后端的两张卡也是两个设备：拿 a 的 context 读 b 的指针是静默的数据错误。
+    EXPECT_THROW(ops::Add(a, b), std::exception);
+    EXPECT_THROW(ops::Concat({a, b}, 0), std::exception);
+}
+
+TEST(DeviceId, MultiIndexToDeviceCopiesValues) {
+    const int count = ops::device_count(kTestDevice);
+    if (count < 2) GTEST_SKIP() << "needs at least two " << device_to_string(kTestDevice)
+                                << " devices";
+    std::vector<float> values{1.0f, 2.0f, 3.0f};
+    Tensor t(values, {3});
+    t.to_device(DeviceId{kTestDevice, 1});
+    ASSERT_EQ(t.device_id(), (DeviceId{kTestDevice, 1}));
+    EXPECT_EQ(host_values<float>(t), values);
+}
+
+// ---------- 0d. CUDA 流：current stream 按线程取值（P2） ----------
 #if defined(BACKEND_CUDA)
 namespace {
 
@@ -263,7 +409,7 @@ TEST(CudaStream, CurrentStreamIsPerThreadAndOpsStayCorrect) {
         Tensor a = Tensor::Ones({2, 3}, DataType::FLOAT32, Device::CUDA);
         a = a + a;
         for (float v : host_values<float>(a)) EXPECT_FLOAT_EQ(v, 2.0f);
-        ctx->synchronize();   // 同步的就是这条流
+        ctx->synchronize_current_stream();   // 同步的就是这条流
     }
     EXPECT_EQ(ctx->current_stream().handle, dflt.handle);
 
@@ -278,6 +424,66 @@ TEST(CudaStream, CurrentStreamIsPerThreadAndOpsStayCorrect) {
     // 池按 round-robin 发号，连续两次拿到不同的流。
     EXPECT_NE(ctx->stream_from_pool().handle, ctx->stream_from_pool().handle);
     ctx->synchronize_all();
+}
+#endif  // BACKEND_CUDA
+
+// ---------- 0e. empty_cache 不碰活着的张量（CUDA） ----------
+#if defined(BACKEND_CUDA)
+TEST(DeviceControl, CudaEmptyCacheKeepsLiveTensors) {
+    if (!backend_available(Device::CUDA)) GTEST_SKIP() << "CUDA is unavailable in this build";
+
+    Tensor probe = Tensor::Ones({4, 4}, DataType::FLOAT32, Device::CUDA);
+    auto   ctx   = cuda_context_of(probe);
+    ASSERT_NE(ctx, nullptr);
+
+    {
+        // 工作提交到池流上，随后离开该作用域：本线程的 current stream 已经
+        // 回到 default，设备级同步仍然要等到池流上的活干完。
+        CUDAContext::StreamGuard guard(*ctx, ctx->stream_from_pool());
+        Tensor a = probe + probe;
+        for (float v : host_values<float>(a)) EXPECT_FLOAT_EQ(v, 2.0f);
+    }
+    EXPECT_NO_THROW(ops::synchronize());
+
+    // 释放之后积压的块进缓存，empty_cache 把它们还给驱动；仍然活着的张量
+    // （probe）不受影响。
+    probe = Tensor();
+    EXPECT_NO_THROW(ops::empty_cache());
+
+    // 交还之后还能正常再要内存。
+    Tensor again = Tensor::Zeros({2, 2}, DataType::FLOAT32, Device::CUDA);
+    for (float v : host_values<float>(again)) EXPECT_FLOAT_EQ(v, 0.0f);
+    EXPECT_NO_THROW(ops::synchronize());
+}
+#endif  // BACKEND_CUDA
+
+// ---------- 0f. 每张卡一个 context（CUDA） ----------
+#if defined(BACKEND_CUDA)
+// 单卡机器上也能验证"每个序号一个独立 context"：直接构造同序号的两个对象。
+TEST(CudaIndex, TwoContextsOfSameIndexAreDistinct) {
+    if (!backend_available(Device::CUDA)) GTEST_SKIP() << "CUDA is unavailable in this build";
+    auto first  = std::make_shared<CUDAContext>(0);
+    auto second = std::make_shared<CUDAContext>(0);
+    EXPECT_NE(first.get(), second.get());
+    EXPECT_EQ(first->device_index(), 0);
+    EXPECT_EQ(second->device_index(), 0);
+    // 各自的流池互不影响。
+    EXPECT_NE(first->stream_from_pool().handle, second->stream_from_pool().handle);
+
+    auto a = std::make_shared<CUDATensor>(4, DataType::FLOAT32, first);
+    auto b = std::make_shared<CUDATensor>(4, DataType::FLOAT32, second);
+    // copy_to 只在同一块存储内成立；跨 context 必须被拒，而不是拷一串错地址。
+    EXPECT_THROW(a->copy_to(b), std::invalid_argument);
+}
+
+TEST(CudaIndex, FactoryContextMatchesIndex) {
+    if (!backend_available(Device::CUDA)) GTEST_SKIP() << "CUDA is unavailable in this build";
+    const int index = ops::current_device(Device::CUDA);
+    Tensor t = Tensor::Ones({4}, DataType::FLOAT32, Device::CUDA);
+    ASSERT_EQ(t.device_index(), index);
+    auto ctx = cuda_context_of(t);
+    ASSERT_NE(ctx, nullptr);
+    EXPECT_EQ(ctx->device_index(), t.device_index());
 }
 #endif  // BACKEND_CUDA
 

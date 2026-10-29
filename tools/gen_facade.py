@@ -86,15 +86,24 @@ def scan_public_names(iface_dir: pathlib.Path) -> set[tuple[str, str]]:
         if not hpp.is_file():
             raise SystemExit(f"missing public partition header: {hpp}")
         # ---- pass 1: strip class bodies ----
+        # The namespace is sticky across the header (same assumption pass 2
+        # makes), so a class defined inside `namespace ops` is recorded as
+        # ops::Name rather than as a global one.
         kept: list[str] = []
         in_class = False
         depth = 0
+        ns = ""
         for raw in hpp.read_text(encoding="utf-8").splitlines():
             s = raw.strip()
             if not in_class:
+                m = re.match(r"namespace\s+(\w+)\s*\{", s)
+                if m:
+                    ns = m.group(1)
+                    kept.append(s)
+                    continue
                 m = re.match(r"(?:class|struct)\s+(\w+)", s)
                 if m and not s.endswith(";"):          # a definition, not a fwd decl
-                    names.add(("", m.group(1)))
+                    names.add((ns, m.group(1)))
                     in_class = True
                     depth = s.count("{") - s.count("}")
                     if depth <= 0 and "{" not in s:     # `class X` then `{` later

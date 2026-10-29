@@ -44,8 +44,10 @@ struct SYCLContext::Impl {
     void* handle = nullptr;
 };
 
-SYCLContext::SYCLContext() {
-    void* handle = ::sycl_c_context_create();
+SYCLContext::SYCLContext() : SYCLContext(-1) {}
+
+SYCLContext::SYCLContext(int device_index) {
+    void* handle = ::sycl_c_context_create(device_index);
     if (handle == nullptr) throw std::runtime_error("no SYCL device available");
 
     auto* impl = new (std::nothrow) Impl;

@@ -32,7 +32,7 @@ Tensor::Tensor(std::vector<int64_t> shape, DataType dtype) {
     m_meta.dtype = dtype;
     m_meta.calculate_strides();
     m_meta.numel = calc_numel(shape);
-    m_impl = create_tensor_impl(m_meta.numel, m_meta.dtype, m_meta.device);
+    m_impl = create_tensor_impl(m_meta.numel, m_meta.dtype, m_meta.device_id());
 }
 
 Tensor::Tensor(std::initializer_list<int64_t> shape, DataType dtype) {
@@ -43,49 +43,53 @@ Tensor::Tensor(std::initializer_list<int64_t> shape, DataType dtype) {
     m_meta.shape = shape_;
     m_meta.calculate_strides();
     m_meta.numel = calc_numel(shape_);
-    m_impl = create_tensor_impl(m_meta.numel, m_meta.dtype, m_meta.device);
+    m_impl = create_tensor_impl(m_meta.numel, m_meta.dtype, m_meta.device_id());
 }
 
 Tensor::Tensor(void* ptr, std::initializer_list<int64_t> shape, DataType dtype, Device device) {
     if (shape.size() == 0) throw std::runtime_error("Tensor shape cannot be empty");
     std::vector<int64_t> shape_(shape);
     m_meta.device = device;
+    m_meta.device_index = current_device_index(device);
     m_meta.dtype = dtype;
     m_meta.shape = shape_;
     m_meta.calculate_strides();
     m_meta.numel = calc_numel(shape_);
-    m_impl = create_tensor_impl(ptr, m_meta.numel, m_meta.dtype, m_meta.device);
+    m_impl = create_tensor_impl(ptr, m_meta.numel, m_meta.dtype, m_meta.device_id());
 }
 
 Tensor::Tensor(void* ptr, std::vector<int64_t> shape, DataType dtype, Device device) {
     if (shape.empty()) throw std::runtime_error("Tensor shape cannot be empty");
     if (ptr == nullptr) throw std::runtime_error("ptr can not nullptr");
     m_meta.device = device;
+    m_meta.device_index = current_device_index(device);
     m_meta.dtype = dtype;
     m_meta.shape = shape;
     m_meta.calculate_strides();
     m_meta.numel = calc_numel(shape);
-    m_impl = create_tensor_impl(ptr, m_meta.numel, m_meta.dtype, m_meta.device);
+    m_impl = create_tensor_impl(ptr, m_meta.numel, m_meta.dtype, m_meta.device_id());
 }
 
 Tensor::Tensor(std::vector<int64_t> shape, DataType dtype, Device device) {
     if (shape.empty()) throw std::runtime_error("Tensor shape cannot be empty");
     m_meta.device = device;
+    m_meta.device_index = current_device_index(device);
     m_meta.dtype = dtype;
     m_meta.shape = shape;
     m_meta.calculate_strides();
     m_meta.numel = calc_numel(shape);
-    m_impl = create_tensor_impl(m_meta.numel, dtype, device);
+    m_impl = create_tensor_impl(m_meta.numel, dtype, m_meta.device_id());
 }
 
 Tensor::Tensor(std::initializer_list<int64_t> shape, DataType dtype, Device device) {
     if (shape.size() == 0) throw std::runtime_error("Tensor shape cannot be empty");
     m_meta.device = device;
+    m_meta.device_index = current_device_index(device);
     m_meta.dtype = dtype;
     m_meta.shape = shape;
     m_meta.calculate_strides();
     m_meta.numel = calc_numel(shape);
-    m_impl = create_tensor_impl(m_meta.numel, dtype, device);
+    m_impl = create_tensor_impl(m_meta.numel, dtype, m_meta.device_id());
 }
 
 template <typename T>
@@ -112,7 +116,7 @@ Tensor::Tensor(std::vector<T>& vec, std::initializer_list<int64_t> shape) {
     m_meta.shape = shape;
     m_meta.calculate_strides();
     m_meta.numel = calc_numel(shape);
-    m_impl = create_tensor_impl(vec.data(), m_meta.numel, m_meta.dtype, m_meta.device);
+    m_impl = create_tensor_impl(vec.data(), m_meta.numel, m_meta.dtype, m_meta.device_id());
 }
 
 template <typename T>
@@ -139,7 +143,7 @@ Tensor::Tensor(std::vector<T>& vec, std::vector<int64_t> shape) {
     m_meta.shape = shape;
     m_meta.calculate_strides();
     m_meta.numel = calc_numel(shape);
-    m_impl = create_tensor_impl(vec.data(), m_meta.numel, m_meta.dtype, m_meta.device);
+    m_impl = create_tensor_impl(vec.data(), m_meta.numel, m_meta.dtype, m_meta.device_id());
 }
 
 Tensor::Tensor(std::span<const int64_t> shape, DataType dtype) {
@@ -149,17 +153,18 @@ Tensor::Tensor(std::span<const int64_t> shape, DataType dtype) {
     m_meta.dtype = dtype;
     m_meta.calculate_strides();
     m_meta.numel = calc_numel(m_meta.shape);
-    m_impl = create_tensor_impl(m_meta.numel, m_meta.dtype, m_meta.device);
+    m_impl = create_tensor_impl(m_meta.numel, m_meta.dtype, m_meta.device_id());
 }
 
 Tensor::Tensor(std::span<const int64_t> shape, DataType dtype, Device device) {
     if (shape.empty()) throw std::runtime_error("Tensor shape cannot be empty");
     m_meta.device = device;
+    m_meta.device_index = current_device_index(device);
     m_meta.shape.assign(shape.begin(), shape.end());
     m_meta.dtype = dtype;
     m_meta.calculate_strides();
     m_meta.numel = calc_numel(m_meta.shape);
-    m_impl = create_tensor_impl(m_meta.numel, dtype, device);
+    m_impl = create_tensor_impl(m_meta.numel, dtype, m_meta.device_id());
 }
 
 Tensor Tensor::t() {
@@ -223,8 +228,21 @@ Tensor Tensor::permute(const std::vector<int64_t>& dims) const {
     return _make_view(new_shape, new_strides, 0);
 }
 
+Tensor Tensor::allocate(DimArray shape, DataType dtype, DeviceId id) {
+    if (shape.empty()) throw std::runtime_error("Tensor shape cannot be empty");
+    Metadata meta;
+    meta.shape = std::move(shape);
+    meta.dtype = dtype;
+    meta.device = id.kind;
+    meta.device_index = id.index;
+    meta.numel = calc_numel(meta.shape);
+    meta.calculate_strides();
+    auto impl = create_tensor_impl(meta.numel, dtype, id);
+    return Tensor(std::move(impl), std::move(meta));
+}
+
 Tensor Tensor::clone() const {
-    Tensor temp(this->m_meta.shape, this->m_meta.dtype, this->m_meta.device);
+    Tensor temp = allocate(m_meta.shape, m_meta.dtype, m_meta.device_id());
     // copy_to 从底层 buffer 基址整块拷贝，只对无 offset 的张量成立；
     // 带 offset 的连续切片和任何非连续视图都走 clone_as_contiguous 物化。
     if (this->is_contiguous() && m_meta.offset == 0) {
@@ -250,7 +268,7 @@ const void* Tensor::data() const {
 
 Tensor Tensor::contiguous() const {
     if (this->is_contiguous()) return *this;
-    Tensor contig_tensor(m_meta.shape, m_meta.dtype, m_meta.device);
+    Tensor contig_tensor = allocate(m_meta.shape, m_meta.dtype, m_meta.device_id());
     auto new_impl = m_impl->clone_as_contiguous(m_meta);
     contig_tensor.m_impl = std::move(new_impl);
     return contig_tensor;
@@ -326,6 +344,7 @@ Tensor Tensor::_make_view(DimArray shape, DimArray strides, int64_t offset) cons
     meta.numel = calc_numel(shape);
     meta.dtype = this->m_meta.dtype;
     meta.device = this->m_meta.device;
+    meta.device_index = this->m_meta.device_index;
     meta.offset = offset;
     meta.shape = std::move(shape);
     meta.strides = std::move(strides);
@@ -362,6 +381,10 @@ Tensor& Tensor::operator=(Tensor&& other) noexcept {
 }
 
 Device Tensor::device() const { return m_meta.device; }
+
+int Tensor::device_index() const { return m_meta.device_index; }
+
+DeviceId Tensor::device_id() const { return {m_meta.device, m_meta.device_index}; }
 
 std::span<const int64_t> Tensor::shape() const { return {m_meta.shape.data(), m_meta.shape.size()}; }
 
@@ -415,17 +438,22 @@ void Tensor::to_host() {
     // copy_to_host works on the impl's raw base pointer, so collapse any view
     // (offset and/or non-contiguous strides) into a standalone buffer first.
     materialize_for_transfer();
-    auto cpu_impl = create_tensor_impl(m_meta.numel, m_meta.dtype, Device::CPU);
+    auto cpu_impl = create_tensor_impl(m_meta.numel, m_meta.dtype, DeviceId{Device::CPU, 0});
     m_impl->copy_to_host(cpu_impl->data(), m_meta.dtype);
     m_impl = std::move(cpu_impl);
     m_meta.device = Device::CPU;
+    m_meta.device_index = 0;
     m_meta.offset = 0;
     m_meta.calculate_strides();
 }
 
-void Tensor::to_device(Device target) {
-    if (m_meta.device == target) return;
-    if (target == Device::CPU) {
+void Tensor::to_device(DeviceId target) {
+    if (target.index < 0)
+        throw std::invalid_argument("to_device: device index must be non-negative");
+    if (target.kind == Device::CPU && target.index != 0)
+        throw std::invalid_argument("to_device: the CPU backend has only index 0");
+    if (m_meta.device_id() == target) return;
+    if (target.kind == Device::CPU) {
         to_host();
         return;
     }
@@ -436,9 +464,14 @@ void Tensor::to_device(Device target) {
     auto device_impl = create_tensor_impl(m_meta.numel, m_meta.dtype, target);
     device_impl->copy_from_host(m_impl->data(), m_meta.dtype);
     m_impl = std::move(device_impl);
-    m_meta.device = target;
+    m_meta.device = target.kind;
+    m_meta.device_index = target.index;
     m_meta.offset = 0;
     m_meta.calculate_strides();
+}
+
+void Tensor::to_device(Device target, int index) {
+    to_device(DeviceId{target, index < 0 ? current_device_index(target) : index});
 }
 
 void Tensor::to_device(uint32_t) {
@@ -472,7 +505,7 @@ void Tensor::reset(std::vector<int64_t> shape, DataType dtype) {
                    && old_numel == new_numel;
 
     if (!reuse_impl) {
-        m_impl = create_tensor_impl(new_numel, dtype, m_meta.device);
+        m_impl = create_tensor_impl(new_numel, dtype, m_meta.device_id());
     }
 }
 
@@ -485,7 +518,10 @@ int64_t Tensor::strides(int i) const { return m_meta.strides[i]; }
 std::span<const int64_t> Tensor::strides() const { return {m_meta.strides.data(), m_meta.strides.size()}; }
 
 Tensor Tensor::empty_like(Tensor& tensor) const {
-    return Tensor(tensor.shape(), m_meta.dtype, m_meta.device);
+    // Follows the shape and device of `tensor`, only the dtype comes from self.
+    DimArray shape_of_source;
+    shape_of_source.assign(tensor.shape().begin(), tensor.shape().end());
+    return allocate(shape_of_source, m_meta.dtype, tensor.device_id());
 }
 
 void Tensor::set_impl(std::shared_ptr<TensorImpl> impl, DataType new_dtype) {

@@ -13,13 +13,23 @@ namespace {
 // driver. This TU exists only in builds with the `vulkan` feature.
 struct VulkanLazyRegistrar {
     VulkanLazyRegistrar() {
-        register_backend_initializer(Device::VULKAN, [] {
-            auto ctx = std::make_shared<VulkanContext>();  // registers pipelines
+        register_device_probe(Device::VULKAN, [] {
+            return DeviceProbe{VulkanContext::device_count(),
+                               VulkanContext::preferred_device_index()};
+        });
+        register_backend_initializer(Device::VULKAN, [](int index) {
+            auto ctx = std::make_shared<VulkanContext>(index);  // registers pipelines
+            const DeviceId device{Device::VULKAN, index};
             register_tensor_impl(
-                Device::VULKAN,
+                device,
                 [ctx](void* ptr, size_t numel, DataType dtype) {
                     return std::make_shared<VKTensor>(ptr, numel, dtype, ctx);
                 });
+            // submitCompute waits on a fence before it returns, so there is
+            // never work outstanding to wait for; VMA releases a buffer's
+            // memory when the buffer is destroyed, so there is no cache of
+            // free blocks to return either.
+            register_device_control(device, DeviceControl{[] {}, [] {}});
         });
     }
 } vulkan_lazy_registrar;

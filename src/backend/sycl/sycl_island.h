@@ -159,10 +159,17 @@ extern "C" {
 // Context, memory and host transfers.
 // ---------------------------------------------------------------------------
 
-// Creates a queue with sycl::default_selector_v (GPU preferred, OpenCL CPU as
-// the fallback). Returns nullptr when no device is usable.
-void* sycl_c_context_create();
+// Creates a queue on device `device_index`: -1 selects sycl::default_selector_v
+// (GPU preferred, OpenCL CPU as the fallback), 0.. selects that position in
+// sycl::device::get_devices(). Returns nullptr when no device is usable.
+void* sycl_c_context_create(int device_index);
 void  sycl_c_context_destroy(void* ctx);
+// How many devices this process can see. The device index space is this
+// backend's own: a position in sycl::device::get_devices(). Returns 0 when the
+// SYCL runtime cannot enumerate.
+int   sycl_c_device_count();
+// The index of the device sycl::default_selector_v would pick, or -1.
+int   sycl_c_default_device_index();
 int   sycl_c_wait(void* ctx);
 // Copies the device name into `out`; returns the number of bytes written.
 int   sycl_c_device_name(void* ctx, char* out, int cap);

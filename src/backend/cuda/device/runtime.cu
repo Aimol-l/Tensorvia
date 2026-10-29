@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstddef>
+#include <format>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -56,7 +57,29 @@ struct CUDAContext::Impl {
     tvv::cuda::CachingAllocator allocator;
 };
 
-CUDAContext::CUDAContext() : CUDAContext(-1) {}
+CUDAContext::CUDAContext() : CUDAContext(preferred_device_index()) {}
+
+int CUDAContext::device_count() {
+    int count = 0;
+    if (cudaGetDeviceCount(&count) != cudaSuccess) return 0;
+    return count;
+}
+
+int CUDAContext::preferred_device_index() {
+    const int count = device_count();
+    if (count <= 0) return -1;
+    int    chosen    = 0;
+    size_t best_memory = 0;
+    for (int i = 0; i < count; ++i) {
+        cudaDeviceProp prop{};
+        if (cudaGetDeviceProperties(&prop, i) != cudaSuccess) continue;
+        if (static_cast<size_t>(prop.totalGlobalMem) > best_memory) {
+            best_memory = static_cast<size_t>(prop.totalGlobalMem);
+            chosen      = i;
+        }
+    }
+    return chosen;
+}
 
 CUDAContext::CUDAContext(int device_index) {
     int count = 0;
@@ -65,18 +88,11 @@ CUDAContext::CUDAContext(int device_index) {
 
     int chosen = device_index;
     if (chosen < 0) {
-        size_t best_memory = 0;
-        chosen = 0;
-        for (int i = 0; i < count; ++i) {
-            cudaDeviceProp prop{};
-            if (cudaGetDeviceProperties(&prop, i) != cudaSuccess) continue;
-            if (static_cast<size_t>(prop.totalGlobalMem) > best_memory) {
-                best_memory = static_cast<size_t>(prop.totalGlobalMem);
-                chosen = i;
-            }
-        }
+        chosen = preferred_device_index();
+        if (chosen < 0) throw std::runtime_error("No CUDA devices found");
     } else if (chosen >= count) {
-        throw std::runtime_error("CUDAContext: device index out of range");
+        throw std::runtime_error(std::format(
+            "CUDAContext: device index {} out of range ({} device(s) visible)", chosen, count));
     }
 
     tvv::cuda::check_cuda(cudaSetDevice(chosen), "CUDAContext: cudaSetDevice");
@@ -112,7 +128,7 @@ void* CUDAContext::ctx_raw_ptr() { return stream(); }
 
 void* CUDAContext::stream() const { return current_stream().handle; }
 
-int CUDAContext::device_id() const {
+int CUDAContext::device_index() const {
     return m_impl == nullptr ? -1 : m_impl->device;
 }
 
@@ -168,14 +184,14 @@ CUDAContext::StreamGuard::~StreamGuard() {
     if (m_context != nullptr) m_context->set_current_stream(m_previous);
 }
 
-void CUDAContext::synchronize() const {
+void CUDAContext::synchronize_current_stream() const {
     if (m_impl == nullptr) return;
     tvv::cuda::check_cuda(
         cudaStreamSynchronize(static_cast<cudaStream_t>(current_stream().handle)),
         "cudaStreamSynchronize");
 }
 
-void CUDAContext::wait() const { synchronize(); }
+void CUDAContext::wait() const { synchronize_current_stream(); }
 
 void CUDAContext::synchronize_all() const {
     if (m_impl == nullptr) return;
@@ -205,7 +221,7 @@ void* CUDAContext::allocate(size_t bytes, CUDAStream stream) {
 
 void CUDAContext::deallocate(void* ptr, CUDAStream stream) noexcept {
     if (m_impl == nullptr || ptr == nullptr) return;
-    // device_id() is noexcept, unlike activate().
+    // device_index() is noexcept, unlike activate().
     (void)cudaSetDevice(m_impl->device);
     m_impl->allocator.deallocate(ptr, static_cast<cudaStream_t>(stream.handle));
 }

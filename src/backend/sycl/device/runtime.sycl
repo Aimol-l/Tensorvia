@@ -10,9 +10,9 @@ using namespace tvv::sycl_dev;
 
 extern "C" {
 
-void* sycl_c_context_create() {
+void* sycl_c_context_create(int device_index) {
     try {
-        auto* ctx = new Context();
+        auto* ctx = new Context(device_index);
         // A queue with default_selector_v always names a device; if the device
         // is unusable the first launch reports it. Returning the handle here
         // keeps "no device" (nullptr) reserved for construction failures.
@@ -28,6 +28,27 @@ void sycl_c_context_destroy(void* ctx) {
         delete static_cast<Context*>(ctx);
     } catch (...) {
         // Destructors do not throw; nothing actionable on a failed teardown.
+    }
+}
+
+int sycl_c_device_count() {
+    try {
+        return static_cast<int>(sycl::device::get_devices().size());
+    } catch (...) {
+        return 0;
+    }
+}
+
+int sycl_c_default_device_index() {
+    try {
+        const sycl::device chosen{sycl::default_selector_v};
+        const auto devices = sycl::device::get_devices();
+        for (size_t i = 0; i < devices.size(); ++i) {
+            if (devices[i] == chosen) return static_cast<int>(i);
+        }
+        return 0;
+    } catch (...) {
+        return -1;
     }
 }
 

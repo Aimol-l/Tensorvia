@@ -21,6 +21,41 @@ void println(std::format_string<Args...> fmt, Args&&... args) {
 void println(Tensor& a);
 void println(Tensor&& a);
 
+
+void synchronize();
+
+void empty_cache();
+
+// ---------------------------------------------------------------------------
+// Devices. A backend can expose more than one instance; the index selects one.
+// The "current" index is per thread and per backend, and starts at that
+// backend's preferred device, so a program that never calls set_device behaves
+// exactly as before.
+// ---------------------------------------------------------------------------
+
+// How many instances of `kind` this process can see (0 when the backend is not
+// built in or no device is usable).
+int device_count(Device kind);
+// The calling thread's current index for `kind`.
+int current_device(Device kind);
+// Throws when the index is out of range, like torch.cuda.set_device.
+void set_device(Device kind, int index);
+
+// Restores the previous current index for `id.kind` when it goes out of scope:
+// the counterpart of torch.cuda.device(i).
+class DeviceGuard {
+public:
+    explicit DeviceGuard(DeviceId id);
+    DeviceGuard(Device kind, int index) : DeviceGuard(DeviceId{kind, index}) {}
+    ~DeviceGuard();
+
+    DeviceGuard(const DeviceGuard&) = delete;
+    DeviceGuard& operator=(const DeviceGuard&) = delete;
+
+private:
+    DeviceId m_previous;
+};
+
 void export_csv(Tensor& a, const std::string& path);
 void export_csv(Tensor&& a, const std::string& path);
 

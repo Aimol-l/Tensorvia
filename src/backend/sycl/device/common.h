@@ -23,10 +23,23 @@ using tvv::sycl::kMaxDims;
 inline constexpr size_t kWorkGroup = 256;
 
 // The queue lives here so every unit can recover it from the opaque handle.
+// Index -1 means "whatever default_selector_v picks"; a non-negative index is a
+// position in sycl::device::get_devices(), which is the index space the
+// external device probe reports.
 struct Context {
     ::sycl::queue queue;
-    Context()
-        : queue(::sycl::default_selector_v, ::sycl::property::queue::in_order()) {}
+    explicit Context(int device_index = -1)
+        : queue(device_of(device_index), ::sycl::property::queue::in_order()) {}
+
+    static ::sycl::device device_of(int device_index) {
+        if (device_index < 0) return ::sycl::device(::sycl::default_selector_v);
+        const auto devices = ::sycl::device::get_devices();
+        if (device_index >= static_cast<int>(devices.size())) {
+            throw ::sycl::exception(::sycl::errc::invalid,
+                                    "no SYCL device at the requested index");
+        }
+        return devices[static_cast<size_t>(device_index)];
+    }
 };
 
 inline ::sycl::queue& queue_of(void* ctx) {

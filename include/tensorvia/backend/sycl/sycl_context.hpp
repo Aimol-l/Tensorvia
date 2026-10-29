@@ -20,6 +20,9 @@ public:
     // Selects a device with sycl::default_selector_v (GPU preferred, OpenCL CPU
     // as the fallback). Throws when no device is usable.
     SYCLContext();
+    // Selects position `device_index` of sycl::device::get_devices(); the
+    // probe's default index is the one the default constructor would pick.
+    explicit SYCLContext(int device_index);
     ~SYCLContext() override;
 
     SYCLContext(const SYCLContext&) = delete;

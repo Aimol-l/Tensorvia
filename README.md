@@ -296,6 +296,35 @@ int main() {
 }
 ```
 
+## 🎛 多设备（多卡）
+
+`Device` 只选后端种类；同一个后端下的第几张卡由运行期序号决定，两者合成
+`DeviceId { Device kind; int index; }`。CPU 恒为 `{CPU, 0}`。
+
+```cpp
+// 每张卡一个实例：设备数、当前设备、切换（线程私有，torch 风格）
+const int n = ops::device_count(Device::CUDA);
+ops::set_device(Device::CUDA, 1);                 // 越界/负数直接抛
+{
+    ops::DeviceGuard guard(Device::CUDA, 0);      // 作用域结束恢复上一个
+    Tensor a = Tensor::Ones({4, 4}, DataType::FLOAT32, Device::CUDA); // 落在 0 号卡
+}                                                  // 回到 1 号卡
+
+Tensor t(values, {3});                             // 先按 {CPU, 0} 构造
+t.to_device(DeviceId{Device::CUDA, 1});            // 跨设备拷贝经 host 中转
+std::println("{}", device_id_to_string(t.device_id()));   // CUDA:1
+```
+
+几条约定：
+
+- 算子的输出跟随输入所在实例；同一后端的不同序号也算跨设备，作为操作数混用会被拒绝，
+  不会拿 A 卡的 context 去读 B 卡的指针。
+- `to_device(Device)` 的目标序号是当前线程的当前设备；`to_device(DeviceId)` 精确指定。
+- `ops::synchronize()` / `ops::empty_cache()` 覆盖所有已经起起来的实例。
+- 序号空间由各后端自己定义：CUDA 按 `cudaGetDeviceCount` 顺序（默认是显存最大的那张），
+  Vulkan 按"过滤 + 类型优先序"后的列表，SYCL 按 `sycl::device::get_devices()` 的位置，
+  默认值都是该后端原本会选中的设备——不调用 `set_device` 的程序行为不变。
+
 ## 🧪 测试
 
 ```sh

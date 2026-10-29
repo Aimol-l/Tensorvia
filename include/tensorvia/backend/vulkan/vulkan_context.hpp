@@ -42,6 +42,7 @@ private:
     VmaOwner                  m_vma;
 
     uint32_t                  m_queuefamily = 0;
+    int                       m_device_index = 0;
 
     std::array<uint32_t, 3>   m_max_workgroup_count{65535u, 65535u, 65535u};
 
@@ -61,19 +62,31 @@ private:
 
     bool                            m_enableValidationLayers = false;
     const std::vector<const char*>  m_validationLayers = {"VK_LAYER_KHRONOS_validation"};
-    const std::vector<const char*>  m_deviceExtensions = {
-        "VK_KHR_shader_float16_int8",
-        "VK_KHR_shader_bfloat16",
-        "VK_KHR_8bit_storage",
-        "VK_KHR_16bit_storage",
-        "VK_KHR_shader_subgroup_extended_types"
-    };
+    // The device extensions every instance requires live in
+    // vulkan_context.cpp: the device probe has to apply the same filter, or it
+    // would report devices that cannot be opened.
 
     void registerPipelines();
 
 public:
+    // Picks index 0 of the suitable-device list (see device_count()).
     VulkanContext();
+    // Picks position `device_index` of the suitable-device list. Every instance
+    // owns its own VkInstance, VMA allocator and pipeline set, so opening a
+    // second GPU costs a second copy of all of that.
+    explicit VulkanContext(int device_index);
     ~VulkanContext() override;
+
+    int device_index() const { return m_device_index; }
+
+    // How many physical devices pass the compute suitability filter, and which
+    // one a caller that names no index should get. The index space is the
+    // filtered list in the priority order choosePhysicalDevice uses, so index 0
+    // is exactly the device today's default constructor picks. The probe uses a
+    // throwaway instance: the physical-device handles belong to that instance,
+    // only the count and the ordering are carried over.
+    static int device_count();
+    static int preferred_device_index();
 
     void* ctx_raw_ptr() override {
         throw std::runtime_error("no ctx_raw_ptr!");
@@ -113,7 +126,7 @@ public:
 private:
     void createInstance();
     void setupDebugMessenger();
-    void choosePhysicalDevice();
+    void choosePhysicalDevice(int device_index);
     void createLogicalDevice();
     void createVmaAllocator();
     void createCommandPool();

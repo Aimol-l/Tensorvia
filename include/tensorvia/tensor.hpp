@@ -15,12 +15,17 @@ struct Metadata {
     size_t numel = 0;
     int64_t offset = 0;
     Device device;
+    // Which instance of that backend device the storage lives on. Views and
+    // clones must carry it; everything else derives its context from it.
+    int device_index = 0;
     DataType dtype;
     DimArray shape;
     DimArray strides;
     // 连续性缓存：strides 变更点（calculate_strides/_make_view）重算，
     // 避免每次 is_contiguous() 都逐维比较。
     bool is_contig = true;
+
+    DeviceId device_id() const { return {device, device_index}; }
 
     void calculate_strides() {
         strides.resize(shape.size());
@@ -80,6 +85,11 @@ private:
     Tensor _make_view(DimArray shape,
                       DimArray strides,
                       int64_t offset) const;
+    // A fresh, contiguous tensor on exactly `id` — unlike the public
+    // constructors, which resolve a bare `Device` through the thread's current
+    // device. Core paths (clone/contiguous/empty_like) must not do that: they
+    // belong to the instance their source lives on.
+    static Tensor allocate(DimArray shape, DataType dtype, DeviceId id);
     // View metadata (offset/strides) is only valid for the shared buffer it was
     // created from. Before handing storage to a different backend, collapse a
     // strided/offset view into a standalone contiguous buffer.
@@ -91,13 +101,20 @@ public:
 
     Tensor clone() const;
     Device device() const;
+    int device_index() const;
+    DeviceId device_id() const;
     DataType dtype() const;
 
     Tensor to_type(DataType) const;  // returns a new tensor, leaves *this untouched
     void to_type_(DataType);         // in-place conversion
 
     void to_host();
-    void to_device(Device target);
+    // Moves this tensor to another device instance. Non-CPU -> non-CPU goes
+    // through host memory: correctness first, and it is rare. A tensor already
+    // on `id` is left untouched.
+    void to_device(DeviceId id);
+    // `index` < 0 means the calling thread's current device for `target`.
+    void to_device(Device target, int index = -1);
     void to_device(uint32_t id = 0);  // legacy: moves CPU tensor to the accelerator
 
     int64_t offset() const { return m_meta.offset; }
@@ -114,6 +131,9 @@ public:
     Tensor empty_like(Tensor& tensor) const;
 
     std::shared_ptr<TensorImpl> get_impl() const;
+    // Replaces the storage. Invariant: the impl's context must be the one named
+    // by this tensor's device_index — the op-entry guard routes later results
+    // through the registry for that index, not through the impl.
     void set_impl(std::shared_ptr<TensorImpl> impl, DataType new_dtype);
 
     Tensor view(std::vector<int64_t> new_shape_list);

@@ -23,10 +23,110 @@ using vulkan_detail::check_fence;
 using vulkan_detail::check_result;
 using vulkan_detail::wait_fence;
 
-VulkanContext::VulkanContext() {
+namespace {
+
+// The device extensions every instance needs. Shared with the suitability
+// filter: a device that lacks one of them cannot be opened, so it must not be
+// counted by the probe either.
+const std::vector<const char*>& required_device_extensions() {
+    static const std::vector<const char*> extensions = {
+        "VK_KHR_shader_float16_int8",
+        "VK_KHR_shader_bfloat16",
+        "VK_KHR_8bit_storage",
+        "VK_KHR_16bit_storage",
+        "VK_KHR_shader_subgroup_extended_types"
+    };
+    return extensions;
+}
+
+uint32_t find_best_compute_family(std::vector<vk::QueueFamilyProperties>&& queue_families) {
+    for (uint32_t i = 0; i < queue_families.size(); i++) {
+        const auto& family = queue_families[i];
+        if ((family.queueFlags & vk::QueueFlagBits::eCompute) &&
+            (family.queueFlags & vk::QueueFlagBits::eGraphics)) {
+            return i;
+        }
+    }
+    for (uint32_t i = 0; i < queue_families.size(); i++) {
+        if (queue_families[i].queueFlags & vk::QueueFlagBits::eCompute) return i;
+    }
+    throw std::runtime_error("No compute queue family found!");
+}
+
+bool is_suitable_physical_device(vk::PhysicalDevice device) {
+    bool has_compute = false;
+    for (const auto& family : device.getQueueFamilyProperties()) {
+        if (family.queueFlags & vk::QueueFlagBits::eCompute) {
+            has_compute = true;
+            break;
+        }
+    }
+    if (!has_compute) return false;
+    if (!device.getFeatures().shaderInt64) return false;
+    const auto limits = device.getProperties().limits;
+    if (limits.maxComputeWorkGroupSize[0] < 16 ||
+        limits.maxComputeWorkGroupSize[1] < 16) {
+        return false;
+    }
+    // A device missing a required extension cannot be opened, so counting it
+    // would only move the failure from the probe to the first allocation.
+    const auto available = device.enumerateDeviceExtensionProperties();
+    for (const char* required : required_device_extensions()) {
+        bool found = false;
+        for (const auto& prop : available) {
+            if (std::strcmp(required, prop.extensionName) == 0) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) return false;
+    }
+    return true;
+}
+
+// Every usable physical device, grouped by the priority order the default
+// selection has always used. The position in this list *is* the device index:
+// index 0 is therefore exactly what the unindexed default picks.
+std::vector<vk::PhysicalDevice> collect_suitable_devices(vk::Instance instance) {
+    const std::vector<vk::PhysicalDevice> devices = instance.enumeratePhysicalDevices();
+    const std::vector<vk::PhysicalDeviceType> priority_order = {
+        vk::PhysicalDeviceType::eDiscreteGpu, vk::PhysicalDeviceType::eIntegratedGpu,
+        vk::PhysicalDeviceType::eVirtualGpu, vk::PhysicalDeviceType::eCpu,
+        vk::PhysicalDeviceType::eOther};
+    std::vector<vk::PhysicalDevice> suitable;
+    for (auto type : priority_order) {
+        for (const auto& device : devices) {
+            if (device.getProperties().deviceType != type) continue;
+            if (!is_suitable_physical_device(device)) continue;
+            suitable.push_back(device);
+        }
+    }
+    return suitable;
+}
+
+}  // namespace
+
+int VulkanContext::device_count() {
+    try {
+        // No application info or extensions: enumeration works on a bare
+        // instance, and this one dies before any device is created from it.
+        auto instance = vk::createInstanceUnique(vk::InstanceCreateInfo{});
+        return static_cast<int>(collect_suitable_devices(*instance).size());
+    } catch (const std::exception&) {
+        return 0;
+    }
+}
+
+int VulkanContext::preferred_device_index() {
+    return device_count() > 0 ? 0 : -1;
+}
+
+VulkanContext::VulkanContext() : VulkanContext(preferred_device_index()) {}
+
+VulkanContext::VulkanContext(int device_index) {
     this->createInstance();
     this->setupDebugMessenger();
-    this->choosePhysicalDevice();
+    this->choosePhysicalDevice(device_index);
     this->createLogicalDevice();
     this->createVmaAllocator();
     this->createCommandPool();
@@ -280,7 +380,7 @@ bool VulkanContext::checkLayerSupport() {
 
 bool VulkanContext::checkExtensionSupport() {
     auto availableDeviceExten = m_phydevice.enumerateDeviceExtensionProperties();
-    for (const char* extName : m_deviceExtensions) {
+    for (const char* extName : required_device_extensions()) {
         bool found = false;
         for (const auto& prop : availableDeviceExten) {
             if (strcmp(extName, prop.extensionName) == 0) {
@@ -338,58 +438,21 @@ void VulkanContext::setupDebugMessenger() {
     }
 }
 
-void VulkanContext::choosePhysicalDevice() {
-    auto devices = m_instance->enumeratePhysicalDevices();
+void VulkanContext::choosePhysicalDevice(int device_index) {
+    const std::vector<vk::PhysicalDevice> devices = collect_suitable_devices(*m_instance);
     if (devices.empty()) {
-        throw std::runtime_error("failed to find GPUs with Vulkan support!");
-    }
-    auto find_best_compute_family =
-        [](std::vector<vk::QueueFamilyProperties>&& queue_families) -> uint32_t {
-        for (uint32_t i = 0; i < queue_families.size(); i++) {
-            const auto& family = queue_families[i];
-            if ((family.queueFlags & vk::QueueFlagBits::eCompute) &&
-                (family.queueFlags & vk::QueueFlagBits::eGraphics)) {
-                return i;
-            }
-        }
-        for (uint32_t i = 0; i < queue_families.size(); i++) {
-            if (queue_families[i].queueFlags & vk::QueueFlagBits::eCompute) return i;
-        }
-        throw std::runtime_error("No compute queue family found!");
-    };
-    auto find_best_phydevice = [](std::vector<vk::PhysicalDevice>& devices) -> vk::PhysicalDevice {
-        std::vector<vk::PhysicalDeviceType> priority_order = {
-            vk::PhysicalDeviceType::eDiscreteGpu, vk::PhysicalDeviceType::eIntegratedGpu,
-            vk::PhysicalDeviceType::eVirtualGpu, vk::PhysicalDeviceType::eCpu,
-            vk::PhysicalDeviceType::eOther};
-        for (auto type : priority_order) {
-            for (auto& device : devices) {
-                auto props = device.getProperties();
-                if (props.deviceType != type) continue;
-                bool has_compute = false;
-                for (const auto& family : device.getQueueFamilyProperties()) {
-                    if (family.queueFlags & vk::QueueFlagBits::eCompute) {
-                        has_compute = true;
-                        break;
-                    }
-                }
-                if (!has_compute) continue;
-                auto features = device.getFeatures();
-                if (!features.shaderInt64) continue;
-                auto limits = props.limits;
-                if (limits.maxComputeWorkGroupSize[0] < 16 ||
-                    limits.maxComputeWorkGroupSize[1] < 16) {
-                    continue;
-                }
-                return device;
-            }
-        }
         throw std::runtime_error(
             "No suitable physical device found that supports compute shaders!");
-    };
-    auto phydevice     = find_best_phydevice(devices);
-    auto computefamily = find_best_compute_family(phydevice.getQueueFamilyProperties());
-    this->m_phydevice  = phydevice;
+    }
+    if (device_index < 0 || device_index >= static_cast<int>(devices.size())) {
+        throw std::runtime_error(std::format(
+            "VulkanContext: device index {} out of range ({} suitable device(s) found)",
+            device_index, devices.size()));
+    }
+    this->m_device_index = device_index;
+    auto phydevice      = devices[static_cast<size_t>(device_index)];
+    auto computefamily  = find_best_compute_family(phydevice.getQueueFamilyProperties());
+    this->m_phydevice   = phydevice;
     this->m_queuefamily = computefamily;
     const auto& wg = phydevice.getProperties().limits.maxComputeWorkGroupCount;
     m_max_workgroup_count = {wg[0], wg[1], wg[2]};
@@ -430,10 +493,11 @@ void VulkanContext::createLogicalDevice() {
     vk11Features.pNext = &vk12Features;
     vk12Features.pNext = nullptr;
 
+    const std::vector<const char*>& extensions = required_device_extensions();
     vk::DeviceCreateInfo createInfo{};
     createInfo.setQueueCreateInfos(queueCreateInfo)
-        .setEnabledExtensionCount(static_cast<uint32_t>(m_deviceExtensions.size()))
-        .setPpEnabledExtensionNames(m_deviceExtensions.data())
+        .setEnabledExtensionCount(static_cast<uint32_t>(extensions.size()))
+        .setPpEnabledExtensionNames(extensions.data())
         .setPNext(&features2);
 
     // createDeviceUnique 会把 dispatcher 一起存进 UniqueDevice；裸句柄构造的
