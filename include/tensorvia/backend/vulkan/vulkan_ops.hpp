@@ -6,9 +6,6 @@
 #include <utility>
 #include <vector>
 
-// Declarations only: this partition deliberately includes no Vulkan headers so
-// it can be part of a CPU-only build. The definitions live in
-// src/backend/vulkan/*.cpp, which is compiled only when BACKEND_VULKAN is on.
 #include "tensorvia/types.hpp"
 #include "tensorvia/tensor.hpp"
 #include "tensorvia/cpu_ops.hpp"

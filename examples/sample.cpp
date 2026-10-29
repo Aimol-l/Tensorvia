@@ -1,13 +1,4 @@
-#include <algorithm>
-#include <chrono>
-#include <cmath>
-#include <cstdint>
-#include <exception>
-#include <format>
-#include <print>
-#include <string>
-#include <string_view>
-#include <vector>
+import std;
 import tensorvia;
 
 int main() {

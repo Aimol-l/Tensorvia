@@ -6,10 +6,6 @@
 #include <stdexcept>
 #include <vector>
 
-// Host-side ufunc driver for Vulkan: dtype promotion + NumPy broadcasting.
-// The broadcast layout is derived by the device-independent helpers in
-// :cpu_ops; strides and view offsets travel to the shader through
-// BcastVecParams, so non-contiguous views do not need to be materialized.
 #include "tensorvia/types.hpp"
 #include "tensorvia/tensor.hpp"
 #include "tensorvia/ops.hpp"
@@ -24,9 +20,6 @@ using ops::ufunc::broadcast_shapes;
 using ops::ufunc::broadcast_strides;
 using ops::ufunc::same_shape;
 
-// Fills BcastVecParams from the two operands (out_shape is the broadcast
-// result shape). Strides and offsets are int32 element counts; out-of-range
-// values are rejected, matching the repack kernel's 32-bit convention.
 inline BcastVecParams make_bcast_params(const Tensor& A, const Tensor& B,
                                         std::span<const int64_t> out_shape) {
     BcastVecParams p{};
@@ -52,18 +45,12 @@ inline BcastVecParams make_bcast_params(const Tensor& A, const Tensor& B,
     return p;
 }
 
-// Zero-copy when no conversion is needed, otherwise a materialized Typecast
-// temporary. submitCompute waits on its fence, so the temporary is fully
-// consumed before it goes out of scope.
 inline const Tensor& promote(const Tensor& t, DataType res, Tensor& storage) {
     if (t.dtype() == res) return t;
     storage = ops::Typecast(t, res);
     return storage;
 }
 
-// Generic broadcast binary submission. A/B already share a dtype; out_dtype
-// is the output dtype (arithmetic = promoted dtype, logical = INT8).
-// dst == nullptr allocates a new output; otherwise it validates and writes dst.
 inline Tensor bcast_binary(OpType op, const Tensor& A, const Tensor& B,
                            DataType out_dtype, Tensor* dst) {
     DimArray out_shape;
