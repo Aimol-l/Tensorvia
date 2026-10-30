@@ -28,8 +28,8 @@ constexpr float kEps = 1e-5f;
 constexpr std::array<Device, 4> kAllDevices{Device::CPU, Device::CUDA,
                                             Device::SYCL, Device::VULKAN};
 
-// 本次编译启用的后端就是被测后端，优先级与 Tensor::to_device(uint32_t) 一致：
-// Vulkan > CUDA > SYCL > CPU。设备相关的用例全部跑在它上面。
+// 本次编译启用的后端就是被测后端（Vulkan > CUDA > SYCL > CPU，与各 lane 的
+// 构建命令一致）。设备相关的用例全部跑在它上面。
 constexpr Device kTestDevice =
 #if defined(BACKEND_VULKAN)
     Device::VULKAN;
@@ -245,7 +245,7 @@ TEST(DeviceControl, EveryLiveBackendAnswersBothCalls) {
     EXPECT_NO_THROW(ops::empty_cache());
 }
 
-// ---------- 0e. 多设备寻址：current device / DeviceGuard ----------
+// ---------- 0d. 多设备寻址：current device / DeviceGuard ----------
 // 单卡机器上这些用例验证的是"序号空间的边界与状态机"，不是第二张卡的实际行为。
 TEST(DeviceId, CpuIsAlwaysIndexZero) {
     EXPECT_EQ(ops::device_count(Device::CPU), 1);
@@ -351,32 +351,75 @@ TEST(DeviceId, SynchronizeCoversAllIndices) {
     EXPECT_NO_THROW(ops::empty_cache());
 }
 
-TEST(DeviceId, MultiIndexCrossOperandRejected) {
-    const int count = ops::device_count(kTestDevice);
-    if (count < 2) GTEST_SKIP() << "needs at least two " << device_to_string(kTestDevice)
-                                << " devices";
-    const DeviceId second{kTestDevice, 1};
+// ---------- 0e. 双卡用例：单卡机器上整组 SKIP ----------
+// 序号空间在第二张卡上的行为只有多卡机才验证得了；单卡上整组跳过，既不进失败
+// 统计，也不会把"这台机器只有一张卡"误报成回归。
+class MultiDevice : public ::testing::Test {
+protected:
+    void SetUp() override {
+        if (!backend_available(kTestDevice)) {
+            GTEST_SKIP() << device_to_string(kTestDevice) << " is unavailable in this build";
+        }
+        const int count = ops::device_count(kTestDevice);
+        if (count < 2) {
+            GTEST_SKIP() << "needs two " << device_to_string(kTestDevice)
+                         << " devices, this machine has " << count;
+        }
+    }
+    static constexpr DeviceId kSecond{kTestDevice, 1};
+};
+
+TEST_F(MultiDevice, CrossOperandRejected) {
     Tensor a = Tensor::Ones({4}, DataType::FLOAT32, kTestDevice);
     Tensor b = Tensor::Ones({4}, DataType::FLOAT32, kTestDevice);
-    b.to_device(second);
-    ASSERT_EQ(b.device_id(), second);
+    b.to_device(kSecond);
+    ASSERT_EQ(b.device_id(), kSecond);
     // 同一后端的两张卡也是两个设备：拿 a 的 context 读 b 的指针是静默的数据错误。
     EXPECT_THROW(ops::Add(a, b), std::exception);
     EXPECT_THROW(ops::Concat({a, b}, 0), std::exception);
 }
 
-TEST(DeviceId, MultiIndexToDeviceCopiesValues) {
-    const int count = ops::device_count(kTestDevice);
-    if (count < 2) GTEST_SKIP() << "needs at least two " << device_to_string(kTestDevice)
-                                << " devices";
+TEST_F(MultiDevice, ToDeviceCopiesValues) {
     std::vector<float> values{1.0f, 2.0f, 3.0f};
     Tensor t(values, {3});
-    t.to_device(DeviceId{kTestDevice, 1});
-    ASSERT_EQ(t.device_id(), (DeviceId{kTestDevice, 1}));
+    t.to_device(kSecond);
+    ASSERT_EQ(t.device_id(), kSecond);
+    EXPECT_EQ(host_values<float>(t), values);
+    // 再回到 host 就是 {CPU, 0}，序号不残留。
+    t.to_host();
+    EXPECT_EQ(t.device_id(), (DeviceId{Device::CPU, 0}));
     EXPECT_EQ(host_values<float>(t), values);
 }
 
-// ---------- 0d. CUDA 流：current stream 按线程取值（P2） ----------
+TEST_F(MultiDevice, DevicePlusIndexMatchesDeviceId) {
+    // 两个入口解析出同一个目标：`(Device, index)` 只是给 DeviceId 的语法糖。
+    std::vector<float> values{4.0f, 5.0f};
+    Tensor by_id(values, {2});
+    Tensor by_pair(values, {2});
+    by_id.to_device(kSecond);
+    by_pair.to_device(kTestDevice, 1);
+    EXPECT_EQ(by_id.device_id(), by_pair.device_id());
+    EXPECT_EQ(host_values<float>(by_id), values);
+    EXPECT_EQ(host_values<float>(by_pair), values);
+}
+
+TEST_F(MultiDevice, CurrentDeviceIsPerThreadPerIndex) {
+    const int before = ops::current_device(kTestDevice);
+    ops::set_device(kTestDevice, 0);
+    int child_index = -1;
+    std::thread child([&] {
+        // 子线程没见过主线程的设置，先自己切到 1 号卡再建张量。
+        ops::set_device(kTestDevice, 1);
+        child_index = Tensor::Ones({2}, DataType::FLOAT32, kTestDevice).device_index();
+    });
+    child.join();
+    // 子线程的切换不外溢，主线程还在 0 号卡。
+    EXPECT_EQ(child_index, 1);
+    EXPECT_EQ(ops::current_device(kTestDevice), 0);
+    ops::set_device(kTestDevice, before);
+}
+
+// ---------- 0f. CUDA 流：current stream 按线程取值（P2） ----------
 #if defined(BACKEND_CUDA)
 namespace {
 
@@ -427,7 +470,7 @@ TEST(CudaStream, CurrentStreamIsPerThreadAndOpsStayCorrect) {
 }
 #endif  // BACKEND_CUDA
 
-// ---------- 0e. empty_cache 不碰活着的张量（CUDA） ----------
+// ---------- 0g. empty_cache 不碰活着的张量（CUDA） ----------
 #if defined(BACKEND_CUDA)
 TEST(DeviceControl, CudaEmptyCacheKeepsLiveTensors) {
     if (!backend_available(Device::CUDA)) GTEST_SKIP() << "CUDA is unavailable in this build";
@@ -457,7 +500,7 @@ TEST(DeviceControl, CudaEmptyCacheKeepsLiveTensors) {
 }
 #endif  // BACKEND_CUDA
 
-// ---------- 0f. 每张卡一个 context（CUDA） ----------
+// ---------- 0h. 每张卡一个 context（CUDA） ----------
 #if defined(BACKEND_CUDA)
 // 单卡机器上也能验证"每个序号一个独立 context"：直接构造同序号的两个对象。
 TEST(CudaIndex, TwoContextsOfSameIndexAreDistinct) {

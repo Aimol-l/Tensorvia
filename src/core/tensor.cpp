@@ -474,17 +474,6 @@ void Tensor::to_device(Device target, int index) {
     to_device(DeviceId{target, index < 0 ? current_device_index(target) : index});
 }
 
-void Tensor::to_device(uint32_t) {
-#if defined(BACKEND_VULKAN)
-    to_device(Device::VULKAN);
-#elif defined(BACKEND_CUDA)
-    to_device(Device::CUDA);
-#elif defined(BACKEND_SYCL)
-    to_device(Device::SYCL);
-#endif
-    // CPU-only build: no accelerator to move to.
-}
-
 void Tensor::reset(std::vector<int64_t> shape, DataType dtype) {
     if (shape.empty()) throw std::runtime_error("Tensor shape cannot be empty");
     size_t new_numel   = calc_numel(shape);

@@ -115,7 +115,6 @@ public:
     void to_device(DeviceId id);
     // `index` < 0 means the calling thread's current device for `target`.
     void to_device(Device target, int index = -1);
-    void to_device(uint32_t id = 0);  // legacy: moves CPU tensor to the accelerator
 
     int64_t offset() const { return m_meta.offset; }
 

@@ -325,6 +325,14 @@ std::println("{}", device_id_to_string(t.device_id()));   // CUDA:1
   Vulkan 按"过滤 + 类型优先序"后的列表，SYCL 按 `sycl::device::get_devices()` 的位置，
   默认值都是该后端原本会选中的设备——不调用 `set_device` 的程序行为不变。
 
+完整示例见 `examples/multi_device.cpp`：在只有一张卡的机器上它照常跑完，跨卡那一段
+打印一条提示后跳过。
+
+> **迁移提示**：旧的 `to_device(uint32_t id = 0)` 已删除。它把传进来的参数整个忽略，只按
+> 编译期开了哪些后端挑目标（同时编入多个后端时静默选 Vulkan），在多设备下没法表达
+> "第几张卡"。改用 `to_device(Device)`（目标后端当前线程的当前卡）或
+> `to_device(DeviceId{kind, index})` / `to_device(kind, index)`（精确指定）。
+
 ## 🧪 测试
 
 ```sh
