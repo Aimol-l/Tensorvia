@@ -12,12 +12,12 @@ int main() {
     // 2. 混合 dtype：结果自动提升
     auto f32 = Tensor::Fill({4}, 1.0f, DataType::FLOAT32);
     auto f64 = Tensor::Fill({4}, 0.5, DataType::FLOAT64);
-    auto mixed = f32 + f64;              // FLOAT32 + FLOAT64 -> FLOAT64
+    auto mixed = f32 + f64;  // FLOAT32 + FLOAT64 -> FLOAT64（提升为双精度）
     ops::println("f32 + f64[0] = {}", mixed.at<double>({0}));  // 1.5
 
     std::vector<std::int32_t> iv{2, 2, 2, 2};
     Tensor i32(iv, {4});
-    auto iw = i32 + f32;                 // INT32 + FLOAT32 -> FLOAT32
+    auto iw = i32 + f32;  // INT32 + FLOAT32 -> FLOAT32（整型提升为浮点）
     ops::println("i32 + f32[0] = {}", iw.at<float>({0}));      // 3.0
 
     // 3. 比较（返回 INT8 掩码）+ where 选择

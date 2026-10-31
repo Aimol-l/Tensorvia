@@ -11,7 +11,7 @@ int main() {
         buf.reset({256}, DataType::FLOAT32);  // 复用容量，避免反复 malloc
         ops::Zeros(buf);                       // in-place 填零
         ops::Add(buf, static_cast<float>(i));  // in-place 全加 i
-        acc += ops::Sum(buf);                  // 每次 sum = 256 * i
+        acc += ops::Sum(buf).item<float>();    // 每次 sum = 256 * i
     }
 
     ops::println("acc      = {}", acc);
