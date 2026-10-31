@@ -50,10 +50,10 @@ void SiluImpl<Device::VULKAN>::execute(Tensor& a) {
 }
 
 Tensor SiluImpl<Device::VULKAN>::execute(const Tensor& a) {
-    // int8/16/32 -> float32; int64 -> float64 (int64->float32 is not a legal
-    // Typecast, matching the Softmax convention); floats keep their dtype.
+    // int8/16/32 -> float32；int64 -> float64（int64->float32 不是合法的 Typecast，
+    // 与 Softmax 的约定一致）；浮点保持自身 dtype。
     DataType rt = a.dtype();
-    if (rt <= DataType::INT32) rt = DataType::FLOAT32;
+    if (is_integral_dtype(rt)) rt = DataType::FLOAT32;
     else if (rt == DataType::INT64) rt = DataType::FLOAT64;
     Tensor result = rt == a.dtype() ? a.clone() : a.to_type(rt);
 
@@ -83,7 +83,7 @@ void TanhImpl<Device::VULKAN>::execute(Tensor& a) {
 
 Tensor TanhImpl<Device::VULKAN>::execute(const Tensor& a) {
     DataType rt = a.dtype();
-    if (rt <= DataType::INT32) rt = DataType::FLOAT32;
+    if (is_integral_dtype(rt)) rt = DataType::FLOAT32;
     else if (rt == DataType::INT64) rt = DataType::FLOAT64;
     Tensor result = rt == a.dtype() ? a.clone() : a.to_type(rt);
 
@@ -113,7 +113,7 @@ void SigmoidImpl<Device::VULKAN>::execute(Tensor& a) {
 
 Tensor SigmoidImpl<Device::VULKAN>::execute(const Tensor& a) {
     DataType rt = a.dtype();
-    if (rt <= DataType::INT32) rt = DataType::FLOAT32;
+    if (is_integral_dtype(rt)) rt = DataType::FLOAT32;
     else if (rt == DataType::INT64) rt = DataType::FLOAT64;
     Tensor result = rt == a.dtype() ? a.clone() : a.to_type(rt);
 
@@ -139,7 +139,7 @@ Tensor SoftmaxImpl<Device::VULKAN>::execute(const Tensor& a, int axis) {
     for (int i = axis + 1; i < dims; ++i) inner_dim *= static_cast<int32_t>(a.shape()[i]);
 
     DataType res_type = a.dtype();
-    if (res_type <= DataType::INT32) {
+    if (is_integral_dtype(res_type)) {
         res_type = DataType::FLOAT32;
     } else if (res_type == DataType::INT64 || res_type == DataType::FLOAT64) {
         res_type = DataType::FLOAT64;
@@ -156,8 +156,8 @@ Tensor SoftmaxImpl<Device::VULKAN>::execute(const Tensor& a, int axis) {
 
     SoftmaxParams params{.axis_dim = axis_dim, .outer_dim = outer_dim, .inner_dim = inner_dim};
 
-    // The pipeline key is the *input* dtype, not the output dtype: the integer
-    // softmax shaders read integer data and write floating point.
+    // 流水线键是*输入* dtype，而非输出 dtype：整型 softmax 着色器读整型数据、写
+    // 浮点结果。
     ctx_impl->submitCompute(OpType::Softmax, a.dtype(),
                             {src_impl->buffer(), dst_impl->buffer()},
                             (result.numel() + 255) / 256, 1, 1, &params, sizeof(params));

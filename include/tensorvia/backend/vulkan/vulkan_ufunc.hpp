@@ -95,7 +95,7 @@ inline Tensor bcast_binary(OpType op, const Tensor& A, const Tensor& B,
     return res;
 }
 
-// Binary arithmetic: dtype promotion + NumPy broadcasting.
+// 二元算术：dtype 提升 + NumPy 广播。
 inline Tensor binary_arith(OpType op, const Tensor& a, const Tensor& b, Tensor* dst) {
     const DataType res_type = compute_type(a.dtype(), b.dtype());
     Tensor storage_a, storage_b;
@@ -104,24 +104,28 @@ inline Tensor binary_arith(OpType op, const Tensor& a, const Tensor& b, Tensor* 
     return bcast_binary(op, A, B, res_type, dst);
 }
 
-// Logical comparison: promote to a common dtype, compare, write INT8.
+// 逻辑比较：提升到公共 dtype、比较、写 BOOL。
 inline Tensor logical_impl(OpType op, const Tensor& a, const Tensor& b) {
     const DataType res_type = compute_type(a.dtype(), b.dtype());
+    // BOOL 没有专用 shader，且其字节可能存着任意非零值，所以 BOOL 操作数经 INT8
+    // 比较：cast 会把它们规范化成 0/1。
+    const DataType compare_type = res_type == DataType::BOOL ? DataType::INT8 : res_type;
     Tensor storage_a, storage_b;
-    const Tensor& A = promote(a, res_type, storage_a);
-    const Tensor& B = promote(b, res_type, storage_b);
-    return bcast_binary(op, A, B, DataType::INT8, nullptr);
+    const Tensor& A = promote(a, compare_type, storage_a);
+    const Tensor& B = promote(b, compare_type, storage_b);
+    return bcast_binary(op, A, B, DataType::BOOL, nullptr);
 }
 
-// Scalar comparison: the right operand is a one-element FLOAT32 tensor.
+// 标量比较：右操作数是提升后 dtype 的单元素张量。浮点张量保持自身 dtype；
+// 弱类型（整型/BOOL）张量采用默认浮点 dtype。
 inline Tensor logical_scalar(OpType op, const Tensor& a, float val) {
-    const DataType res_type = compute_type(a.dtype(), DataType::FLOAT32);
+    const DataType res_type = scalar_promote_type(a.dtype());
     Tensor storage_a;
     const Tensor& A = promote(a, res_type, storage_a);
-    Tensor scalar = ops::Fill(std::vector<int64_t>{1}, DataType::FLOAT32, val, Device::VULKAN);
+    Tensor scalar = ops::Fill(std::vector<int64_t>{1}, res_type, val, Device::VULKAN);
     Tensor storage_b;
     const Tensor& B = promote(scalar, res_type, storage_b);
-    return bcast_binary(op, A, B, DataType::INT8, nullptr);
+    return bcast_binary(op, A, B, DataType::BOOL, nullptr);
 }
 
 }  // namespace ops::vk_ufunc

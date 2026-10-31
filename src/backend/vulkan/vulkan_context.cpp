@@ -25,9 +25,8 @@ using vulkan_detail::wait_fence;
 
 namespace {
 
-// The device extensions every instance needs. Shared with the suitability
-// filter: a device that lacks one of them cannot be opened, so it must not be
-// counted by the probe either.
+// 每个实例都需要的设备扩展。与可用性过滤共享：缺少其中之一的设备无法打开，因此
+// 探测时也不能把它计入。
 const std::vector<const char*>& required_device_extensions() {
     static const std::vector<const char*> extensions = {
         "VK_KHR_shader_float16_int8",
@@ -68,8 +67,7 @@ bool is_suitable_physical_device(vk::PhysicalDevice device) {
         limits.maxComputeWorkGroupSize[1] < 16) {
         return false;
     }
-    // A device missing a required extension cannot be opened, so counting it
-    // would only move the failure from the probe to the first allocation.
+    // 缺少必需扩展的设备无法打开，把它计入只会把失败从探测阶段推迟到首次分配。
     const auto available = device.enumerateDeviceExtensionProperties();
     for (const char* required : required_device_extensions()) {
         bool found = false;
@@ -84,9 +82,8 @@ bool is_suitable_physical_device(vk::PhysicalDevice device) {
     return true;
 }
 
-// Every usable physical device, grouped by the priority order the default
-// selection has always used. The position in this list *is* the device index:
-// index 0 is therefore exactly what the unindexed default picks.
+// 所有可用的物理设备，按默认选择一贯使用的优先级顺序分组。本列表中的位置*就是*
+// 设备索引：因此索引 0 恰好就是不带索引的默认选择。
 std::vector<vk::PhysicalDevice> collect_suitable_devices(vk::Instance instance) {
     const std::vector<vk::PhysicalDevice> devices = instance.enumeratePhysicalDevices();
     const std::vector<vk::PhysicalDeviceType> priority_order = {
@@ -108,8 +105,8 @@ std::vector<vk::PhysicalDevice> collect_suitable_devices(vk::Instance instance) 
 
 int VulkanContext::device_count() {
     try {
-        // No application info or extensions: enumeration works on a bare
-        // instance, and this one dies before any device is created from it.
+        // 不带应用信息和扩展：裸实例就能完成枚举，而且这个实例在任何设备由它创建
+        // 之前就被销毁。
         auto instance = vk::createInstanceUnique(vk::InstanceCreateInfo{});
         return static_cast<int>(collect_suitable_devices(*instance).size());
     } catch (const std::exception&) {
@@ -156,11 +153,20 @@ VulkanContext::VulkanContext(int device_index) {
 }
 
 VulkanContext::~VulkanContext() {
-    // All resource destruction is handled by the Unique* members and
-    // DebugMessenger (declaration order is documented in the partition).
-    // Destroying the device while submissions are in flight is UB; every
-    // submission waits on its fence, so this is just the final guard.
+    // 所有资源销毁都由 Unique* 成员和 DebugMessenger 负责（声明顺序见对应分块
+    // 的文档）。提交是异步的，所以先等队列清空、回收在飞的命令缓冲与退役 buffer，
+    // 再销毁设备。
     if (m_device) {
+        try {
+            std::lock_guard<std::recursive_mutex> lock(m_submit_mutex);
+            waitLocked();
+            for (const auto& entry : m_retired) {
+                vmaDestroyBuffer(m_vma.handle, static_cast<VkBuffer>(entry.buffer),
+                                 entry.allocation);
+            }
+            m_retired.clear();
+        } catch (const vk::SystemError&) {
+        }
         try {
             m_device->waitIdle();
         } catch (const vk::SystemError&) {
@@ -249,9 +255,8 @@ void VulkanContext::registerPipelines() {
     registerOp(OpType::Silu, FloatTypes, 2, sizeof(int64_t));
     registerOp(OpType::Tanh, FloatTypes, 2, sizeof(int64_t));
     registerOp(OpType::Sigmoid, FloatTypes, 2, sizeof(int64_t));
-    // Softmax shaders read integer inputs and write floating point, so the
-    // pipeline key must be the *input* dtype; registering only FloatTypes
-    // would leave integer inputs without a pipeline.
+    // Softmax 着色器读整型输入、写浮点结果，所以流水线键必须是*输入* dtype；只注册
+    // FloatTypes 会让整型输入找不到流水线。
     registerOp(OpType::Softmax, AllTypes, 2, sizeof(SoftmaxParams));
 
     registerOp(OpType::Sum, AllTypes, 2, sizeof(int64_t));
@@ -288,8 +293,7 @@ void VulkanContext::registerPipelines() {
 
 void VulkanContext::createDescriptorSetLayout(std::string ori_op, int tensor_count,
                                               [[maybe_unused]] int params_size) {
-    // Descriptor set layouts carry no dtype information, so they are keyed by
-    // the operator name only and shared by every dtype variant.
+    // 描述符集布局不携带 dtype 信息，因此只按算子名作键，由所有 dtype 变体共享。
     if (m_descriptor_set_layouts.contains(ori_op)) return;
     std::vector<vk::DescriptorSetLayoutBinding> bindings;
     bindings.reserve(tensor_count);
@@ -417,8 +421,7 @@ void VulkanContext::setupDebugMessenger() {
                        VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
         .pfnUserCallback = DebugUtilsMessengerCallback,
         .pUserData       = nullptr};
-    // Both entry points must be fetched through vkGetInstanceProcAddr: the
-    // loader does not export them.
+    // 两个入口都必须经 vkGetInstanceProcAddr 获取：loader 并不导出它们。
     m_debugMessenger.destroy_fn = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
         vkGetInstanceProcAddr(static_cast<VkInstance>(*m_instance),
                               "vkDestroyDebugUtilsMessengerEXT"));
@@ -509,10 +512,9 @@ void VulkanContext::createLogicalDevice() {
 }
 
 void VulkanContext::createVmaAllocator() {
-    // The package builds VMA with VMA_DYNAMIC_VULKAN_FUNCTIONS=1 and
-    // VMA_STATIC_VULKAN_FUNCTIONS=0, so VMA resolves every entry point itself
-    // starting from these two: without them vmaCreateAllocator dereferences a
-    // null function pointer instead of failing cleanly.
+    // 本包以 VMA_DYNAMIC_VULKAN_FUNCTIONS=1、VMA_STATIC_VULKAN_FUNCTIONS=0 构建
+    // VMA，所以 VMA 从这两个函数出发自行解析所有入口：缺了它们，vmaCreateAllocator
+    // 会解引用空函数指针，而不是干净地失败。
     VmaVulkanFunctions functions{};
     functions.vkGetInstanceProcAddr = &vkGetInstanceProcAddr;
     functions.vkGetDeviceProcAddr   = &vkGetDeviceProcAddr;
@@ -561,8 +563,8 @@ VKBufferGuard VulkanContext::createDeviceBuffer(size_t bytes, vk::BufferUsageFla
 
     vk::BufferCreateInfo bufferInfo;
     bufferInfo.setSize(bytes).setUsage(usage);
-    // No host-access flags: VMA_MEMORY_USAGE_AUTO then prefers device-local
-    // memory, which is what a storage buffer wants.
+    // 不加宿主访问标志：这样 VMA_MEMORY_USAGE_AUTO 会优先设备本地内存，正是存储
+    // buffer 想要的。
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
 
@@ -573,12 +575,91 @@ VKBufferGuard VulkanContext::createDeviceBuffer(size_t bytes, vk::BufferUsageFla
     vulkan_detail::check_vma(
         vmaCreateBuffer(m_vma.handle, &ci, &allocInfo, &buffer, &allocation, nullptr),
         "vmaCreateBuffer(device)", __FILE__, __LINE__);
-    return VKBufferGuard(m_vma.handle, vk::Buffer(buffer), allocation);
+    return VKBufferGuard(m_vma.handle, [this](vk::Buffer b, VmaAllocation a) { destroyBuffer(b, a); },
+                         vk::Buffer(buffer), allocation);
 }
 
 void VulkanContext::destroyBuffer(vk::Buffer buffer, VmaAllocation allocation) noexcept {
     if (!buffer) return;
-    vmaDestroyBuffer(m_vma.handle, static_cast<VkBuffer>(buffer), allocation);
+    std::lock_guard<std::recursive_mutex> lock(m_submit_mutex);
+    // 队列为空时之前的命令都已完成，可以立刻销毁；否则排进退役队列，等更早的
+    // 提交回收时一起处理。
+    if (m_inflight.empty()) {
+        vmaDestroyBuffer(m_vma.handle, static_cast<VkBuffer>(buffer), allocation);
+        return;
+    }
+    try {
+        m_retired.push_back(RetiredBuffer{buffer, allocation, m_submit_seq});
+    } catch (...) {
+        // 记不下来就只能先等队列清空再释放（慢，但不会回收仍在被引用的内存）。
+        try {
+            waitLocked();
+        } catch (...) {
+        }
+        vmaDestroyBuffer(m_vma.handle, static_cast<VkBuffer>(buffer), allocation);
+    }
+}
+
+void VulkanContext::submitAsync(vk::CommandBuffer cmd, vk::DescriptorSet ds) {
+    std::lock_guard<std::recursive_mutex> lock(m_submit_mutex);
+    reapCompletedLocked();
+    // 描述符池上限 2000 个集合；积压过多时先等最老的一次，保证池里还有空位。
+    constexpr size_t kMaxInFlight = 512;
+    if (m_inflight.size() >= kMaxInFlight) waitLocked();
+
+    vk::Fence fence = m_device->createFence({});
+    vk::SubmitInfo submitInfo{};
+    submitInfo.setCommandBuffers(cmd);
+    try {
+        m_compute_queue.submit(submitInfo, fence);
+    } catch (...) {
+        m_device->destroyFence(fence);
+        throw;
+    }
+    m_inflight.push_back(InFlight{fence, cmd, ds, ++m_submit_seq});
+}
+
+void VulkanContext::finishFrontLocked() {
+    InFlight entry = m_inflight.front();
+    m_inflight.pop_front();
+
+    m_device->destroyFence(entry.fence);
+    m_device->freeCommandBuffers(*m_command_pool, 1, &entry.cmd);
+    if (entry.ds) (void)m_device->freeDescriptorSets(*m_descriptor_pool, 1, &entry.ds);
+
+    // 该序号及之前的提交都已完成：这些 buffer 不会再有命令引用。
+    std::erase_if(m_retired, [&](const RetiredBuffer& buffer) {
+        if (buffer.after_seq > entry.seq) return false;
+        vmaDestroyBuffer(m_vma.handle, static_cast<VkBuffer>(buffer.buffer), buffer.allocation);
+        return true;
+    });
+}
+
+void VulkanContext::reapCompletedLocked() {
+    while (!m_inflight.empty()) {
+        const vk::Result ready = m_device->getFenceStatus(m_inflight.front().fence);
+        if (ready != vk::Result::eSuccess) break;
+        finishFrontLocked();
+    }
+}
+
+void VulkanContext::waitLocked() {
+    while (!m_inflight.empty()) {
+        // 队列有序：等队首的 fence 有信号，就代表排在它之前的都完成了。
+        const vk::Result waited = wait_fence(*m_device, m_inflight.front().fence);
+        if (waited != vk::Result::eSuccess) {
+            // 超时意味着设备大概率已丢失；先收齐资源再抛，免得泄漏。
+            const vk::Result failure = waited;
+            finishFrontLocked();
+            check_fence(failure, "VulkanContext: waitForFences", __FILE__, __LINE__);
+        }
+        finishFrontLocked();
+    }
+}
+
+void VulkanContext::synchronize() {
+    std::lock_guard<std::recursive_mutex> lock(m_submit_mutex);
+    waitLocked();
 }
 
 VKBufferGuard VulkanContext::createStagingBuffer(size_t bytes) {
@@ -587,9 +668,8 @@ VKBufferGuard VulkanContext::createStagingBuffer(size_t bytes) {
     vk::BufferCreateInfo bufferInfo;
     bufferInfo.setSize(bytes).setUsage(vk::BufferUsageFlagBits::eTransferSrc |
                                        vk::BufferUsageFlagBits::eTransferDst);
-    // Random access covers both directions (upload writes, download reads).
-    // MAPPED_BIT keeps the pointer alive for the guard's lifetime, so callers
-    // never map/unmap per transfer.
+    // 随机访问同时覆盖两个方向（上传写、下载读）。MAPPED_BIT 让指针在守卫的生命
+    // 周期内保持有效，调用方无需每次传输都 map/unmap。
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
     allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
@@ -607,7 +687,8 @@ VKBufferGuard VulkanContext::createStagingBuffer(size_t bytes) {
         vmaDestroyBuffer(m_vma.handle, buffer, allocation);
         throw std::runtime_error("createStagingBuffer: VMA returned an unmapped allocation");
     }
-    return VKBufferGuard(m_vma.handle, vk::Buffer(buffer), allocation, info.pMappedData);
+    return VKBufferGuard(m_vma.handle, [this](vk::Buffer b, VmaAllocation a) { destroyBuffer(b, a); },
+                         vk::Buffer(buffer), allocation, info.pMappedData);
 }
 
 void VulkanContext::uploadBuffer(vk::Buffer dst, const void* src, size_t bytes) {
@@ -616,7 +697,7 @@ void VulkanContext::uploadBuffer(vk::Buffer dst, const void* src, size_t bytes) 
     vk::Device device = *m_device;
     auto staging = createStagingBuffer(bytes);
     std::memcpy(staging.mapped(), src, bytes);
-    // No-op for the coherent memory VMA prefers; required when it is not.
+    // VMA 偏好的相干内存上是空操作；非相干内存时才需要。
     vmaFlushAllocation(m_vma.handle, staging.allocation(), 0, VK_WHOLE_SIZE);
 
     vk::CommandBufferAllocateInfo cmdAlloc{};
@@ -632,14 +713,9 @@ void VulkanContext::uploadBuffer(vk::Buffer dst, const void* src, size_t bytes) 
     cmd.copyBuffer(staging.buffer(), dst, region);
     cmd.end();
 
-    vk::SubmitInfo submitInfo{};
-    submitInfo.setCommandBuffers(cmd);
-    vk::Fence fence = device.createFence({});
-    m_compute_queue.submit(submitInfo, fence);
-    const vk::Result wait_result = wait_fence(device, fence);
-    device.destroyFence(fence);
-    device.freeCommandBuffers(*m_command_pool, 1, &cmd);
-    check_fence(wait_result, "uploadBuffer: waitForFences", __FILE__, __LINE__);
+    // 只入队。暂存 buffer 离开作用域时经 destroyBuffer 排队，等这次提交完成后才
+    // 真正释放。
+    submitAsync(cmd);
 }
 
 void VulkanContext::downloadBuffer(vk::Buffer src, void* dst, size_t bytes) {
@@ -661,14 +737,10 @@ void VulkanContext::downloadBuffer(vk::Buffer src, void* dst, size_t bytes) {
     cmd.copyBuffer(src, staging.buffer(), region);
     cmd.end();
 
-    vk::SubmitInfo submitInfo{};
-    submitInfo.setCommandBuffers(cmd);
-    vk::Fence fence = device.createFence({});
-    m_compute_queue.submit(submitInfo, fence);
-    const vk::Result wait_result = wait_fence(device, fence);
-    device.destroyFence(fence);
-    device.freeCommandBuffers(*m_command_pool, 1, &cmd);
-    check_fence(wait_result, "downloadBuffer: waitForFences", __FILE__, __LINE__);
+    // 命令按队列顺序执行，这次拷贝自然排在之前所有算子之后；等队列清空就拿到了
+    // 结果。这是 to_host()/item<T>() 的同步点。
+    submitAsync(cmd);
+    waitLocked();
 
     vmaInvalidateAllocation(m_vma.handle, staging.allocation(), 0, VK_WHOLE_SIZE);
     std::memcpy(dst, staging.mapped(), bytes);
@@ -679,11 +751,13 @@ void VulkanContext::submitCompute(OpType op, DataType dtype,
                                   uint32_t gx, uint32_t gy, uint32_t gz,
                                   const void* push_constants, size_t push_size) {
     std::lock_guard<std::recursive_mutex> lock(m_submit_mutex);
+    // BOOL 与 INT8 同为单字节布局，且没有自己的着色器：bool buffer 由 INT8 流水线
+    // 完成拷贝、比较或填充。宿主侧驱动在进出一律把值规范化为 0/1。
+    if (dtype == DataType::BOOL) dtype = DataType::INT8;
     auto ori_op  = op_to_string(op);
     auto type_op = make_pipeline_key(op, dtype);
 
-    // Dispatch limits: fitting in INT32_MAX elements does not make the dispatch
-    // grid legal. Validate before allocating anything.
+    // 派发限制：元素数落在 INT32_MAX 内并不保证派发网格合法。先校验再分配任何东西。
     {
         const uint32_t lim_x = vulkan_detail::clamp_workgroup_count(m_max_workgroup_count[0]);
         const uint32_t lim_y = vulkan_detail::clamp_workgroup_count(m_max_workgroup_count[1]);
@@ -709,8 +783,7 @@ void VulkanContext::submitCompute(OpType op, DataType dtype,
     vk::PipelineLayout      layout   = *m_pipeline_layouts[type_op];
     vk::DescriptorSetLayout dsl      = *m_descriptor_set_layouts[ori_op];
 
-    // Validate inputs before allocating a descriptor set: a throw afterwards
-    // would leak the set and eventually exhaust the pool.
+    // 在分配描述符集之前校验输入：之后再抛异常会泄漏该集合，最终耗尽池。
     for (size_t i = 0; i < buffers.size(); ++i) {
         if (buffers[i] == VK_NULL_HANDLE) {
             throw std::runtime_error(
@@ -758,18 +831,7 @@ void VulkanContext::submitCompute(OpType op, DataType dtype,
     cmd.dispatch(gx, gy, gz);
     cmd.end();
 
-    vk::SubmitInfo submitInfo{};
-    submitInfo.setCommandBuffers(cmd);
-    vk::Fence fence = m_device->createFence({});
-    m_compute_queue.submit(submitInfo, fence);
-    // Keep the result: fence, command buffer and descriptor set must be
-    // released whether or not the wait succeeded.
-    const vk::Result wait_result = wait_fence(*m_device, fence);
-
-    m_device->destroyFence(fence);
-    m_device->freeCommandBuffers(*m_command_pool, 1, &cmd);
-    const vk::Result free_result = m_device->freeDescriptorSets(*m_descriptor_pool, 1, &ds);
-
-    check_fence(wait_result, "submitCompute: waitForFences", __FILE__, __LINE__);
-    check_result(free_result, "submitCompute: freeDescriptorSets", __FILE__, __LINE__);
+    // 只入队。命令缓冲与描述符集在 fence 有信号后由 submitAsync 的回收逻辑释放，
+    // 所以这里不能立即 freeDescriptorSets。
+    submitAsync(cmd, ds);
 }

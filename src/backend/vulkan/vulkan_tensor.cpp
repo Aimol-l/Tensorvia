@@ -31,21 +31,24 @@ void VKTensor::init(void* ptr, size_t numel, DataType dtype,
     vulkan_detail::require_int32_indexable(static_cast<int64_t>(numel), "VKTensor::init");
 
     const size_t size_bytes = numel * calc_dtype_size(dtype);
+    // VMA 拒绝零尺寸 buffer；空张量保留 1 字节占位，使 data() 保持非空且每个
+    // buffer 都可绑定。
+    const size_t alloc_bytes = size_bytes == 0 ? 1 : size_bytes;
 
     VKBufferGuard guard = m_context->createDeviceBuffer(
-        size_bytes,
+        alloc_bytes,
         vk::BufferUsageFlagBits::eStorageBuffer |
-            vk::BufferUsageFlagBits::eTransferDst |   // clone / copy_from_host
-            vk::BufferUsageFlagBits::eTransferSrc);   // copy_to / clone
+            vk::BufferUsageFlagBits::eTransferDst |   // 写目标：clone / copy_from_host
+            vk::BufferUsageFlagBits::eTransferSrc);   // 读源：copy_to / clone
     this->m_buffer     = guard.buffer();
     this->m_allocation = guard.allocation();
 
-    if (ptr == nullptr) {
+    if (ptr == nullptr || size_bytes == 0) {
         guard.release();
         return;
     }
 
-    // Stage host data through a host-visible buffer, then copy on the queue.
+    // 宿主数据先经宿主可见 buffer 暂存，再在队列上拷贝。
     {
         auto staging_guard = m_context->createStagingBuffer(size_bytes);
         std::memcpy(staging_guard.mapped(), ptr, size_bytes);
@@ -64,14 +67,8 @@ void VKTensor::init(void* ptr, size_t numel, DataType dtype,
         cmd.copyBuffer(staging_guard.buffer(), m_buffer, copyRegion);
         cmd.end();
 
-        vk::SubmitInfo submitInfo{};
-        submitInfo.setCommandBuffers(cmd);
-        vk::Fence fence = device.createFence({});
-        m_context->computeQueue().submit(submitInfo, fence);
-        const vk::Result wait_result = vulkan_detail::wait_fence(device, fence);
-        device.destroyFence(fence);
-        device.freeCommandBuffers(m_context->commandPool(), 1, &cmd);
-        vulkan_detail::check_fence(wait_result, "VKTensor::init: waitForFences", __FILE__,__LINE__);
+        // 只入队；暂存 buffer 的销毁由 context 排到这次拷贝完成之后。
+        m_context->submitAsync(cmd);
     }
     guard.release();
 }
@@ -113,20 +110,11 @@ void VKTensor::copy_to(std::shared_ptr<TensorImpl> dst) const {
     cmd.copyBuffer(m_buffer, vk_dst->m_buffer, copyRegion);
     cmd.end();
 
-    vk::SubmitInfo submitInfo{};
-    submitInfo.setCommandBuffers(cmd);
-    vk::Fence fence = device.createFence({});
-    m_context->computeQueue().submit(submitInfo, fence);
-    const vk::Result wait_result = vulkan_detail::wait_fence(device, fence);
-
-    device.destroyFence(fence);
-    device.freeCommandBuffers(m_context->commandPool(), 1, &cmd);
-    vulkan_detail::check_fence(wait_result, "VKTensor::copy_to: waitForFences", __FILE__,
-                               __LINE__);
+    m_context->submitAsync(cmd);
 }
 
 std::unique_ptr<TensorImpl> VKTensor::clone() const {
-    // init() below takes the same recursive mutex on this thread.
+    // 下面的 init() 会在此线程上取同一把递归锁。
     std::lock_guard<std::recursive_mutex> lock(m_context->submitMutex());
     auto cloned            = std::make_unique<VKTensor>(m_numel, m_dtype, m_context);
     const size_t size_bytes = m_numel * calc_dtype_size(m_dtype);
@@ -146,17 +134,7 @@ std::unique_ptr<TensorImpl> VKTensor::clone() const {
     cmd.copyBuffer(m_buffer, cloned->buffer(), copyRegion);
     cmd.end();
 
-    vk::SubmitInfo submitInfo{};
-    submitInfo.setCommandBuffers(cmd);
-    vk::Fence fence = device.createFence({});
-    m_context->computeQueue().submit(submitInfo, fence);
-    // Collect the result before throwing: fence and command buffer must be
-    // released either way.
-    const vk::Result wait_result = vulkan_detail::wait_fence(device, fence);
-    device.destroyFence(fence);
-    device.freeCommandBuffers(m_context->commandPool(), 1, &cmd);
-    vulkan_detail::check_fence(wait_result, "VKTensor::clone: waitForFences", __FILE__,
-                               __LINE__);
+    m_context->submitAsync(cmd);
     return cloned;
 }
 
