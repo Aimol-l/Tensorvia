@@ -1,4 +1,4 @@
-// General N-D permutation into a contiguous output.
+// 通用 N 维置换，输出连续。
 #include "common.h"
 
 using namespace tvv::sycl_dev;
@@ -10,8 +10,7 @@ void transpose_kernel(sycl::queue& q, const T* in, T* out,
                       const tvv::sycl::Transpose& p) {
     q.parallel_for(range_of(p.numel), [=](sycl::id<1> idx) {
         const int64_t i = static_cast<int64_t>(idx[0]);
-        // Decode the contiguous input index with its strides, then encode the
-        // permuted coordinate in the output.
+        // 用输入步长解码连续输入下标，再在输出中编码置换后的坐标。
         int64_t rem = i;
         int64_t coord[kMaxDims] = {};
         for (int d = 0; d < p.ndim; ++d) {

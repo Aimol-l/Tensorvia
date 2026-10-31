@@ -10,8 +10,8 @@
 #include "tensorvia/cpu_context.hpp"
 
 namespace cpu_tensor_detail {
-// Stateful deleter: carries the byte size so the pool knows which size-class
-// freelist to return the block to. operator() body lives in cpu_tensor.cpp.
+// 带状态的 deleter：携带字节数，池才知道该把块还回哪个 size-class 的空闲链表。
+// operator() 的实现体在 cpu_tensor.cpp。
 struct PoolDeleter {
     size_t bytes = 0;
     PoolDeleter() = default;

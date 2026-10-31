@@ -16,14 +16,14 @@ static inline __m256 exp_ps(__m256 x) {
 
     const __m256 log2e  = _mm256_set1_ps(1.44269504088896341f);
     const __m256 ln2_hi = _mm256_set1_ps(-6.93145751953125e-1f);       // -0.693145751953125
-    const __m256 ln2_lo = _mm256_set1_ps(-1.42860682033041704512e-6f); // ln2 - ln2_hi
+    const __m256 ln2_lo = _mm256_set1_ps(-1.42860682033041704512e-6f); // ln2 - ln2_hi（低位补差）
 
     const __m256 n = _mm256_round_ps(_mm256_mul_ps(x, log2e), _MM_FROUND_TO_NEAREST_INT);
     __m256 r = _mm256_fmadd_ps(n, ln2_hi, x);   // x - n·ln2_hi
     r        = _mm256_fmadd_ps(n, ln2_lo, r);   // r - n·ln2_lo
 
     // Taylor 7 阶：exp(r) = 1 + r + r²/2 + ... + r⁷/7!
-    __m256 p = _mm256_set1_ps(1.9841269841269841e-4f);  // 1/5040
+    __m256 p = _mm256_set1_ps(1.9841269841269841e-4f);  // 泰勒系数 1/5040
     p = _mm256_fmadd_ps(p, r, _mm256_set1_ps(1.3888888888888889e-3f));  // 1/720
     p = _mm256_fmadd_ps(p, r, _mm256_set1_ps(8.3333333333333333e-3f));  // 1/120
     p = _mm256_fmadd_ps(p, r, _mm256_set1_ps(4.1666666666666667e-2f));  // 1/24
@@ -51,7 +51,7 @@ static inline __m256 sigmoid_ps(__m256 x) {
     return _mm256_blendv_ps(neg, pos, mask);
 }
 
-// silu(x) = x·sigmoid(x)
+// silu(x) = x·sigmoid(x)（公式注释）
 static inline __m256 silu_ps(__m256 x) {
     return _mm256_mul_ps(x, sigmoid_ps(x));
 }
@@ -87,7 +87,7 @@ static inline __m256 log_ps(__m256 x) {
     const __m256 one = _mm256_set1_ps(1.0f);
     const __m256 y = _mm256_div_ps(_mm256_sub_ps(m, one), _mm256_add_ps(m, one));
     const __m256 y2 = _mm256_mul_ps(y, y);
-    // atanh(y) = y·(1 + y²·(1/3 + y²·(1/5 + y²·(1/7 + y²·(1/9 + y²·(1/11 + y²/13))))))
+    // atanh 幂级数展开：atanh(y) = y·(1 + y²·(1/3 + y²·(1/5 + y²·(1/7 + ...))))
     __m256 p = _mm256_set1_ps(1.0f / 13.0f);
     p = _mm256_fmadd_ps(p, y2, _mm256_set1_ps(1.0f / 11.0f));
     p = _mm256_fmadd_ps(p, y2, _mm256_set1_ps(1.0f / 9.0f));
@@ -118,7 +118,7 @@ static inline __m256 sin_ps(__m256 x) {
     return _mm256_mul_ps(r, p);
 }
 
-// cos(x) = sin(x + π/2)
+// cos(x) = sin(x + π/2)（相位平移）
 static inline __m256 cos_ps(__m256 x) {
     return sin_ps(_mm256_add_ps(x, _mm256_set1_ps(1.57079632679489661923f)));
 }

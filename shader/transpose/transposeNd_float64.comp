@@ -6,9 +6,9 @@ layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 layout(push_constant) uniform Params {
     int numel;
     int dims;
-    int axes[8];        // axes[i] = input dimension corresponding to output dimension i
-    int in_strides[8];  // input strides (row-major)
-    int out_strides[8]; // output strides (row-major)
+    int axes[8];        // axes[i] = 输出第 i 维对应的输入维
+    int in_strides[8];  // 输入步长（行主序）
+    int out_strides[8]; // 输出步长（行主序）
 } params;
 
 layout(std430, binding = 0) readonly buffer InputA {
@@ -23,22 +23,22 @@ void main() {
     uint gid = gl_GlobalInvocationID.x;
     if (int(gid) >= params.numel) return;
 
-    // Step 1: Decompose output linear index into output coordinates
+    // 步骤 1：把输出线性下标分解为输出坐标
     uint temp = gid;
     uint input_idx = 0;
 
-    // Step 2: For each output dimension i, extract coordinate and map to input
+    // 步骤 2：对每个输出维 i 取出坐标并映射到输入
     for (int i = 0; i < params.dims; ++i) {
-        // Coordinate along output dimension i
+        // 沿输出维 i 的坐标
         uint coord = temp / uint(params.out_strides[i]);
         temp = temp % uint(params.out_strides[i]);
 
-        // This coordinate comes from input dimension `params.axes[i]`
-        // So we add: coord * input_stride[corresponding_input_dim]
+        // 该坐标来自输入维 `params.axes[i]`
+        // 因此累加：coord * input_stride[对应的输入维]
         int input_dim = params.axes[i];
         input_idx += coord * uint(params.in_strides[input_dim]);
     }
 
-    // Step 3: Copy data
+    // 步骤 3：拷贝数据
     dst.data[gid] = src.data[input_idx];
 }

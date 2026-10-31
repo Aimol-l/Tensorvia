@@ -88,8 +88,8 @@ void gather_kernel(const T* in, const I* idx, T* out, size_t total,
 template <typename I>
 void check_index_range(const I* idx, int64_t len, int64_t axis_len, const char* op) {
     for (int64_t k = 0; k < len; ++k)
-        // Compare as double: the software bfloat16/float16 types convert to
-        // both float and double, so `idx[k] < 0` would be ambiguous.
+        // 以 double 比较：软件 bfloat16/float16 类型可同时转换为 float 与 double，
+        // 所以 `idx[k] < 0` 会有歧义。
         if (static_cast<double>(idx[k]) < 0.0 || static_cast<int64_t>(idx[k]) >= axis_len)
             throw std::runtime_error(std::string(op) + ": index out of range");
 }

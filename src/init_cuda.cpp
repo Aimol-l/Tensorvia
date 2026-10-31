@@ -11,10 +11,9 @@
 #include "tensorvia/backend/cuda/cuda_tensor.hpp"
 
 namespace {
-// One entry per GPU that has been brought up. It exists only so the exit hook
-// below has something to reach: cudaFree from the factory's own static teardown
-// happens after the CUDA runtime has unloaded and fails silently, leaving the
-// allocators' cached blocks as reported leaks.
+// 每个已启动 GPU 一条记录。它存在的唯一目的是给下面的退出钩子一个可达的句柄：
+// 若从工厂自身的静态拆卸中调用 cudaFree，会发生在 CUDA 运行时卸载之后并静默失败，
+// 把分配器缓存的块留成上报的内存泄漏。
 std::mutex                                  g_contexts_mtx;
 std::vector<std::shared_ptr<CUDAContext>>   g_contexts;
 
@@ -25,24 +24,24 @@ void release_device_cache() {
     }
 }
 
-// The driver, streams and allocator are only touched when a Device::CUDA tensor
-// is requested; CPU-only programs never load libcuda.
+// 只有在请求 Device::CUDA 张量时才会触及驱动、stream 与分配器；纯 CPU 程序从不
+// 加载 libcuda。
 struct CudaLazyRegistrar {
     CudaLazyRegistrar() {
         register_device_probe(Device::CUDA, [] {
             return DeviceProbe{CUDAContext::device_count(),
                                CUDAContext::preferred_device_index()};
         });
-        // One context per requested index; the registry remembers which indices
-        // have been initialised, so this runs at most once each.
+        // 每个被请求的索引一个上下文；注册表记得哪些索引已初始化，所以每个最多
+        // 运行一次。
         register_backend_initializer(Device::CUDA, [](int index) {
             auto ctx = std::make_shared<CUDAContext>(index);
             {
                 std::lock_guard<std::mutex> lock(g_contexts_mtx);
                 g_contexts.push_back(ctx);
             }
-            // Registered once, after the runtime initialised (the context ctor
-            // did that), so LIFO exit order runs it before CUDA's own teardown.
+            // 在运行时初始化之后才注册一次（由上下文构造函数完成初始化），因此
+            // LIFO 退出顺序会让它在 CUDA 自身拆卸之前运行。
             static std::once_flag exit_hook;
             std::call_once(exit_hook, [] { (void)std::atexit(&release_device_cache); });
 
@@ -50,8 +49,8 @@ struct CudaLazyRegistrar {
             register_tensor_impl(device, [ctx](void* ptr, size_t numel, DataType dtype) {
                 return std::make_shared<CUDATensor>(ptr, numel, dtype, ctx);
             });
-            // synchronize_all, not synchronize: the device-level contract is
-            // "every stream is idle", matching torch.cuda.synchronize().
+            // 用 synchronize_all 而非 synchronize：设备级契约是“所有 stream 空闲”，
+            // 与 torch.cuda.synchronize() 一致。
             register_device_control(device, DeviceControl{
                 [ctx] { ctx->synchronize_all(); },
                 [ctx] { ctx->empty_cache(); },

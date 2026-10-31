@@ -20,7 +20,7 @@ void main() {
     uint idx = gl_GlobalInvocationID.x;
     if (idx >= uint64_t(params.numel)) return;
 
-    // Optional: clamp to int16_t range
+    // 可选：钳制到 int16_t 范围
     float clamped = clamp(params.value, -32768.0, 32767.0);
     // 整型除零定义为 0（审计 B3，与 C++ 的 div_contract 一致）。
     data[idx] = (int16_t(int(clamped)) == 0) ? int16_t(0) : (data[idx] / int16_t(int(clamped)));

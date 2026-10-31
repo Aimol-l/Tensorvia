@@ -1,8 +1,7 @@
-// Tiled matrix multiplication.
+// 分块矩阵乘法。
 //
-// A is viewed as [batch, rows, k] and B as [batch, k, cols]; a 2D call is the
-// batch=1 case. The host promotes both operands and the destination to a
-// common dtype, so one scalar type per launch is enough.
+// A 视为 [batch, rows, k]，B 视为 [batch, k, cols]；二维调用就是 batch=1 的情形。
+// 宿主把两个操作数和目标提升到公共 dtype，所以每次启动只需一种标量类型。
 #include "common.h"
 
 using namespace tvv::sycl_dev;
@@ -11,8 +10,8 @@ namespace {
 
 constexpr int kTile = 16;
 
-// The sum of two promoted scalars carries the integral promotion rules, so a
-// narrow integer operand accumulates in int rather than in its storage type.
+// 两个提升后标量之和遵循整型提升规则，所以窄整型操作数在 int（而不是其存储
+// 类型）中累加。
 template <class T>
 using accum_t = decltype(promoted_t<T>() + promoted_t<T>());
 

@@ -3,10 +3,9 @@
 #include <cstddef>
 #include <memory>
 
-// Declarations only: buffer management and the copy paths are defined by
-// src/backend/sycl/host/runtime.cpp. data() returns a real USM device pointer,
-// but it must still not be dereferenced on the host: use copy_to_host /
-// Tensor::to_host.
+// 只有声明：buffer 管理与拷贝路径定义在 src/backend/sycl/host/runtime.cpp。
+// data() 返回真正的 USM 设备指针，但在宿主上仍然不能解引用：请用 copy_to_host /
+// Tensor::to_host。
 #include "tensorvia/types.hpp"
 #include "tensorvia/tensor.hpp"
 #include "tensorvia/context.hpp"
@@ -41,8 +40,7 @@ public:
     std::shared_ptr<ContextImpl> context() const override;
     std::unique_ptr<TensorImpl> clone_as_contiguous(const Metadata& meta) const override;
 
-    // Not optional: the base implementation memcpy's, which would dereference a
-    // device pointer on the host.
+    // 不能沿用默认实现：基类实现用 memcpy，会在宿主上解引用设备指针。
     void copy_to_host(void* dst, DataType dtype) const override;
     void copy_from_host(const void* src, DataType dtype) override;
 };

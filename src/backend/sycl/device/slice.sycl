@@ -1,4 +1,4 @@
-// Start/stop slice of a strided input into a contiguous output.
+// 跨步输入的起止切片，输出连续。
 #include "common.h"
 
 using namespace tvv::sycl_dev;

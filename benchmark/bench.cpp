@@ -48,7 +48,7 @@ int main(int argc, char* argv[]) {
         double ms = median_ms([&] { ops::Add(a, b, d); });
         report("add f32 16M", ms, 3.0 * double(N) * 4);
     }
-    {   // element-wise mul
+    {   // 逐元素乘法
         constexpr std::int64_t N = std::int64_t{1} << 24;
         Tensor a = Tensor::Random({N}, 0.0f, 1.0f, DT::FLOAT32);
         Tensor b = Tensor::Random({N}, 0.0f, 1.0f, DT::FLOAT32);

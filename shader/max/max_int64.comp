@@ -26,14 +26,14 @@ void main() {
     uint block_size = gl_WorkGroupSize.x;
     uint group_size = gl_NumWorkGroups.x * block_size;
 
-    // grid stride
+    // 网格跨步
     uint seed_idx = idx < uint(params.numel) ? idx : 0u;
     int64_t max_val = src.data[seed_idx];
     for (uint s = idx; s < params.numel; s += group_size) {
         max_val = src.data[s] > max_val ? src.data[s] : max_val;
     }
 
-    // block stride
+    // 块跨步
     sharedMem[tid] = max_val;
     barrier();
 

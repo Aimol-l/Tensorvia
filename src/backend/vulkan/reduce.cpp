@@ -18,7 +18,7 @@ namespace ops {
 
 namespace {
 
-// NaN-propagating fold contracts: a plain `v < a ? v : a` swallows NaN.
+// 传播 NaN 的折叠契约：朴素的 `v < a ? v : a` 会把 NaN 吞掉。
 inline bool contract_is_nan(double v) { return v != v; }
 inline double min_contract(double a, double b) {
     if (contract_is_nan(a)) return a;
@@ -36,13 +36,12 @@ struct FoldOp {
     double (*apply)(double, double);
 };
 
-/// Folds the per-workgroup partials on the host.
+/// 在宿主上折叠各工作组的部分和。
 ///
-/// The scratch tensor has one slot per workgroup (the shader writes
-/// dst.data[gl_WorkGroupID.x]), so its size is (numel+255)/256, not a fixed
-/// 256: a larger block count would write out of bounds and a smaller one would
-/// read never-written slots. Reads use the scratch dtype because the scratch
-/// uses the promoted accumulator dtype, not a.dtype().
+/// scratch 张量每个工作组一个槽位（着色器写 dst.data[gl_WorkGroupID.x]），所以
+/// 其大小为 (numel+255)/256 而非固定的 256：块数偏大会越界写，偏小则会读到从未
+/// 写过的槽位。读取按 scratch 的 dtype 进行，因为 scratch 用的是提升后的累加
+/// dtype，而不是 a.dtype()。
 double fold_partials(Tensor& scratch, int64_t blocks, FoldOp op) {
     scratch.to_host();
     double acc = op.init;
@@ -68,8 +67,8 @@ float SumImpl<Device::VULKAN>::execute(const Tensor& a) {
 
     const int64_t numel  = a.numel();
     const int64_t blocks = (numel + 255) / 256;
-    // Scratch uses the accumulator dtype: the shader promotes block-local sums
-    // (int8/int16 -> int32, int32/int64 -> int64, f16/bf16 -> float).
+    // scratch 使用累加 dtype：着色器会把块内和提升（int8/int16 -> int32，
+    // int32/int64 -> int64，f16/bf16 -> float）。
     Tensor res({blocks > 0 ? blocks : 1}, reduction_type(a.dtype()), Device::VULKAN);
     auto res_impl = std::dynamic_pointer_cast<VKTensor>(res.get_impl());
     check_vk(res_impl, "Sum");
@@ -91,8 +90,9 @@ Tensor SumImpl<Device::VULKAN>::execute(const Tensor& a, int axis) {
     for (int i = 0; i < dims; ++i) {
         if (i != axis) new_shape.push_back(a.shape(i));
     }
-    // Removing the only dimension of a 1D input leaves an empty shape; tensors
-    // do not support rank 0, so fall back to {1} (matching the CPU side).
+    // 单轴内核早于 rank-0 张量出现，把空的归约形状写作 {1}；核心层通过
+    // with_reduced_shape 把结果重塑为真正的 0-dim 张量，所以该回退永远不会到达
+    // 公开 API。
     if (new_shape.empty()) new_shape = {1};
 
     int32_t inner_dim = 1;
@@ -105,7 +105,7 @@ Tensor SumImpl<Device::VULKAN>::execute(const Tensor& a, int axis) {
     auto result_impl = std::dynamic_pointer_cast<VKTensor>(result.get_impl());
     check_vk(result_impl, "Sum");
 
-    // The parameter layout happens to match SoftmaxParams.
+    // 参数布局恰好与 SoftmaxParams 一致。
     SoftmaxParams params{
         .axis_dim = axis_dim, .outer_dim = outer_dim * inner_dim, .inner_dim = inner_dim};
 
@@ -119,7 +119,7 @@ Tensor SumImpl<Device::VULKAN>::execute(const Tensor& a, int axis) {
 float MeanImpl<Device::VULKAN>::execute(const Tensor& a) {
     const int64_t numel = a.numel();
     if (numel == 0) return 0.0f;
-    // Divide in double: above 2^24 a float divisor is no longer exact.
+    // 用 double 做除法：超过 2^24 后 float 除数不再精确。
     return static_cast<float>(SumImpl<Device::VULKAN>::execute(a) /
                               static_cast<double>(numel));
 }
@@ -283,9 +283,8 @@ Tensor ArgMaxImpl<Device::VULKAN>::execute(const Tensor& a, int axis) {
 
     SoftmaxParams params{
         .axis_dim = axis_dim,
-        // The shader uses this as its bounds check, and dst only holds
-        // outer_dim*inner_dim elements; numel would let out-of-range threads
-        // write past the buffer.
+        // 着色器用它做边界检查，而 dst 只有 outer_dim*inner_dim 个元素；用 numel
+        // 会让越界的线程写过 buffer 末尾。
         .outer_dim = outer_dim * inner_dim,
         .inner_dim = inner_dim};
 
@@ -334,8 +333,7 @@ bool AnyImpl<Device::VULKAN>::execute(const Tensor& a, float val) {
     auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
     if (!ctx_impl) throw std::runtime_error("vulkan Any: missing VulkanContext");
 
-    // bool cannot be passed to the shader, so use an INT32 tensor; the shader's
-    // atomic does not support int8.
+    // bool 无法传给着色器，所以用 INT32 张量；着色器的原子操作不支持 int8。
     auto result = Tensor::Fill({1}, 0.0f, DataType::INT32, Device::VULKAN);
     auto res_impl = std::dynamic_pointer_cast<VKTensor>(result.get_impl());
     check_vk(res_impl, "Any");

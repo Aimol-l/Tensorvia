@@ -26,20 +26,17 @@ struct is_bfloat<__nv_bfloat16> : std::true_type {};
 template <class T>
 struct is_low_precision : std::bool_constant<is_half<T>::value || is_bfloat<T>::value> {};
 
-// Compute type of one scalar: 16-bit floats widen to float, everything else is
-// already its own compute type.
+// 单个标量的计算类型：16 位浮点拓宽到 float，其余类型本身就是自己的计算类型。
 template <class T>
 using promoted_t = std::conditional_t<is_low_precision<T>::value, float, T>;
 
-// Compute type of a unary transcendental. The CPU backend calls std::sin(int)
-// and friends, which select the double overload, so integer inputs are
-// computed in double before the result is narrowed to the output dtype.
+// 一元超越算子的计算类型。CPU 后端调用 std::sin(int) 之类，会选中 double 重载，
+// 所以整型输入先以 double 计算，再把结果收窄到输出 dtype。
 template <class T>
 using unary_compute_t =
     std::conditional_t<std::is_integral<T>::value, double, promoted_t<T>>;
 
-// Promotion of a binary pair. 16-bit floats join the float family; the wider
-// of the two operands wins otherwise.
+// 二元配对的提升规则。16 位浮点并入 float 家族；其余情况两者中较宽者胜出。
 template <class A, class B>
 using promote2_t = std::conditional_t<
     is_low_precision<A>::value || is_low_precision<B>::value, float,
@@ -67,7 +64,7 @@ TVV_CUDA_HD double load_as_double(T v) {
     }
 }
 
-// Host-side conversion back into a device scalar type.
+// 宿主侧转换回设备标量类型。
 template <class T>
 TVV_CUDA_HD T store_from_double(double v) {
     if constexpr (is_half<T>::value) {
@@ -79,8 +76,8 @@ TVV_CUDA_HD T store_from_double(double v) {
     }
 }
 
-// Comparison tolerance tiers. Mirrors the CPU/Vulkan contract: doubles compare
-// tightly, 16-bit floats loosely, because their spacing is ~1e-3 / ~1e-2.
+// 比较容差档位。与 CPU/Vulkan 契约一致：double 比较得紧，16 位浮点比较得松，
+// 因为它们的间距约为 1e-3 / 1e-2。
 template <class T>
 TVV_CUDA_HD double tolerance_abs() {
     if constexpr (std::is_same_v<T, double>) {
@@ -125,8 +122,8 @@ TVV_CUDA_HD bool approximately_equal(T a, T b) {
     }
 }
 
-// Ordering predicates. NaN never compares greater or less, and equality must
-// stay exact for integers (the approximate form is only for float families).
+// 大小比较谓词。NaN 既不大于也不小于任何值；整型的相等必须保持精确（近似形式只
+// 用于浮点家族）。
 template <class T>
 TVV_CUDA_HD bool is_nan(T v) {
     if constexpr (std::is_floating_point_v<T>) {
@@ -142,8 +139,8 @@ TVV_CUDA_HD bool is_nan(T v) {
 
 template <class T>
 TVV_CUDA_HD T relu_contract(T v) {
-    // NaN is a signal, not a value to clamp: NumPy's maximum/clip and PyTorch's
-    // relu/clamp all propagate it. Integers have no NaN, so the test folds away.
+    // NaN 是信号，不是可裁剪的值：NumPy 的 maximum/clip 与 PyTorch 的 relu/clamp
+    // 都会传播它。整型没有 NaN，所以该判断会被编译掉。
     if constexpr (!std::is_integral_v<T>) {
         if (is_nan(v)) return v;
     }
@@ -152,7 +149,7 @@ TVV_CUDA_HD T relu_contract(T v) {
 
 template <class T>
 TVV_CUDA_HD T clamp_contract(T v, T lo, T hi) {
-    // Same propagation rule as relu_contract.
+    // 与 relu_contract 相同的传播规则。
     if constexpr (!std::is_integral_v<T>) {
         if (is_nan(v)) return v;
     }
@@ -160,8 +157,7 @@ TVV_CUDA_HD T clamp_contract(T v, T lo, T hi) {
     return clamped_low > hi ? hi : clamped_low;
 }
 
-// Accumulator for sum-style reductions. Narrow integers and 16-bit floats must
-// not wrap or lose bits before the result is written.
+// sum 类归约的累加器。窄整型与 16 位浮点在结果写出之前不得回绕或丢位。
 template <class T>
 using reduction_acc_t = std::conditional_t<
     std::is_integral<T>::value,
@@ -169,8 +165,8 @@ using reduction_acc_t = std::conditional_t<
                        std::conditional_t<(sizeof(T) == 4), int64_t, int64_t>>,
     promoted_t<T>>;
 
-// min/max propagate NaN: it marks a computation that went wrong, and silently
-// replacing it with a finite bound is a plausible-looking wrong answer.
+// min/max 传播 NaN：它标志着计算出错，悄悄用有限边界替换它只会得到一个看似合理
+// 的错误答案。
 template <class T>
 TVV_CUDA_HD T min_contract(T a, T b) {
     if (is_nan(a)) return a;
@@ -185,8 +181,8 @@ TVV_CUDA_HD T max_contract(T a, T b) {
     return b > a ? b : a;
 }
 
-// argmax/argmin: the first NaN wins; ties keep the smaller index, so a later
-// value only replaces the incumbent when it compares strictly greater/less.
+// argmax/argmin：首个 NaN 胜出；并列时保留较小索引，所以后来的值只有在严格
+// 大于/小于当前值时才取代它。
 template <class T>
 TVV_CUDA_HD bool argmax_better(T val, T best) {
     if (is_nan(best)) return false;
@@ -201,8 +197,7 @@ TVV_CUDA_HD bool argmin_better(T val, T best) {
     return val < best;
 }
 
-// All/Any compare against a float scalar. Integers compare exactly; float
-// families use a dtype-dependent absolute tolerance.
+// All/Any 与浮点标量比较。整型精确比较；浮点家族使用依赖 dtype 的绝对容差。
 template <class T>
 TVV_CUDA_HD double match_tolerance() {
     if constexpr (std::is_same_v<T, double>) return 1e-10;
@@ -222,9 +217,8 @@ TVV_CUDA_HD bool match_value(T x, float val) {
     }
 }
 
-// Equality test used by Equal/NotEqual. The tolerances arrive from the host
-// because promotion to a common dtype can widen 16-bit operands, losing the
-// precision tier the comparison contract is supposed to use.
+// Equal/NotEqual 使用的相等判定。容差由宿主传入，因为提升到公共 dtype 可能拓宽
+// 16 位操作数，从而丢失比较契约本应采用的那一档精度。
 template <class T>
 TVV_CUDA_HD bool cmp_close(T a, T b, double abs_tol, double rel_tol) {
     if constexpr (std::is_integral_v<T>) {
@@ -240,8 +234,8 @@ TVV_CUDA_HD bool cmp_close(T a, T b, double abs_tol, double rel_tol) {
     }
 }
 
-// Division contract: floating point follows IEEE (x/0 is ±inf), integer
-// division by zero is defined as 0 instead of the C++ undefined behavior.
+// 除法契约：浮点遵循 IEEE（x/0 为 ±inf），整型除零定义为 0，而不是 C++ 的未定义
+// 行为。
 template <class T>
 TVV_CUDA_HD T div_contract(T x, T y) {
     if constexpr (std::is_integral_v<T>) {

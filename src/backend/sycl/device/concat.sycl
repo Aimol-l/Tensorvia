@@ -1,7 +1,7 @@
-// Concatenation along one axis.
+// 沿单轴拼接。
 //
-// One kernel per input instead of a device-side pointer array: the host calls
-// this entry once per operand, with that operand's prefix offset on the axis.
+// 每个输入一个内核，而不在设备侧暂存指针数组：宿主为每个操作数调用一次该入口，
+// 传入它在轴上的前缀偏移。
 #include "common.h"
 
 using namespace tvv::sycl_dev;

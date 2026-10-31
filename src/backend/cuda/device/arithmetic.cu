@@ -1,9 +1,8 @@
-// Element-wise arithmetic and activation kernels, and the host driver that
-// defines AddImpl/SubImpl/MulImpl/DivImpl/AbsImpl/... for Device::CUDA.
+// 逐元素算术与激活内核，以及为 Device::CUDA 定义
+// AddImpl/SubImpl/MulImpl/DivImpl/AbsImpl/... 的宿主驱动。
 //
-// The host always promotes both operands (and the output) to a common dtype
-// before calling in, so the entry points below can dispatch a single scalar
-// type per launch. Mixed dtypes are rejected instead of silently narrowing.
+// 宿主总会在调用前把两个操作数（以及输出）提升到公共 dtype，所以下面的入口每次
+// 启动只需派发一种标量类型。混合 dtype 会被拒绝，而不是静默收窄。
 #include "common.cuh"
 
 #include <stdexcept>
@@ -29,8 +28,8 @@ using tvv::cuda::type_tag;
 
 namespace contract = tvv::cuda::contract;
 
-// Decode a flat output index against the broadcast shape, accumulating each
-// operand's element offset with its own (already broadcast) stride array.
+// 按广播形状解码扁平输出下标，用各自（已完成广播的）步长数组累加每个操作数的
+// 元素 offset。
 TVV_CUDA_HD int64_t bcast_offset(int64_t idx, const tvv::cuda::Bcast& p,
                                  const int64_t* strides) {
     int64_t off = 0;
@@ -54,7 +53,7 @@ TVV_CUDA_HD C binary_value(int op, C x, C y) {
     }
 }
 
-// op codes are uniform across the grid, so the branch is not per-lane divergence.
+// 算子码在整个网格上一致，所以这个分支不会造成每 lane 的分歧。
 template <class T>
 __global__ void binary_kernel(const T* a, const T* b, T* out, tvv::cuda::Bcast p, int op) {
     using C = contract::promoted_t<T>;
@@ -110,7 +109,7 @@ TVV_CUDA_HD C unary_value(int op, C x, C p0, C p1) {
             else if constexpr (std::is_same_v<C, double>) return ::sqrt(x);
             else return static_cast<C>(sqrt(static_cast<double>(x)));
         case tvv::cuda::kUnaryLog:
-            // log base p0, matching the CPU backend: log(x) / log(base).
+            // 以 p0 为底的对数，与 CPU 后端一致：log(x) / log(base)。
             if constexpr (std::is_same_v<C, float>) return logf(x) / logf(p0);
             else if constexpr (std::is_same_v<C, double>) return ::log(x) / log(p0);
             else return static_cast<C>(::log(static_cast<double>(x)) /
@@ -122,7 +121,7 @@ TVV_CUDA_HD C unary_value(int op, C x, C p0, C p1) {
         case tvv::cuda::kUnaryRelu:
             return contract::relu_contract(x);
         case tvv::cuda::kUnarySilu: {
-            // x * sigmoid(x), written so the tails saturate instead of overflowing.
+            // x * sigmoid(x)，如此写法可让尾部饱和而不溢出。
             if constexpr (std::is_same_v<C, float>) return x / (1.0f + expf(-x));
             else return x / (1.0 + ::exp(-x));
         }
@@ -190,8 +189,8 @@ cudaError_t launch_unary(cudaStream_t stream, const void* in, void* out,
                          int64_t numel, DataType in_dtype, DataType out_dtype,
                          int op, double p0, double p1) {
     if (in == nullptr || out == nullptr) return cudaErrorInvalidValue;
-    // The only promotion the other backends apply is integer -> FLOAT32 and a
-    // same-type in-place update, so those are the only two shapes instantiated.
+    // 其它后端施加的唯一提升是整型 -> FLOAT32 与同类型原地更新，所以只实例化
+    // 这两种形态。
     const bool same     = in_dtype == out_dtype;
     const bool to_float = out_dtype == DataType::FLOAT32;
     if (!same && !to_float) return cudaErrorNotSupported;
@@ -213,13 +212,13 @@ cudaError_t launch_unary(cudaStream_t stream, const void* in, void* out,
 }  // namespace tvv::cuda
 
 // ---------------------------------------------------------------------------
-// Host driver.
+// 宿主驱动。
 // ---------------------------------------------------------------------------
 
 namespace ops {
 
 // ---------------------------------------------------------------------------
-// Scalar arithmetic.
+// 标量算术。
 // ---------------------------------------------------------------------------
 void AddImpl<Device::CUDA>::execute(Tensor& a, float b) {
     cuda_ufunc::scalar_inplace(a, tvv::cuda::kBinAdd, b, "Add");
@@ -248,7 +247,7 @@ Tensor DivImpl<Device::CUDA>::execute(const Tensor& a, float b) {
 }
 
 // ---------------------------------------------------------------------------
-// Tensor-tensor arithmetic: dtype promotion + NumPy broadcasting.
+// 张量-张量算术：dtype 提升 + NumPy 广播。
 // ---------------------------------------------------------------------------
 Tensor AddImpl<Device::CUDA>::execute(const Tensor& a, const Tensor& b) {
     return cuda_ufunc::binary_arith(tvv::cuda::kBinAdd, a, b, nullptr);
@@ -277,8 +276,8 @@ void DivImpl<Device::CUDA>::execute(const Tensor& a, const Tensor& b, Tensor& ds
 }
 
 // ---------------------------------------------------------------------------
-// Unary element-wise. Integer inputs are computed in FLOAT32 for the
-// transcendental operators; Abs/Clamp keep the input dtype.
+// 一元逐元素运算。超越算子的整型输入以 FLOAT32 计算；Abs/Clamp 保持输入
+// dtype。
 // ---------------------------------------------------------------------------
 namespace {
 

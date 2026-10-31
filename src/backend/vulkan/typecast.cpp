@@ -10,7 +10,7 @@
 
 namespace ops {
 
-// Not a native kernel: round-trip through the host and convert there.
+// 不是原生内核：经宿主机往返，在宿主上转换。
 Tensor TypecastImpl<Device::VULKAN>::execute(const Tensor& a, DataType dst_type) {
     Tensor result = a.clone();
     result.to_host();

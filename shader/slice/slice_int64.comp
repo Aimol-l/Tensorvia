@@ -26,13 +26,13 @@ layout(std430, binding = 1) writeonly buffer Output {
 
 void main() {
     uint gid = gl_GlobalInvocationID.x;
-    // output numel
+    // 输出元素数
     uint total = 1;
     for (uint i = 0; i < p.ndim; ++i)
         total *= p.output_shape[i];
     if (gid >= total)
         return;
-    // linear -> coord
+    // 线性下标 -> 坐标
     uint coord[MAX_DIMS];
     uint tmp = gid;
     for (int i = int(p.ndim) - 1; i >= 0; --i) {
@@ -40,7 +40,7 @@ void main() {
         coord[i] = (s > 1u) ? tmp % s : 0u;
         tmp /= max(s, 1u);
     }
-    // coord -> input linear
+    // 坐标 -> 输入线性下标
     uint src = 0;
     for (uint i = 0; i < p.ndim; ++i) {
         uint c = coord[i];

@@ -28,9 +28,8 @@ public:
     void init(void* ptr, size_t numel, DataType dtype,
               std::shared_ptr<VulkanContext> context);
 
-    // Do NOT dereference these: they return the VkBuffer handle, not a host
-    // pointer. Use buffer() below for commands, or copy_to_host/to_host for
-    // host access.
+    // 不要解引用：它们返回 VkBuffer 句柄而非宿主指针。下命令用下面的 buffer()，
+    // 宿主访问用 copy_to_host/to_host。
     void*       data() override;
     const void* data() const override;
     vk::Buffer  buffer() const { return m_buffer; }
@@ -43,7 +42,7 @@ public:
     std::shared_ptr<ContextImpl> context() const override;
     std::unique_ptr<TensorImpl> clone_as_contiguous(const Metadata&) const;
 
-    // Host staging transfers (device-local memory -> host and back).
+    // 宿主中转传输（device-local 内存 <-> 宿主）。
     void copy_to_host(void* dst, DataType dtype) const override;
     void copy_from_host(const void* src, DataType dtype) override;
 };

@@ -1,5 +1,5 @@
-// Reductions: global and per-axis sum/min/max/mean, argmax/argmin, all/any and
-// the NonZero count.
+// 归约：全局与单轴的 sum/min/max/mean、argmax/argmin、all/any 以及 NonZero
+// 计数。
 #include "common.h"
 
 using namespace tvv::sycl_dev;
@@ -112,9 +112,8 @@ void arg_reduce_kernel(sycl::queue& q, const T* in, int32_t* out,
     });
 }
 
-// The destination word is initialized by a one-work-item launch on the same
-// in-order queue, then each work-group folds its slice and combines with one
-// atomic. The host never has to zero device memory.
+// 目标字由同一 in-order 队列上一个单工作项的启动初始化，随后每个工作组折叠自己的
+// 片段并做一次原子合并。宿主永远不必清零设备内存。
 void init_uint_kernel(sycl::queue& q, unsigned int* out, unsigned int value) {
     q.parallel_for(sycl::range<1>(1), [=](sycl::id<1>) { out[0] = value; });
 }

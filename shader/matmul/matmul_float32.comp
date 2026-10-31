@@ -2,14 +2,14 @@
 
 #define TILE 16
 
-// 2D workgroup: (16, 16, 1)
+// 二维工作组： (16, 16, 1)
 layout(local_size_x = TILE, local_size_y = TILE, local_size_z = 1) in;
 
 layout(push_constant) uniform Params {
     uint batch;
-    uint N; // cols
-    uint K; // reduction dimension
-    uint M; // rows
+    uint N; // 列数
+    uint K; // 归约维
+    uint M; // 行数
 } params;
 
 layout(std430, binding = 0) buffer InputA {
@@ -24,19 +24,19 @@ layout(std430, binding = 2) buffer Output {
     float data[];
 } C; // [batch, M, N]
 
-// Shared memory tiles
-shared float tileA[TILE][TILE + 1]; // +1 to reduce bank conflicts
+// 共享内存分块
+shared float tileA[TILE][TILE + 1]; // +1 减少 bank 冲突
 shared float tileB[TILE][TILE + 1];
 
 void main() {
     uint wg_batch = gl_WorkGroupID.z;
-    uint wg_m = gl_WorkGroupID.y;      // block row index
-    uint wg_n = gl_WorkGroupID.x;      // block col index
+    uint wg_m = gl_WorkGroupID.y;      // 块行索引
+    uint wg_n = gl_WorkGroupID.x;      // 块列索引
 
     uint local_m = gl_LocalInvocationID.y;
     uint local_n = gl_LocalInvocationID.x;
 
-    // Global output indices
+    // 全局输出下标
     uint global_m = wg_m * TILE + local_m;
     uint global_n = wg_n * TILE + local_n;
 
@@ -44,7 +44,7 @@ void main() {
 
     uint numTiles = (params.K + TILE - 1) / TILE;
     for (uint t = 0; t < numTiles; ++t) {
-        // Load A tile: A[wg_batch, global_m, k_start + local_n]
+        // 载入 A 分块：A[wg_batch, global_m, k_start + local_n]
         uint k_start = t * TILE;
         uint a_k = k_start + local_n;
         if (global_m < params.M && a_k < params.K) {
@@ -54,7 +54,7 @@ void main() {
             tileA[local_m][local_n] = 0.0;
         }
 
-        // Load B tile: B[wg_batch, k_start + local_m, global_n]
+        // 载入 B 分块：B[wg_batch, k_start + local_m, global_n]
         uint b_k = k_start + local_m;
         if (b_k < params.K && global_n < params.N) {
             uint b_idx = wg_batch * params.K * params.N + b_k * params.N + global_n;
@@ -63,17 +63,17 @@ void main() {
             tileB[local_m][local_n] = 0.0;
         }
 
-        barrier(); // Synchronize before using shared memory
+        barrier(); // 使用共享内存前先同步
 
-        // Compute partial dot product
+        // 计算部分点积
         for (uint k = 0; k < TILE; ++k) {
             acc += tileA[local_m][k] * tileB[k][local_n];
         }
 
-        barrier(); // Ensure no overwrite in next iteration
+        barrier(); // 确保下一次迭代不会覆盖
     }
 
-    // Write result
+    // 写出结果
     if (global_m < params.M && global_n < params.N) {
         uint c_idx = wg_batch * params.M * params.N + global_m * params.N + global_n;
         C.data[c_idx] = acc;

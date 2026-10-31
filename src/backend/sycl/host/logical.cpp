@@ -1,7 +1,7 @@
-// Equal/NotEqual/Greater/Less/GreaterEqual/LessEqual for Device::SYCL.
+// Device::SYCL 的 Equal/NotEqual/Greater/Less/GreaterEqual/LessEqual。
 //
-// The host promotes both operands to a common dtype, so each launch dispatches
-// one scalar type; the result is always INT8.
+// 宿主把两个操作数提升到公共 dtype，所以每次启动只派发一种标量类型；结果始终是
+// INT8。
 #include <cstdint>
 #include <memory>
 #include <stdexcept>

@@ -3,10 +3,9 @@
 #include <cstddef>
 #include <memory>
 
-// Declarations only: the buffer management and copy paths are defined by
-// src/backend/cuda/device/runtime.cu. data() returns a real device pointer
-// (unlike Vulkan, where it returns a buffer handle), but it must still not be
-// dereferenced on the host: use copy_to_host / Tensor::to_host.
+// 只有声明：buffer 管理与拷贝路径定义在 src/backend/cuda/device/runtime.cu。
+// data() 返回真正的设备指针（Vulkan 那边返回的是 buffer 句柄），但在宿主上仍然
+// 不能解引用：请用 copy_to_host / Tensor::to_host。
 #include "tensorvia/types.hpp"
 #include "tensorvia/tensor.hpp"
 #include "tensorvia/context.hpp"
@@ -17,9 +16,8 @@ private:
     void*                         m_data = nullptr;
     size_t                        m_numel = 0;
     DataType                      m_dtype = DataType::FLOAT32;
-    // The stream the buffer was allocated on; its release is recorded there, so
-    // another thread reusing the block waits for this stream rather than for a
-    // device-wide barrier.
+    // buffer 是在哪条流上分配的；释放记录也记在那条流上，因此复用该块的另一个
+    // 线程只需等待这条流，而不需要设备级屏障。
     CUDAContext::CUDAStream       m_stream;
     std::shared_ptr<CUDAContext>  m_context;
 
@@ -45,8 +43,7 @@ public:
     std::shared_ptr<ContextImpl> context() const override;
     std::unique_ptr<TensorImpl> clone_as_contiguous(const Metadata& meta) const override;
 
-    // Not optional: the base implementation memcpy's, which would dereference a
-    // device pointer on the host.
+    // 不能沿用默认实现：基类实现用 memcpy，会在宿主上解引用设备指针。
     void copy_to_host(void* dst, DataType dtype) const override;
     void copy_from_host(const void* src, DataType dtype) override;
 };

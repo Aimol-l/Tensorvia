@@ -15,7 +15,7 @@
 namespace ops {
 
 void TransposeImpl<Device::VULKAN>::execute(Tensor& a) {
-    // 2D-only transpose.
+    // 仅支持二维转置。
     const int rows = static_cast<int>(a.shape(0));
     const int cols = static_cast<int>(a.shape(1));
     Tensor output({cols, rows}, a.dtype(), a.device());
@@ -39,7 +39,7 @@ void TransposeImpl<Device::VULKAN>::execute(Tensor& a) {
 
 namespace {
 
-// Shared by the out-of-place and in-place N-D transposes.
+// 非原地与原地 N 维转置共享。
 TransNDParams make_transpose_params(const Tensor& a, const Tensor& dst,
                                     const std::vector<int64_t>& new_shape,
                                     const std::vector<int32_t>& axes_norm) {

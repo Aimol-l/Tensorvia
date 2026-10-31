@@ -1,7 +1,7 @@
-// Element-wise arithmetic: broadcast binary, in-place scalar and unary.
+// 逐元素算术：广播二元、原地标量与一元运算。
 //
-// The host always promotes both operands (and the output) to a common dtype
-// before calling in, so each launch dispatches a single scalar type.
+// 宿主总会在调用前把两个操作数（以及输出）提升到公共 dtype，所以每次启动只派发
+// 一种标量类型。
 #include "common.h"
 
 using namespace tvv::sycl_dev;
@@ -121,8 +121,7 @@ int sycl_c_launch_unary(void* ctx, const void* in, void* out, int64_t numel,
                         int in_dtype, int out_dtype, int op, double p0, double p1) {
     if (ctx == nullptr || in == nullptr || out == nullptr)
         return tvv::sycl::kSyclInvalid;
-    // The only promotion the other backends apply is integer -> FLOAT32 and a
-    // same-type in-place update.
+    // 其它后端施加的唯一提升是整型 -> FLOAT32，以及同类型原地更新。
     const bool same = in_dtype == out_dtype;
     const bool to_float = out_dtype == tvv::sycl::kFloat32;
     if (!same && !to_float) return tvv::sycl::kSyclUnsupported;
