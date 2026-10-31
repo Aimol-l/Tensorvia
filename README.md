@@ -35,15 +35,22 @@
 | **SYCL** | Clang（host）+ DPC++（设备） | C++23 host + SYCL 设备单元 | SYCL（USM，自动选择设备） | ✅ 可选启用 |
 
 设备枚举为 `Device::CPU`、`Device::VULKAN`、`Device::CUDA` 和 `Device::SYCL`。CPU 后端实现完整的
-`ops` API；Vulkan、CUDA 与 SYCL 覆盖同一组算子：
+`ops` API；Vulkan、CUDA 与 SYCL 覆盖下面这组算子（少数算子仍为 CPU-only，设备上调用会显式报错，
+见本节末尾）：
 
-- 创建：`Zeros`、`Ones`、`Fill`、`Random`
-- 算术：`Add`、`Sub`、`Mul`（逐元素）、`Div`、`MatMul`（矩阵乘）
+- 创建：`Zeros`、`Ones`、`Fill`、`Random`；生成器 `Arange`、`Linspace`、`Eye`、`Randn` 的
+  `TensorOptions` 重载在宿主生成后一次性搬到目标设备（同一 seed 各后端取值相同）
+- 算术：`Add`、`Sub`、`Mul`、`Div`、`MatMul`（N-D batched + batch 广播）、`Bmm`、`Addmm`、`Linear`
 - 一元：`Abs`、`Sin`、`Cos`、`Tan`、`Exp`、`Sqrt`、`Log`、`Pow`、`Clamp`
-- 激活：`Relu`、`Silu`、`Tanh`、`Sigmoid`、`Softmax`
-- 归约：`Sum`、`Min`、`Max`、`Mean`、`Argmax`、`Argmin`
-- 比较/逻辑：`Equal`、`NotEqual`、`Greater`、`Less`、`GreaterEqual`、`LessEqual`、`All`、`Any`、`Nonzero`
-- 形状/类型：`Concat`、`Transpose`、`Slice`、`Typecast`
+- 激活：`Relu`、`Silu`、`Tanh`、`Sigmoid`、`Softmax`、`LogSoftmax`
+- 归一化/统计：`LayerNorm`、`RmsNorm`、`Var`、`Std`、`Norm`（设备端由上面的逐元素与归约算子组合实现，
+  全程留在设备上，无隐式回拷）
+- 归约：`Sum`、`Min`、`Max`、`Mean`、`Argmax`、`Argmin`（`Var/Std/Norm` 见上）
+- 比较/逻辑：`Equal`、`NotEqual`、`Greater`、`Less`、`GreaterEqual`、`LessEqual`、`All`、`Any`、`Nonzero`、`CountNonzero`
+- 形状/搬移/类型：`Concat`、`Transpose`、`Slice`、`Split`、`Chunk`、`Stack`、`Pad`、`Repeat`、`Flip`、`Roll`、`Typecast`
+
+仍为 CPU-only 的算子（设备张量调用抛 `"only the CPU backend implements this op"`，不会静默回退 CPU）：
+`Erf`、`Cumsum`、`Where`、`IndexSelect`、`Gather`、`MaskedSelect`、`MaskedFill`、`Sort`、`Topk`、`Prod`。
 
 ## 📦 依赖
 
@@ -102,7 +109,7 @@ int main() {
 
     auto v = Tensor::Random({1024}, 1.0f, 10.0f, DataType::FLOAT32);
 
-    std::println("{}", ops::Sum(ops::Softmax(v, 0)));
+    std::println("{}", ops::Sum(ops::Softmax(v, 0)).item<float>());  // 归约结果取回标量：item<T>()
 
     return 0;
 }
@@ -163,7 +170,7 @@ int main() {
 
     auto v = Tensor::Random({1024}, 1.0f, 10.0f, DataType::FLOAT32);
 
-    std::println("{}", ops::Sum(ops::Softmax(v, 0)));
+    std::println("{}", ops::Sum(ops::Softmax(v, 0)).item<float>());  // 归约结果取回标量：item<T>()
 
     return 0;
 }
@@ -290,7 +297,7 @@ int main() {
 
     auto v = Tensor::Random({1024}, 1.0f, 10.0f, DataType::FLOAT32);
 
-    std::println("{}", ops::Sum(ops::Softmax(v, 0)));
+    std::println("{}", ops::Sum(ops::Softmax(v, 0)).item<float>());  // 归约结果取回标量：item<T>()
 
     return 0;
 }
@@ -348,7 +355,7 @@ cmake -B build -DBACKEND_CPU=ON -DCMAKE_BUILD_TYPE=Release -DBUILD_TEST=ON && cm
 # cmake -B build -DBACKEND_SYCL=ON -DCMAKE_BUILD_TYPE=Release -DBUILD_TEST=ON && cmake --build build --parallel
 ```
 
-`tests/` 是头文件范式（`#include "tensorvia.hpp"`），mcpp 与 CMake 两条路径编译同一份文件、产出同样的两个二进制：`tests/test.cpp`（公共 API 的全量行为测试，不区分后端，CPU 上运行）与 `benchmark/bench.cpp`（基准，自带 main；`mcpp.toml` 的 `[test] discover` 与 `-DBUILD_BENCH=ON` 都会构建它）。上面的 lane 命令验证的是**该 lane 完整构建 + 公共测试通过**；各设备后端编入后的算子行为由消费方冒烟覆盖。测试通过 `[dev-dependencies]` 拿 GoogleTest——它只进测试二进制，不进 `libtensorvia.so`。模块导出面（`import tensorvia;` 的符号清单）由 `tools/gen_facade.py --check` 在每次 `mcpp build` 时守卫。
+`tests/` 是头文件范式（`#include "tensorvia.hpp"`），mcpp 与 CMake 两条路径编译同一批文件。每个 `tests/*.cpp` 各自是一个独立的测试二进制：`device`（后端生命周期、多设备寻址、CUDA context/stream）、`view`（视图/offset/引用语义）、`ops`（算子与数值覆盖）、`contract`（FR-1/FR-2/FR-3 契约）、`p0`（P0 语义契约 FR-3..FR-7）、`p1`（FR-9..FR-12：N-D matmul、推理关键算子的跨后端一致性、搬运算子、不支持组合的显式报错）、`dim`；共享夹具与助手在 `tests/test_support.hpp`。另有 `benchmark/bench.cpp`（基准，自带 main；`mcpp.toml` 的 `[test] discover` 与 `-DBUILD_BENCH=ON` 都会构建它）。上面的 lane 命令验证的是**该 lane 完整构建 + 公共测试通过**；各设备后端编入后的算子行为由消费方冒烟覆盖。测试通过 `[dev-dependencies]` 拿 GoogleTest——它只进测试二进制，不进 `libtensorvia.so`。模块导出面（`import tensorvia;` 的符号清单）由 `tools/gen_facade.py --check` 在每次 `mcpp build` 时守卫。
 
 > **SYCL lane 的 llvm 构建需要 mcpp ≥ 2026.10.26.1**：该版本起 mcpp 把
 > libsycl 带来的 libstdc++ 识别为 C++ ABI island 并做链接后验证，`.so` 内
