@@ -1,6 +1,5 @@
-// Reduction kernels — global and per-axis sum/min/max/mean, argmax/argmin,
-// all/any and the NonZero count — plus the host driver that defines the
-// corresponding Device::CUDA implementations.
+// 归约内核——全局与单轴的 sum/min/max/mean、argmax/argmin、all/any 以及
+// NonZero 计数——外加定义相应 Device::CUDA 实现的宿主驱动。
 #include "common.cuh"
 
 #include <cstdint>
@@ -21,8 +20,8 @@
 namespace tvv::cuda {
 namespace {
 
-// One block reduces the whole buffer. The block loops over the input and then
-// folds the per-thread partials in shared memory.
+// 一个 block 归约整个 buffer。该 block 遍历输入，然后在共享内存中折叠各线程的
+// 部分和。
 template <class T, class Out>
 __global__ void reduce_all_kernel(const T* in, Out* out, int64_t numel, int op) {
     using Acc = contract::reduction_acc_t<T>;
@@ -58,7 +57,7 @@ __global__ void reduce_all_kernel(const T* in, Out* out, int64_t numel, int op) 
     if (threadIdx.x == 0) out[blockIdx.x] = store_as<Out>(sdata[0]);
 }
 
-// One thread per (outer, inner) pair walks the reduced axis.
+// 每个 (outer, inner) 对一个线程，沿被归约的轴行走。
 template <class T, class Out>
 __global__ void reduce_axis_kernel(const T* in, Out* out, ReduceAxis p, int op) {
     using Acc = contract::reduction_acc_t<T>;
@@ -113,9 +112,8 @@ __global__ void arg_reduce_kernel(const T* in, int32_t* out, ReduceAxis p, int i
     }
 }
 
-// All/Any: each block folds its slice into one flag, then combines into the
-// single device word with an atomic and/or. The host launches init_kernel first
-// on the same stream, so the destination never needs host-side zeroing.
+// All/Any：每个 block 先把自己的片段折叠成一个标志，再用原子 and/or 合并到单个
+// 设备字中。宿主先在同一条 stream 上启动 init_kernel，因此目标无需宿主侧清零。
 template <class T>
 __global__ void all_any_kernel(const T* in, unsigned int* out, int64_t numel, int is_all,
                                double value) {
@@ -164,7 +162,7 @@ cudaError_t launch_reduce_all(cudaStream_t stream, const void* in, void* out,
                               int op) {
     if (in == nullptr || out == nullptr) return cudaErrorInvalidValue;
     cudaError_t status = cudaErrorNotSupported;
-    // A single block, so the partial buffer is exactly one element.
+    // 只用单个 block，所以部分和 buffer 恰好一个元素。
     tvv::cuda::dispatch_dtype(in_dtype, [&](auto src_tag) {
         using T = typename decltype(src_tag)::type;
         tvv::cuda::dispatch_dtype(out_dtype, [&](auto dst_tag) {
@@ -246,7 +244,7 @@ cudaError_t launch_nonzero_count(cudaStream_t stream, const void* in, void* out,
 }  // namespace tvv::cuda
 
 // ---------------------------------------------------------------------------
-// Host driver.
+// 宿主驱动。
 // ---------------------------------------------------------------------------
 
 namespace ops {
@@ -263,9 +261,9 @@ std::shared_ptr<CUDAContext> context_of(const Tensor& t, const char* what) {
     return ctx;
 }
 
-// The kernels index a flat row-major buffer, so a view is materialized once
-// here. Tensor::data() (not the impl's base pointer) is passed on, so a
-// contiguous view with a non-zero offset reads its own elements.
+// 内核索引扁平行主序 buffer，所以视图在这里一次性物化。传下去的是
+// Tensor::data()（而不是 impl 的基址指针），因此带非零 offset 的连续视图读取的是
+// 自己的元素。
 Tensor materialize(const Tensor& a) {
     return a.is_contiguous() ? a : a.clone();
 }
@@ -291,14 +289,15 @@ AxisLayout axis_layout(const Tensor& a, int axis, const char* what) {
     for (int i = 0; i < dim; ++i) {
         if (i != axis) layout.shape.push_back(a.shape(i));
     }
-    // Dropping the only dimension of a 1D input leaves rank 0, which tensors do
-    // not support; {1} matches the CPU/Vulkan fallback.
+// 单轴内核早于 rank-0 张量出现，把空的归约形状写作 {1}；核心层通过
+// with_reduced_shape 把结果重塑为真正的 0-dim 张量，所以该回退永远不会到达公开
+// API。
     if (layout.shape.empty()) layout.shape = {1};
     return layout;
 }
 
-// Global reductions fold into one FLOAT64 element on the device and are
-// narrowed to float on the host, which is the API's return type.
+// 全局归约在设备上折叠为一个 FLOAT64 元素，再在宿主收窄为 float——这正是 API
+// 的返回类型。
 double reduce_all_value(const Tensor& a, int op, const char* what) {
     const Tensor src = materialize(a);
     auto ctx = context_of(src, what);
@@ -314,7 +313,6 @@ double reduce_all_value(const Tensor& a, int op, const char* what) {
                                      static_cast<int64_t>(src.numel()), src.dtype(),
                                      DataType::FLOAT64, op),
         what);
-    ctx->wait();
 
     out.to_host();
     return static_cast<const double*>(out.data())[0];
@@ -336,7 +334,6 @@ Tensor axis_reduce(const Tensor& a, int axis, DataType out_type, int op, const c
                                       src.data(), out_impl->data(), src.dtype(),
                                       out_type, op, layout.params),
         what);
-    ctx->wait();
     return out;
 }
 
@@ -356,15 +353,13 @@ Tensor arg_reduce(const Tensor& a, int axis, bool is_max, const char* what) {
                                      src.data(), out_impl->data(), src.dtype(),
                                      is_max, layout.params),
         what);
-    ctx->wait();
     return out;
 }
 
 bool all_any_value(const Tensor& a, float value, bool is_all, const char* what) {
     const Tensor src = materialize(a);
     auto ctx = context_of(src, what);
-    // The kernel initializes this word itself (init launch, then atomics), so
-    // it does not need a host round-trip before the reduction.
+// 内核自己初始化这个字（先 init 启动，再原子操作），所以归约前无需宿主往返。
     Tensor out({1}, DataType::INT32, Device::CUDA);
     const auto out_impl = std::dynamic_pointer_cast<CUDATensor>(out.get_impl());
     if (!out_impl)
@@ -376,7 +371,6 @@ bool all_any_value(const Tensor& a, float value, bool is_all, const char* what) 
                                   out_impl->data(), static_cast<int64_t>(src.numel()),
                                   src.dtype(), is_all, static_cast<double>(value)),
         what);
-    ctx->wait();
 
     out.to_host();
     return static_cast<const int32_t*>(out.data())[0] != 0;
@@ -389,8 +383,8 @@ float SumImpl<Device::CUDA>::execute(const Tensor& a) {
 }
 
 Tensor SumImpl<Device::CUDA>::execute(const Tensor& a, int axis) {
-    // Sum widens narrow integers and 16-bit floats to a real accumulator type;
-    // the Vulkan backend uses the same rule (the CPU one keeps the input dtype).
+// Sum 把窄整型与 16 位浮点拓宽到真正的累加类型；所有后端遵循同一条
+// reduction_type 规则。
     return axis_reduce(a, axis, reduction_type(a.dtype()), tvv::cuda::kReduceSum, "Sum");
 }
 
@@ -411,7 +405,7 @@ Tensor MaxImpl<Device::CUDA>::execute(const Tensor& a, int axis) {
 }
 
 float MeanImpl<Device::CUDA>::execute(const Tensor& a) {
-    // Divide in double: above 2^24 a float divisor is no longer exact.
+    // 用 double 做除法：超过 2^24 后 float 除数不再精确。
     const double sum = reduce_all_value(a, tvv::cuda::kReduceSum, "Mean");
     return static_cast<float>(sum / static_cast<double>(a.numel()));
 }
@@ -450,7 +444,6 @@ size_t NonZeroImpl<Device::CUDA>::execute(const Tensor& a) {
                                         src.data(), out_impl->data(),
                                         static_cast<int64_t>(src.numel()), src.dtype()),
         "NonZero launch");
-    ctx->wait();
 
     out.to_host();
     return static_cast<size_t>(static_cast<const int64_t*>(out.data())[0]);

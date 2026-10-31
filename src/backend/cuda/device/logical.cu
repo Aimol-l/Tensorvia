@@ -1,8 +1,7 @@
-// Broadcast and scalar comparison kernels, and the Equal/NotEqual/Greater/
-// Less/GreaterEqual/LessEqual device implementations that drive them.
+// 广播与标量比较内核，以及驱动它们的 Equal/NotEqual/Greater/Less/GreaterEqual/
+// LessEqual 设备实现。
 //
-// The host promotes both operands to a common dtype, so each launch dispatches
-// one scalar type.
+// 宿主把两个操作数提升到公共 dtype，所以每次启动只派发一种标量类型。
 #include "common.cuh"
 
 #include "tensorvia/backend/cuda/cuda_ops.hpp"
@@ -24,8 +23,7 @@ using tvv::cuda::type_tag;
 
 namespace contract = tvv::cuda::contract;
 
-// Same decode as the arithmetic kernels: accumulate each side's element offset
-// with its own broadcast stride array.
+// 与算术内核相同的解码：用各自的广播步长数组累加每一侧的元素 offset。
 TVV_CUDA_HD int64_t bcast_offset(int64_t idx, const tvv::cuda::Bcast& p,
                                  const int64_t* strides) {
     int64_t off = 0;
@@ -40,14 +38,30 @@ TVV_CUDA_HD int64_t bcast_offset(int64_t idx, const tvv::cuda::Bcast& p,
 
 template <class T>
 TVV_CUDA_HD int8_t cmp_value(int op, T x, T y, double abs_tol, double rel_tol) {
-    switch (op) {
-        case tvv::cuda::kCmpEqual:        return contract::cmp_close(x, y, abs_tol, rel_tol) ? 1 : 0;
-        case tvv::cuda::kCmpNotEqual:     return contract::cmp_close(x, y, abs_tol, rel_tol) ? 0 : 1;
-        case tvv::cuda::kCmpGreater:      return x > y ? 1 : 0;
-        case tvv::cuda::kCmpLess:         return x < y ? 1 : 0;
-        case tvv::cuda::kCmpGreaterEqual: return x >= y ? 1 : 0;
-        case tvv::cuda::kCmpLessEqual:    return x <= y ? 1 : 0;
-        default:                          return 0;
+    if constexpr (std::is_same_v<T, uint8_t>) {
+        // BOOL 读取按真值解释：外部写入的字节（比如 2）表示真，所以比较前先
+        // 规范化。
+        const bool bx = x != 0;
+        const bool by = y != 0;
+        switch (op) {
+            case tvv::cuda::kCmpEqual:        return bx == by ? 1 : 0;
+            case tvv::cuda::kCmpNotEqual:     return bx != by ? 1 : 0;
+            case tvv::cuda::kCmpGreater:      return bx > by ? 1 : 0;
+            case tvv::cuda::kCmpLess:         return bx < by ? 1 : 0;
+            case tvv::cuda::kCmpGreaterEqual: return bx >= by ? 1 : 0;
+            case tvv::cuda::kCmpLessEqual:    return bx <= by ? 1 : 0;
+            default:                          return 0;
+        }
+    } else {
+        switch (op) {
+            case tvv::cuda::kCmpEqual:        return contract::cmp_close(x, y, abs_tol, rel_tol) ? 1 : 0;
+            case tvv::cuda::kCmpNotEqual:     return contract::cmp_close(x, y, abs_tol, rel_tol) ? 0 : 1;
+            case tvv::cuda::kCmpGreater:      return x > y ? 1 : 0;
+            case tvv::cuda::kCmpLess:         return x < y ? 1 : 0;
+            case tvv::cuda::kCmpGreaterEqual: return x >= y ? 1 : 0;
+            case tvv::cuda::kCmpLessEqual:    return x <= y ? 1 : 0;
+            default:                          return 0;
+        }
     }
 }
 
@@ -66,8 +80,8 @@ __global__ void compare_kernel(const T* a, const T* b, int8_t* out, tvv::cuda::B
 template <class T>
 __global__ void compare_scalar_kernel(const T* a, int8_t* out, int64_t numel, int op,
                                       double scalar, double abs_tol, double rel_tol) {
-    // The scalar arrives as double; convert once so half arithmetic stays in
-    // the same native type the tensor uses.
+    // 标量以 double 传入；在此转换一次，使半精度运算保持在张量所用的同一原生
+    // 类型中。
     const T s = scalar_from_double<T>(scalar);
     const int64_t stride = static_cast<int64_t>(gridDim.x) * blockDim.x;
     for (int64_t i = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
@@ -84,7 +98,7 @@ cudaError_t launch_compare(cudaStream_t stream, const void* a, const void* b,
                            void* out, DataType dtype_a, DataType dtype_b, int op,
                            double tol_abs, double tol_rel, const Bcast& p) {
     if (a == nullptr || b == nullptr || out == nullptr) return cudaErrorInvalidValue;
-    // The host promotes both sides, so a mixed pair here is a host-side bug.
+    // 宿主已提升两侧，所以这里出现混合对就是宿主侧的 bug。
     if (dtype_a != dtype_b) return cudaErrorInvalidValue;
     cudaError_t status = cudaErrorNotSupported;
     tvv::cuda::dispatch_dtype(dtype_a, [&](auto tag) {

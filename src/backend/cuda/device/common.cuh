@@ -1,9 +1,8 @@
-// Shared vocabulary for the CUDA translation units: launch geometry, dtype
-// dispatch over the library's DataType, and the contract's scalar helpers.
+// CUDA 翻译单元共享的词汇表：启动几何、对库内 DataType 的 dtype 派发，以及契约
+// 的标量辅助函数。
 //
-// Every .cu file in this directory is part of the header-first artifact and
-// shares the same generated headers as the host code, so no ABI ids are
-// involved any more.
+// 本目录下每个 .cu 文件都属于 header-first 产物，与宿主代码共享同一批生成头文件，
+// 因此不再涉及任何 ABI id。
 #ifndef TVV_CUDA_COMMON_CUH
 #define TVV_CUDA_COMMON_CUH
 
@@ -26,8 +25,8 @@ namespace tvv::cuda {
 
 inline constexpr int kThreads = 256;
 
-// Blocks for a flat launch. Always at least one: a zero-block launch is an
-// invalid configuration and its sticky error would surface at the next call.
+// 扁平启动的 block 数。至少为一个：零 block 启动是非法配置，其粘性错误会在下次
+// 调用时浮现。
 inline int blocks_for(int64_t numel, int threads = kThreads) {
     if (numel <= 0) return 1;
     const int64_t blocks = (numel + threads - 1) / threads;
@@ -39,9 +38,8 @@ inline cudaError_t launch_status() {
     return cudaGetLastError();
 }
 
-// Host-side dispatch of a DataType to a callable taking a device scalar type.
-// A local tag rather than std::type_identity keeps the device units portable
-// across nvcc front ends.
+// 宿主侧把 DataType 派发到接受设备标量类型的可调用对象。用本地标签而非
+// std::type_identity，以保证设备单元能在不同 nvcc 前端间移植。
 template <class T>
 struct type_tag {
     using type = T;
@@ -50,6 +48,7 @@ struct type_tag {
 template <class F>
 void dispatch_dtype(DataType dtype, F&& f) {
     switch (dtype) {
+        case DataType::BOOL:     f(type_tag<uint8_t>{}); break;
         case DataType::INT8:     f(type_tag<int8_t>{}); break;
         case DataType::INT16:    f(type_tag<int16_t>{}); break;
         case DataType::INT32:    f(type_tag<int32_t>{}); break;
@@ -62,7 +61,7 @@ void dispatch_dtype(DataType dtype, F&& f) {
     }
 }
 
-// ABI-free scalar parameters travel as double; convert them once on the host.
+// 无 ABI 的标量参数以 double 传递；在宿主上转换一次。
 template <class T>
 TVV_CUDA_HD T scalar_from_double(double v) {
     if constexpr (std::is_same_v<T, __half>) {
@@ -74,8 +73,8 @@ TVV_CUDA_HD T scalar_from_double(double v) {
     }
 }
 
-// Read a scalar into the compute type and write it back. 16-bit floats widen
-// to float for computation and round through double on the way out.
+// 把标量读入计算类型再写回。16 位浮点在计算中拓宽为 float，写出时经 double
+// 舍入。
 template <class C, class T>
 TVV_CUDA_HD C to_compute(T v) {
     if constexpr (std::is_same_v<C, T>) {
@@ -98,9 +97,9 @@ TVV_CUDA_HD R store_as(C v) {
     }
 }
 
-// std::numeric_limits members are host constexpr functions, which nvcc refuses
-// to call from device code without --expt-relaxed-constexpr. These literal
-// variants cover the accumulator types the reduction kernels use.
+// std::numeric_limits 的成员是宿主 constexpr 函数，nvcc 在未加
+// --expt-relaxed-constexpr 时拒绝在设备代码中调用。这些字面量变体覆盖归约内核
+// 用到的累加类型。
 template <class T>
 TVV_CUDA_HD T max_finite() {
     if constexpr (std::is_same_v<T, float>)       return FLT_MAX;
@@ -122,8 +121,7 @@ TVV_CUDA_HD T inf_value() {
     return static_cast<T>(INFINITY);
 }
 
-// Parameter structs are passed by value and relied upon only through their
-// members; these assertions just catch an accidental non-trivial layout.
+// 参数结构体按值传递，使用时只依赖其成员；这些断言只是拦住意外的非平凡布局。
 static_assert(sizeof(Bcast) % alignof(int64_t) == 0, "bcast layout");
 static_assert(sizeof(Repack) % alignof(int64_t) == 0, "repack layout");
 

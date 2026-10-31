@@ -1,10 +1,8 @@
-// Fill / random initialization kernels and the host driver for
-// Zeros/Ones/Fill/Random.
+// 填充 / 随机初始化内核，以及 Zeros/Ones/Fill/Random 的宿主驱动。
 //
-// Random uses cuRAND's Philox counter-based generator with a per-element
-// subsequence, so no curandState array has to be allocated: the reference
-// implementation allocated 48 bytes per element and freed it after a device
-// synchronization. The seed always comes from the host.
+// Random 使用 cuRAND 的 Philox 计数器式生成器，并以元素下标作为子序列，因此无需
+// 分配 curandState 数组：旧实现为每个元素分配 48 字节，还要在一次设备同步之后
+// 才释放。种子始终来自宿主。
 #include "common.cuh"
 
 #include <random>
@@ -39,8 +37,8 @@ __global__ void random_kernel(T* __restrict__ out, int64_t numel, float lo, floa
     const int64_t stride = static_cast<int64_t>(gridDim.x) * blockDim.x;
     for (int64_t i = start; i < numel; i += stride) {
         curandStatePhilox4_32_10_t state;
-        // (seed, subsequence, offset): the index is the subsequence, which keeps
-        // streams independent without any shared state.
+        // (seed, subsequence, offset)：下标即子序列，这让各条流彼此独立而无需
+        // 任何共享状态。
         curand_init(seed, static_cast<unsigned long long>(i), 0, &state);
         const float r = curand_uniform(&state);  // (0, 1]
         out[i] = tvv::cuda::contract::store_from_double<T>(
@@ -55,11 +53,13 @@ namespace tvv::cuda {
 cudaError_t launch_fill(cudaStream_t stream, void* out, int64_t numel,
                         DataType dtype, double value) {
     if (out == nullptr) return cudaErrorInvalidValue;
+    // BOOL 写入会规范化：任何非零填充值都表示真（1）。
+    const double v = (dtype == DataType::BOOL) ? (value != 0.0 ? 1.0 : 0.0) : value;
     cudaError_t status = cudaErrorNotSupported;
     tvv::cuda::dispatch_dtype(dtype, [&](auto id) {
         using T = typename decltype(id)::type;
         fill_kernel<T><<<blocks_for(numel), kThreads, 0, stream>>>(
-            static_cast<T*>(out), numel, scalar_from_double<T>(value));
+            static_cast<T*>(out), numel, scalar_from_double<T>(v));
         status = launch_status();
     });
     return status;
@@ -81,7 +81,7 @@ cudaError_t launch_random(cudaStream_t stream, void* out, int64_t numel,
 }  // namespace tvv::cuda
 
 // ---------------------------------------------------------------------------
-// Host driver.
+// 宿主驱动。
 // ---------------------------------------------------------------------------
 
 namespace ops {
@@ -105,13 +105,12 @@ void fill_tensor(const Tensor& t, double value, const char* what) {
     auto target = target_of(t, what);
     target.ctx->activate();
     tvv::cuda::check_cuda(
-        // const_cast: filling is the one host-side write; Tensor::data() is the
-        // offset-aware pointer, unlike TensorImpl::data().
+        // const_cast：填充是唯一的宿主侧写入；这里用 Tensor::data()（感知 offset）
+        // 而不是 TensorImpl::data()。
         tvv::cuda::launch_fill(static_cast<cudaStream_t>(target.ctx->stream()),
                                const_cast<void*>(t.data()),
                                static_cast<int64_t>(t.numel()), t.dtype(), value),
         what);
-    target.ctx->wait();
 }
 
 uint64_t make_seed() {
@@ -154,7 +153,6 @@ Tensor RandomImpl<Device::CUDA>::execute(const std::vector<int64_t>& shape, Data
                                  target.impl->data(), static_cast<int64_t>(temp.numel()),
                                  dtype, min, max, make_seed()),
         "Random");
-    target.ctx->wait();
     return temp;
 }
 

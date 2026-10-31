@@ -1,9 +1,8 @@
-// CUDA runtime: context/stream lifetime, allocation, host transfers and the
-// CUDATensor buffer management.
+// CUDA 运行时：上下文/stream 生命周期、内存分配、宿主传输以及 CUDATensor 的
+// buffer 管理。
 //
-// Formerly a pure-C island plus two module-side host drivers. The header-first
-// artifact compiles all of it as one translation unit, so the context and the
-// tensor can use the driver API directly and throw on error.
+// 过去是一个纯 C island 加两个模块侧宿主驱动。header-first 产物把它们全部作为一个
+// 翻译单元编译，因此上下文和张量可以直接使用驱动 API 并在出错时抛异常。
 #include "common.cuh"
 #include "allocator.cuh"
 #include "cuda_launch.hpp"
@@ -26,22 +25,18 @@
 #include "tensorvia/types.hpp"
 
 // ---------------------------------------------------------------------------
-// Context
+// 上下文
 // ---------------------------------------------------------------------------
 
 namespace {
 
-// Streams the context hands out on demand. torch's default is 32 per device.
-constexpr size_t kStreamPoolSize = 32;
-
-// Contexts never reuse an id, so a thread-local entry left behind by a
-// destroyed context can never be read as the current stream of a new one that
-// happens to land on the same address.
+// 上下文 id 永不复用，因此已销毁上下文残留的线程私有条目绝不会被误当成恰好落在
+// 同一地址上的新上下文的流。
 std::atomic<uint64_t> g_next_context_id{1};
 
-// The current stream is per (thread, context). Thread-local: no lock, and no
-// thread can observe another thread's choice.
-thread_local std::unordered_map<uint64_t, cudaStream_t> tls_current_stream;
+// 每条（线程, 上下文）一条流。线程私有：查表无需加锁，也没有线程能看到别的线程的
+// 流；新创建的流同时登记到 context 的注册表，供 synchronize_all 与析构使用。
+thread_local std::unordered_map<uint64_t, cudaStream_t> tls_stream;
 
 }  // namespace
 
@@ -50,10 +45,8 @@ struct CUDAContext::Impl {
 
     int                        device = 0;
     uint64_t                   id = 0;
-    cudaStream_t               default_stream = nullptr;
-    std::vector<cudaStream_t>  pool;          // created on first pool request
-    size_t                     next_pool = 0;
-    mutable std::mutex         pool_mtx;      // pool is shared across threads
+    std::vector<cudaStream_t>  streams;       // 所有线程已创建的流
+    mutable std::mutex         streams_mtx;
     tvv::cuda::CachingAllocator allocator;
 };
 
@@ -101,27 +94,19 @@ CUDAContext::CUDAContext(int device_index) {
     if (impl == nullptr) throw std::bad_alloc();
     impl->id = g_next_context_id.fetch_add(1, std::memory_order_relaxed);
 
-    const cudaError_t err = cudaStreamCreateWithFlags(&impl->default_stream, cudaStreamNonBlocking);
-    if (err != cudaSuccess) {
-        delete impl;
-        tvv::cuda::check_cuda(err, "CUDAContext: cudaStreamCreateWithFlags");
-    }
     m_impl = impl;
 }
 
 CUDAContext::~CUDAContext() {
     if (m_impl == nullptr) return;
-    // Destructors do not throw; a failed teardown is not actionable here.
+    // 析构函数不抛异常；清理失败在这里也无从处理。
     (void)cudaSetDevice(m_impl->device);
-    // The cached blocks go back to the driver before the streams they were
-    // recorded on, so no event outlives its stream.
-    const cudaStream_t              default_stream = m_impl->default_stream;
-    std::vector<cudaStream_t>       pool           = std::move(m_impl->pool);
+    // 缓存的块先于使用它们的流归还驱动，因此分配器里没有东西会比流活得更久。
+    std::vector<cudaStream_t> streams = std::move(m_impl->streams);
     delete m_impl;
-    for (const cudaStream_t stream : pool) {
+    for (const cudaStream_t stream : streams) {
         if (stream != nullptr) (void)cudaStreamDestroy(stream);
     }
-    if (default_stream != nullptr) (void)cudaStreamDestroy(default_stream);
 }
 
 void* CUDAContext::ctx_raw_ptr() { return stream(); }
@@ -138,50 +123,22 @@ void CUDAContext::activate() const {
 
 CUDAContext::CUDAStream CUDAContext::current_stream() const {
     if (m_impl == nullptr) return {};
-    const auto it = tls_current_stream.find(m_impl->id);
-    const cudaStream_t handle =
-        it == tls_current_stream.end() ? m_impl->default_stream : it->second;
-    return {static_cast<void*>(handle), m_impl->device};
-}
+    const auto it = tls_stream.find(m_impl->id);
+    if (it != tls_stream.end()) return {static_cast<void*>(it->second), m_impl->device};
 
-CUDAContext::CUDAStream CUDAContext::default_stream() const {
-    if (m_impl == nullptr) return {};
-    return {static_cast<void*>(m_impl->default_stream), m_impl->device};
-}
-
-CUDAContext::CUDAStream CUDAContext::stream_from_pool() {
-    if (m_impl == nullptr) throw std::runtime_error("CUDAContext::stream_from_pool: null context");
-    // A pool stream is created on the context's device, whatever this thread
-    // had current.
+    // 首次使用时创建。context 自己的设备在这里确定，与本线程的 current device 无关。
     if (const cudaError_t err = cudaSetDevice(m_impl->device); err != cudaSuccess)
-        tvv::cuda::check_cuda(err, "CUDAContext::stream_from_pool: cudaSetDevice");
+        tvv::cuda::check_cuda(err, "CUDAContext::current_stream: cudaSetDevice");
 
-    std::lock_guard<std::mutex> lock(m_impl->pool_mtx);
-    if (m_impl->pool.empty()) {
-        m_impl->pool.reserve(kStreamPoolSize);
-        for (size_t i = 0; i < kStreamPoolSize; ++i) {
-            cudaStream_t created = nullptr;
-            tvv::cuda::check_cuda(cudaStreamCreateWithFlags(&created, cudaStreamNonBlocking),
-                                  "CUDAContext: cudaStreamCreateWithFlags (pool)");
-            m_impl->pool.push_back(created);
-        }
+    cudaStream_t created = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(m_impl->streams_mtx);
+        tvv::cuda::check_cuda(cudaStreamCreateWithFlags(&created, cudaStreamNonBlocking),
+                              "CUDAContext: cudaStreamCreateWithFlags");
+        m_impl->streams.push_back(created);
     }
-    const size_t slot = m_impl->next_pool++ % m_impl->pool.size();
-    return {static_cast<void*>(m_impl->pool[slot]), m_impl->device};
-}
-
-void CUDAContext::set_current_stream(CUDAStream stream) const {
-    if (m_impl == nullptr) return;
-    tls_current_stream[m_impl->id] = static_cast<cudaStream_t>(stream.handle);
-}
-
-CUDAContext::StreamGuard::StreamGuard(const CUDAContext& context, CUDAStream stream)
-    : m_context(&context), m_previous(context.current_stream()) {
-    context.set_current_stream(stream);
-}
-
-CUDAContext::StreamGuard::~StreamGuard() {
-    if (m_context != nullptr) m_context->set_current_stream(m_previous);
+    tls_stream[m_impl->id] = created;
+    return {static_cast<void*>(created), m_impl->device};
 }
 
 void CUDAContext::synchronize_current_stream() const {
@@ -191,18 +148,15 @@ void CUDAContext::synchronize_current_stream() const {
         "cudaStreamSynchronize");
 }
 
-void CUDAContext::wait() const { synchronize_current_stream(); }
-
 void CUDAContext::synchronize_all() const {
     if (m_impl == nullptr) return;
     (void)cudaSetDevice(m_impl->device);
 
     std::vector<cudaStream_t> streams;
     {
-        std::lock_guard<std::mutex> lock(m_impl->pool_mtx);
-        streams = m_impl->pool;
+        std::lock_guard<std::mutex> lock(m_impl->streams_mtx);
+        streams = m_impl->streams;
     }
-    streams.push_back(m_impl->default_stream);
     for (const cudaStream_t stream : streams) {
         if (stream == nullptr) continue;
         tvv::cuda::check_cuda(cudaStreamSynchronize(stream), "cudaStreamSynchronize");
@@ -212,16 +166,15 @@ void CUDAContext::synchronize_all() const {
 void* CUDAContext::allocate(size_t bytes, CUDAStream stream) {
     if (m_impl == nullptr) throw std::runtime_error("CUDAContext::allocate: null context");
     activate();
-    // cudaMalloc(0) is an error; a zero-byte tensor still needs a valid handle
-    // so the destructor and copy paths stay uniform. The allocator rounds up,
-    // so one byte is enough to get a usable block.
+    // cudaMalloc(0) 是错误；零字节张量仍需一个有效句柄，好让析构和拷贝路径保持
+    // 统一。分配器会向上取整，所以一字节就足以拿到一个可用块。
     return m_impl->allocator.allocate(bytes == 0 ? 1 : bytes,
                                       static_cast<cudaStream_t>(stream.handle));
 }
 
 void CUDAContext::deallocate(void* ptr, CUDAStream stream) noexcept {
     if (m_impl == nullptr || ptr == nullptr) return;
-    // device_index() is noexcept, unlike activate().
+    // device_index() 是 noexcept，与 activate() 不同。
     (void)cudaSetDevice(m_impl->device);
     m_impl->allocator.deallocate(ptr, static_cast<cudaStream_t>(stream.handle));
 }
@@ -233,13 +186,12 @@ void CUDAContext::empty_cache() noexcept {
 }
 
 // ---------------------------------------------------------------------------
-// Device buffers
+// 设备 buffer
 // ---------------------------------------------------------------------------
 
 namespace {
 
-// The public contract is "copies are complete on return", so a caller can free
-// its staging buffer immediately.
+// 公开契约是“返回时拷贝已完成”，因此调用方可以立刻释放自己的暂存 buffer。
 cudaError_t copy_bytes(cudaStream_t stream, void* dst, const void* src, size_t bytes,
                        cudaMemcpyKind kind) {
     if (bytes == 0) return cudaSuccess;
@@ -272,9 +224,8 @@ void CUDATensor::init(void* ptr, size_t numel, DataType dtype,
     if (!m_context) throw std::runtime_error("CUDATensor: null CUDAContext");
 
     m_context->activate();
-    // The allocator handles the zero-byte case and keeps the block for reuse;
-    // only pointer validity is this class's concern. The allocation stream is
-    // remembered: it is where the block's release gets recorded.
+    // 分配器处理零字节情况并保留块以便复用；本类只关心指针是否有效。分配时所在的
+    // stream 会被记住：块的释放事件就记录在那条 stream 上。
     const size_t bytes = numel * calc_dtype_size(dtype);
     m_stream = m_context->current_stream();
     m_data   = m_context->allocate(bytes, m_stream);
@@ -283,7 +234,7 @@ void CUDATensor::init(void* ptr, size_t numel, DataType dtype,
         const cudaError_t err = copy_bytes(stream_of(m_context), m_data, ptr, bytes,
                                            cudaMemcpyHostToDevice);
         if (err != cudaSuccess) {
-            // The object's destructor does not run when a constructor throws.
+            // 构造函数抛出时，对象的析构函数不会运行。
             m_context->deallocate(m_data, m_stream);
             m_data = nullptr;
             tvv::cuda::check_cuda(err, "CUDATensor::init: host-to-device copy");
@@ -293,7 +244,7 @@ void CUDATensor::init(void* ptr, size_t numel, DataType dtype,
 
 CUDATensor::~CUDATensor() {
     if (m_data != nullptr) {
-        // Destructors do not throw; a failed release is not actionable here.
+        // 析构函数不抛异常；释放失败在这里也无从处理。
         m_context->deallocate(m_data, m_stream);
     }
 }
@@ -313,8 +264,8 @@ void CUDATensor::copy_to(std::shared_ptr<TensorImpl> dst) const {
     }
 
     m_context->activate();
-    // m_numel is the shared base buffer's element count; dst may be a smaller
-    // view. Copying the source length would write past dst's allocation.
+    // m_numel 是共享基础 buffer 的元素数；dst 可能是更小的视图。按源长度拷贝会写
+    // 越 dst 的分配区。
     const size_t count = std::min(m_numel, cuda_dst->m_numel);
     tvv::cuda::check_cuda(copy_bytes(stream_of(m_context), cuda_dst->m_data, m_data,
                           count * calc_dtype_size(m_dtype), cudaMemcpyDeviceToDevice),
@@ -335,7 +286,6 @@ std::unique_ptr<TensorImpl> CUDATensor::clone_as_contiguous(const Metadata& meta
     m_context->activate();
     tvv::cuda::check_cuda(tvv::cuda::launch_repack(stream_of(m_context), m_data, cloned->m_data, meta),
                "repack");
-    m_context->wait();
     return cloned;
 }
 

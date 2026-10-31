@@ -1,6 +1,5 @@
-// Activation kernels that need more than the element-wise unary path.
-// Relu/Silu/Tanh/Sigmoid live in arithmetic.cu; Softmax reduces along one axis
-// and is implemented here, together with the host driver for all of them.
+// 逐元素一元路径无法表达、需要更多处理的一元激活内核。Relu/Silu/Tanh/Sigmoid 在
+// arithmetic.cu 中；Softmax 沿单轴归约，在这里实现，同时附带它们的宿主驱动。
 #include "common.cuh"
 
 #include <stdexcept>
@@ -74,15 +73,15 @@ cudaError_t launch_softmax(cudaStream_t stream, const void* in, void* out,
 }  // namespace tvv::cuda
 
 // ---------------------------------------------------------------------------
-// Host driver.
+// 宿主驱动。
 // ---------------------------------------------------------------------------
 
 namespace ops {
 
 namespace {
 
-// Softmax reads and writes one reduction axis at a time; the kernel works on a
-// flat row-major buffer, so a strided operand is materialized first.
+// Softmax 每次只读写一条归约轴；内核处理扁平行主序 buffer，所以跨步操作数要先
+// 物化。
 Tensor softmax_impl(const Tensor& a, int axis) {
     const int dim = static_cast<int>(a.shape().size());
     if (axis < 0) axis += dim;
@@ -97,10 +96,10 @@ Tensor softmax_impl(const Tensor& a, int axis) {
     p.outer = 1;
     for (int i = 0; i < axis; ++i) p.outer *= a.shape(i);
 
-    // Integers have no meaningful probability output; the other backends
-    // promote them to FLOAT32, everything else keeps its storage type.
+    // 整数没有有意义的概率输出；其它后端将其提升到 FLOAT32，其余类型保持其存储
+    // 类型。
     const DataType out_type =
-        src.dtype() <= DataType::INT64 ? DataType::FLOAT32 : src.dtype();
+        is_integral_dtype(src.dtype()) ? DataType::FLOAT32 : src.dtype();
     Tensor out(src.shape(), out_type, Device::CUDA);
 
     auto ctx = cuda_ufunc::context_of(src, "Softmax");
@@ -113,7 +112,6 @@ Tensor softmax_impl(const Tensor& a, int axis) {
         tvv::cuda::launch_softmax(cuda_ufunc::stream_of(*ctx), src.data(), out.data(),
                                   src.dtype(), out_type, p),
         "Softmax launch");
-    ctx->wait();
     return out;
 }
 

@@ -1,9 +1,8 @@
-// Tiled matrix multiplication and the host driver for MatMulImpl.
+// 分块矩阵乘法，以及 MatMulImpl 的宿主驱动。
 //
-// A is viewed as [batch, rows, k] and B as [batch, k, cols]; a 2D call is the
-// batch=1 case. The host promotes both operands and the destination to a
-// common dtype and materializes contiguous buffers, so one scalar type per
-// launch is enough here.
+// A 视为 [batch, rows, k]，B 视为 [batch, k, cols]；二维调用就是 batch=1 的情形。
+// 宿主把两个操作数和目标提升到公共 dtype 并物化为连续 buffer，所以这里每次启动只
+// 需一种标量类型。
 #include "common.cuh"
 
 #include <algorithm>
@@ -110,7 +109,7 @@ cudaError_t launch_matmul(cudaStream_t stream, const void* a, const void* b,
 }  // namespace tvv::cuda
 
 // ---------------------------------------------------------------------------
-// Host driver.
+// 宿主驱动。
 // ---------------------------------------------------------------------------
 
 namespace ops {
@@ -128,8 +127,8 @@ Tensor MatMulImpl<Device::CUDA>::execute(const Tensor& a, const Tensor& b) {
         batched ? std::vector<int64_t>{batch, rows, cols}
                 : std::vector<int64_t>{rows, cols};
 
-    // Half-precision operands are widened to FLOAT32 first, exactly like the
-    // CPU backend: the 16-bit formats are storage types, not accumulator types.
+    // 半精度操作数先拓宽到 FLOAT32，与 CPU 后端完全一致：16 位格式是存储类型，
+    // 不是累加类型。
     Tensor a_storage, b_storage;
     const Tensor* a_p = &a;
     const Tensor* b_p = &b;
@@ -144,8 +143,8 @@ Tensor MatMulImpl<Device::CUDA>::execute(const Tensor& a, const Tensor& b) {
 
     const DataType res_type = compute_type(a_p->dtype(), b_p->dtype());
     Tensor dst(newshape, res_type, Device::CUDA);
-    // The kernel reads contiguous row-major operands; dtype promotion goes
-    // through Typecast (no-op when the dtype already matches).
+    // 内核读取连续的行主序操作数；dtype 提升走 Typecast（dtype 已匹配时是空
+    // 操作）。
     const Tensor A = a_p->dtype() == res_type ? a_p->contiguous() : ops::Typecast(*a_p, res_type);
     const Tensor B = b_p->dtype() == res_type ? b_p->contiguous() : ops::Typecast(*b_p, res_type);
 
@@ -160,10 +159,9 @@ Tensor MatMulImpl<Device::CUDA>::execute(const Tensor& a, const Tensor& b) {
     ctx->activate();
     tvv::cuda::check_cuda(
         tvv::cuda::launch_matmul(static_cast<cudaStream_t>(ctx->stream()),
-                                 A_impl->data(), B_impl->data(), dst_impl->data(),
+                                 A.data(), B.data(), dst.data(),
                                  res_type, batch, rows, cols, common),
         "MatMul launch");
-    ctx->wait();
     return dst;
 }
 
