@@ -23,8 +23,14 @@
 namespace ops {
 
 template <typename T>
+inline T normalized_value(float v) {
+    if constexpr (std::is_same_v<T, uint8_t>) return v != 0.0f ? uint8_t{1} : uint8_t{0};
+    else return static_cast<T>(v);
+}
+
+template <typename T>
 inline void fill_value_impl(T* ptr, float val, size_t numel) {
-    const T v = static_cast<T>(val);
+    const T v = normalized_value<T>(val);
     #pragma omp parallel for if (numel > 4096)  // 4096 是一个经验值
     for (size_t i = 0; i < numel; ++i) ptr[i] = v;
 }
@@ -214,7 +220,7 @@ void FillImpl<Device::CPU>::execute(Tensor& a, float value) {
     dispatch_dtype(a.dtype(), [&](auto type_id) {
         using T = typename decltype(type_id)::type;
         T* p = static_cast<T*>(a.data());
-        const T v = static_cast<T>(value);
+        const T v = normalized_value<T>(value);
         const size_t numel = a.numel();
         #pragma omp parallel for if (numel > 4096)  // 4096 是一个经验值
         for (size_t i = 0; i < numel; ++i) p[i] = v;
@@ -250,7 +256,7 @@ Tensor ArangeImpl<Device::CPU>::execute(float start, float stop, float step, Dat
         T* p = static_cast<T*>(res.data());
         #pragma omp parallel for
         for (int64_t i = 0; i < n; ++i)
-            p[i] = static_cast<T>(start + static_cast<float>(i) * step);
+            p[i] = normalized_value<T>(start + static_cast<float>(i) * step);
     });
     return res;
 }
@@ -260,11 +266,12 @@ Tensor LinspaceImpl<Device::CPU>::execute(float start, float stop, int64_t steps
     dispatch_dtype(dtype, [&](auto type_id) {
         using T = typename decltype(type_id)::type;
         T* p = static_cast<T*>(res.data());
-        if (steps == 1) { p[0] = static_cast<T>(start); return; }
+        if (steps == 1) { p[0] = normalized_value<T>(start); return; }
         const float inv = 1.0f / static_cast<float>(steps - 1);
         #pragma omp parallel for
         for (int64_t i = 0; i < steps; ++i)
-            p[i] = static_cast<T>(start + (stop - start) * (static_cast<float>(i) * inv));
+            p[i] = normalized_value<T>(start + (stop - start) *
+                                                  (static_cast<float>(i) * inv));
     });
     return res;
 }

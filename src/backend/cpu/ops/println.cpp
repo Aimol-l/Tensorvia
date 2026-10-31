@@ -19,13 +19,27 @@ template <typename T>
 concept BFloat16Type = std::is_same_v<T, bfloat16>;
 
 template <typename T>
+inline void print_one(const T& v) {
+    if constexpr (Float16Type<T> || BFloat16Type<T>) {
+        std::cout << std::format("{:.3f}", float(v));
+    } else if constexpr (std::is_integral_v<T>) {
+        std::cout << std::format("{}", v);
+    } else {
+        std::cout << std::format("{:.3f}", v);
+    }
+}
+
+template <typename T>
 inline void _println(const Tensor& a) {
     const auto shape = a.shape();
+    const T* data = static_cast<const T*>(a.data());
     if (shape.empty()) {
-        std::cout << "[ ]\n";
+        // 0-dim（全归约的结果）是标量，不是长度为 1 的数组：不带方括号，
+        // 与秩 ≥ 1 的打印区分开。形状记作 ()，其余尾巴与其它秩一致。
+        print_one(data[0]);
+        std::cout << "\nTensor shape: () | ";
         return;
     }
-    const T* data = static_cast<const T*>(a.data());
 
     constexpr size_t elements = 3;
     constexpr size_t max_elements_per_dim = 7;

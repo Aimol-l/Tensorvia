@@ -183,32 +183,39 @@ float max_kernel(const T *ptr, size_t size) {
     return max_val;
 }
 
+// 累加类型：整型输入在 int64 里精确累加，浮点输入用 double；float32 的连续轴
+// 仍走 float 的 SIMD 快路径。
 template <typename T>
-void sum_kernel(const T *src_ptr, T *res_ptr, int outer_size, int inner_size, int axis_size) {
+using reduce_acc_t = std::conditional_t<std::is_integral_v<T>, int64_t, double>;
+
+// 输出类型 R 由 reduction_type 决定（PyTorch 语义：整型归约提升到 int64）。
+template <typename T, typename R>
+void sum_kernel(const T *src_ptr, R *res_ptr, int outer_size, int inner_size, int axis_size) {
     const size_t n_outer = static_cast<size_t>(outer_size);
     const size_t n_inner = static_cast<size_t>(inner_size);
     const size_t n_axis  = static_cast<size_t>(axis_size);
+    using Acc = reduce_acc_t<T>;
 
     if (n_inner == 1) {
         // 连续轴：每个 outer 对应一段 axis_size 个连续元素
         #pragma omp parallel for schedule(static)
         for (size_t outer = 0; outer < n_outer; ++outer) {
             const T* p = src_ptr + outer * n_axis;
-            float s = 0.0f;
+            Acc s = 0;
             if constexpr (std::is_same_v<T, float32>) {
-                const float* pf = p;  // T == float
+                const float* pf = p;  // T == float（T 就是 float）
                 __m256 acc = _mm256_setzero_ps();
                 size_t i = 0;
                 for (; i + 8 <= n_axis; i += 8)
                     acc = _mm256_add_ps(acc, _mm256_loadu_ps(pf + i));
-                s = hsum_ps(acc);
-                for (; i < n_axis; ++i) s += pf[i];
+                s = static_cast<Acc>(hsum_ps(acc));
+                for (; i < n_axis; ++i) s += static_cast<Acc>(pf[i]);
             } else {
                 #pragma omp simd reduction(+:s)
                 for (size_t i = 0; i < n_axis; ++i)
-                    s += static_cast<float>(p[i]);
+                    s += static_cast<Acc>(p[i]);
             }
-            res_ptr[outer] = static_cast<T>(s);
+            res_ptr[outer] = static_cast<R>(s);
         }
     } else {
         // 跨步轴：每个 (outer, inner) 是一个归约组
@@ -218,30 +225,33 @@ void sum_kernel(const T *src_ptr, T *res_ptr, int outer_size, int inner_size, in
             const size_t outer = task / n_inner;
             const size_t inner = task % n_inner;
             const T* p = src_ptr + outer * n_axis * n_inner + inner;
-            float s = 0.0f;
+            Acc s = 0;
             #pragma omp simd reduction(+:s)
             for (size_t k = 0; k < n_axis; ++k)
-                s += static_cast<float>(p[k * n_inner]);
-            res_ptr[task] = static_cast<T>(s);
+                s += static_cast<Acc>(p[k * n_inner]);
+            res_ptr[task] = static_cast<R>(s);
         }
     }
 }
 
-template <typename T>
-void mean_kernel(const T *src_ptr, float *res_ptr, int outer_size, int inner_size, int axis_size) {
+// 输出类型 R 由 float_reduction_type 决定：整型与窄浮点归约到 float32，
+// float64 输入保持双精度累加。
+template <typename T, typename R>
+void mean_kernel(const T *src_ptr, R *res_ptr, int outer_size, int inner_size, int axis_size) {
     const size_t n_outer = static_cast<size_t>(outer_size);
     const size_t n_inner = static_cast<size_t>(inner_size);
     const size_t n_axis  = static_cast<size_t>(axis_size);
-    const float inv_axis = 1.0f / static_cast<float>(n_axis);
+    using Acc = std::conditional_t<std::is_same_v<R, float64>, double, float>;
+    const Acc inv_axis = Acc{1} / static_cast<Acc>(n_axis);
 
     if (n_inner == 1) {
         // 连续轴：每个 outer 对应一段 axis_size 个连续元素
         #pragma omp parallel for schedule(static)
         for (size_t outer = 0; outer < n_outer; ++outer) {
             const T* p = src_ptr + outer * n_axis;
-            float s = 0.0f;
-            if constexpr (std::is_same_v<T, float32>) {
-                const float* pf = p;  // T == float
+            Acc s = 0;
+            if constexpr (std::is_same_v<T, float32> && std::is_same_v<Acc, float>) {
+                const float* pf = p;  // T == float（T 就是 float）
                 __m256 acc = _mm256_setzero_ps();
                 size_t i = 0;
                 for (; i + 8 <= n_axis; i += 8)
@@ -251,9 +261,9 @@ void mean_kernel(const T *src_ptr, float *res_ptr, int outer_size, int inner_siz
             } else {
                 #pragma omp simd reduction(+:s)
                 for (size_t i = 0; i < n_axis; ++i)
-                    s += static_cast<float>(p[i]);
+                    s += static_cast<Acc>(p[i]);
             }
-            res_ptr[outer] = s * inv_axis;
+            res_ptr[outer] = static_cast<R>(s * inv_axis);
         }
     } else {
         // 跨步轴：每个 (outer, inner) 是一个归约组
@@ -263,11 +273,11 @@ void mean_kernel(const T *src_ptr, float *res_ptr, int outer_size, int inner_siz
             const size_t outer = task / n_inner;
             const size_t inner = task % n_inner;
             const T* p = src_ptr + outer * n_axis * n_inner + inner;
-            float s = 0.0f;
+            Acc s = 0;
             #pragma omp simd reduction(+:s)
             for (size_t k = 0; k < n_axis; ++k)
-                s += static_cast<float>(p[k * n_inner]);
-            res_ptr[task] = s * inv_axis;
+                s += static_cast<Acc>(p[k * n_inner]);
+            res_ptr[task] = static_cast<R>(s * inv_axis);
         }
     }
 }
@@ -348,20 +358,21 @@ float prod_kernel(const T* ptr, size_t size) {
     return prod;
 }
 
-template <typename T>
-void prod_kernel(const T* src_ptr, T* res_ptr, int outer_size, int inner_size, int axis_size) {
+template <typename T, typename R>
+void prod_kernel(const T* src_ptr, R* res_ptr, int outer_size, int inner_size, int axis_size) {
     const size_t n_outer = static_cast<size_t>(outer_size);
     const size_t n_inner = static_cast<size_t>(inner_size);
     const size_t n_axis  = static_cast<size_t>(axis_size);
+    using Acc = reduce_acc_t<T>;
 
     if (n_inner == 1) {
         #pragma omp parallel for schedule(static)
         for (size_t outer = 0; outer < n_outer; ++outer) {
             const T* p = src_ptr + outer * n_axis;
-            float prod = 1.0f;
+            Acc prod = 1;
             #pragma omp simd reduction(*:prod)
-            for (size_t k = 0; k < n_axis; ++k) prod *= static_cast<float>(p[k]);
-            res_ptr[outer] = static_cast<T>(prod);
+            for (size_t k = 0; k < n_axis; ++k) prod *= static_cast<Acc>(p[k]);
+            res_ptr[outer] = static_cast<R>(prod);
         }
     } else {
         const size_t total = n_outer * n_inner;
@@ -370,10 +381,10 @@ void prod_kernel(const T* src_ptr, T* res_ptr, int outer_size, int inner_size, i
             const size_t outer = task / n_inner;
             const size_t inner = task % n_inner;
             const T* p = src_ptr + outer * n_axis * n_inner + inner;
-            float prod = 1.0f;
+            Acc prod = 1;
             #pragma omp simd reduction(*:prod)
-            for (size_t k = 0; k < n_axis; ++k) prod *= static_cast<float>(p[k * n_inner]);
-            res_ptr[task] = static_cast<T>(prod);
+            for (size_t k = 0; k < n_axis; ++k) prod *= static_cast<Acc>(p[k * n_inner]);
+            res_ptr[task] = static_cast<R>(prod);
         }
     }
 }
@@ -392,28 +403,29 @@ float var_std_full(const T* src, size_t n) {
     return Std ? std::sqrt(v) : v;
 }
 
-template <typename T, bool Std>
-void var_std_kernel(const T* src_ptr, float* res_ptr, int outer_size, int inner_size, int axis_size) {
+template <typename T, typename R, bool Std>
+void var_std_kernel(const T* src_ptr, R* res_ptr, int outer_size, int inner_size, int axis_size) {
     const size_t n_outer = static_cast<size_t>(outer_size);
     const size_t n_inner = static_cast<size_t>(inner_size);
     const size_t n_axis  = static_cast<size_t>(axis_size);
-    const float inv = 1.0f / static_cast<float>(n_axis);
+    using Acc = std::conditional_t<std::is_same_v<R, float64>, double, float>;
+    const Acc inv = Acc{1} / static_cast<Acc>(n_axis);
     const size_t total = n_outer * n_inner;
     #pragma omp parallel for schedule(static)
     for (size_t task = 0; task < total; ++task) {
         const size_t outer = task / n_inner;
         const size_t inner = task % n_inner;
         const T* p = src_ptr + outer * n_axis * n_inner + inner;
-        float sum = 0.0f;
-        for (size_t k = 0; k < n_axis; ++k) sum += static_cast<float>(p[k * n_inner]);
-        const float mean = sum * inv;
-        float ss = 0.0f;
+        Acc sum = 0;
+        for (size_t k = 0; k < n_axis; ++k) sum += static_cast<Acc>(p[k * n_inner]);
+        const Acc mean = sum * inv;
+        Acc ss = 0;
         for (size_t k = 0; k < n_axis; ++k) {
-            const float d = static_cast<float>(p[k * n_inner]) - mean;
+            const Acc d = static_cast<Acc>(p[k * n_inner]) - mean;
             ss += d * d;
         }
-        const float v = ss * inv;
-        res_ptr[task] = Std ? std::sqrt(v) : v;
+        const Acc v = ss * inv;
+        res_ptr[task] = static_cast<R>(Std ? std::sqrt(v) : v);
     }
 }
 
@@ -434,29 +446,30 @@ float norm_full(const T* src, size_t n, float p) {
     return acc;
 }
 
-template <typename T>
-void norm_kernel(const T* src_ptr, float* res_ptr, int outer_size, int inner_size, int axis_size, float p) {
+template <typename T, typename R>
+void norm_kernel(const T* src_ptr, R* res_ptr, int outer_size, int inner_size, int axis_size, float p) {
     const size_t n_outer = static_cast<size_t>(outer_size);
     const size_t n_inner = static_cast<size_t>(inner_size);
     const size_t n_axis  = static_cast<size_t>(axis_size);
     const bool l1 = (p == 1.0f);
+    using Acc = std::conditional_t<std::is_same_v<R, float64>, double, float>;
     const size_t total = n_outer * n_inner;
     #pragma omp parallel for schedule(static)
     for (size_t task = 0; task < total; ++task) {
         const size_t outer = task / n_inner;
         const size_t inner = task % n_inner;
         const T* q = src_ptr + outer * n_axis * n_inner + inner;
-        float acc = 0.0f;
+        Acc acc = 0;
         if (l1) {
-            for (size_t k = 0; k < n_axis; ++k) acc += std::abs(static_cast<float>(q[k * n_inner]));
+            for (size_t k = 0; k < n_axis; ++k) acc += std::abs(static_cast<Acc>(q[k * n_inner]));
         } else {
             for (size_t k = 0; k < n_axis; ++k) {
-                const float v = static_cast<float>(q[k * n_inner]);
+                const Acc v = static_cast<Acc>(q[k * n_inner]);
                 acc += v * v;
             }
             acc = std::sqrt(acc);
         }
-        res_ptr[task] = acc;
+        res_ptr[task] = static_cast<R>(acc);
     }
 }
 
@@ -593,12 +606,16 @@ Tensor SumImpl<Device::CPU>::execute(const Tensor& a, int axis) {
     for(int i = axis+1; i < dim; ++i) inner_size *= a_shape[i];
 
 
-    Tensor result(new_shape, a.dtype(), Device::CPU);
+    Tensor result(new_shape, reduction_type(a.dtype()), Device::CPU);
+    const DataType out_type = result.dtype();
     dispatch_dtype(a.dtype(), [&](auto type_id) {
         using T = typename decltype(type_id)::type;
         const T* a_ptr = static_cast<const T*>(a.data());
-        T* res_ptr = static_cast<T*>(result.data());
-        sum_kernel<T>(a_ptr,res_ptr,outer_size, inner_size, axis_size);
+        dispatch_dtype(out_type, [&](auto rid) {
+            using R = typename decltype(rid)::type;
+            sum_kernel<T, R>(a_ptr, static_cast<R*>(result.data()),
+                             outer_size, inner_size, axis_size);
+        });
     });
     return result;
 }
@@ -667,12 +684,16 @@ Tensor MeanImpl<Device::CPU>::execute(const Tensor& a, int axis) {
     size_t inner_size = 1;
     for(int i = axis+1; i < dim; ++i) inner_size *= a_shape[i];
 
-    Tensor result(new_shape, DataType::FLOAT32, Device::CPU);
+    Tensor result(new_shape, float_reduction_type(a.dtype()), Device::CPU);
+    const DataType out_type = result.dtype();
     dispatch_dtype(a.dtype(), [&](auto type_id) {
         using T = typename decltype(type_id)::type;
         const T* a_ptr = static_cast<const T*>(a.data());
-        float* res_ptr = static_cast<float*>(result.data());
-        mean_kernel<T>(a_ptr,res_ptr,outer_size, inner_size, axis_size);
+        dispatch_dtype(out_type, [&](auto rid) {
+            using R = typename decltype(rid)::type;
+            mean_kernel<T, R>(a_ptr, static_cast<R*>(result.data()),
+                              outer_size, inner_size, axis_size);
+        });
     });
     return result;
 }
@@ -768,11 +789,16 @@ Tensor ProdImpl<Device::CPU>::execute(const Tensor& a, int axis) {
     size_t axis_size = a_shape[axis];
     size_t inner_size = 1;
     for (int i = axis + 1; i < dim; ++i) inner_size *= a_shape[i];
-    Tensor result(new_shape, a.dtype(), Device::CPU);
+    Tensor result(new_shape, reduction_type(a.dtype()), Device::CPU);
+    const DataType out_type = result.dtype();
     dispatch_dtype(a.dtype(), [&](auto type_id) {
         using T = typename decltype(type_id)::type;
-        prod_kernel<T>(static_cast<const T*>(a.data()), static_cast<T*>(result.data()),
-                       outer_size, inner_size, axis_size);
+        const T* a_ptr = static_cast<const T*>(a.data());
+        dispatch_dtype(out_type, [&](auto rid) {
+            using R = typename decltype(rid)::type;
+            prod_kernel<T, R>(a_ptr, static_cast<R*>(result.data()),
+                              outer_size, inner_size, axis_size);
+        });
     });
     return result;
 }
@@ -797,11 +823,16 @@ Tensor VarImpl<Device::CPU>::execute(const Tensor& a, int axis) {
     size_t axis_size = a_shape[axis];
     size_t inner_size = 1;
     for (int i = axis + 1; i < dim; ++i) inner_size *= a_shape[i];
-    Tensor result(new_shape, DataType::FLOAT32, Device::CPU);
+    Tensor result(new_shape, float_reduction_type(a.dtype()), Device::CPU);
+    const DataType out_type = result.dtype();
     dispatch_dtype(a.dtype(), [&](auto type_id) {
         using T = typename decltype(type_id)::type;
-        var_std_kernel<T, false>(static_cast<const T*>(a.data()), static_cast<float*>(result.data()),
-                                 outer_size, inner_size, axis_size);
+        dispatch_dtype(out_type, [&](auto rid) {
+            using R = typename decltype(rid)::type;
+            var_std_kernel<T, R, false>(static_cast<const T*>(a.data()),
+                                        static_cast<R*>(result.data()),
+                                        outer_size, inner_size, axis_size);
+        });
     });
     return result;
 }
@@ -826,11 +857,16 @@ Tensor StdImpl<Device::CPU>::execute(const Tensor& a, int axis) {
     size_t axis_size = a_shape[axis];
     size_t inner_size = 1;
     for (int i = axis + 1; i < dim; ++i) inner_size *= a_shape[i];
-    Tensor result(new_shape, DataType::FLOAT32, Device::CPU);
+    Tensor result(new_shape, float_reduction_type(a.dtype()), Device::CPU);
+    const DataType out_type = result.dtype();
     dispatch_dtype(a.dtype(), [&](auto type_id) {
         using T = typename decltype(type_id)::type;
-        var_std_kernel<T, true>(static_cast<const T*>(a.data()), static_cast<float*>(result.data()),
-                                outer_size, inner_size, axis_size);
+        dispatch_dtype(out_type, [&](auto rid) {
+            using R = typename decltype(rid)::type;
+            var_std_kernel<T, R, true>(static_cast<const T*>(a.data()),
+                                       static_cast<R*>(result.data()),
+                                       outer_size, inner_size, axis_size);
+        });
     });
     return result;
 }
@@ -855,11 +891,15 @@ Tensor NormImpl<Device::CPU>::execute(const Tensor& a, float p, int axis) {
     size_t axis_size = a_shape[axis];
     size_t inner_size = 1;
     for (int i = axis + 1; i < dim; ++i) inner_size *= a_shape[i];
-    Tensor result(new_shape, DataType::FLOAT32, Device::CPU);
+    Tensor result(new_shape, float_reduction_type(a.dtype()), Device::CPU);
+    const DataType out_type = result.dtype();
     dispatch_dtype(a.dtype(), [&](auto type_id) {
         using T = typename decltype(type_id)::type;
-        norm_kernel<T>(static_cast<const T*>(a.data()), static_cast<float*>(result.data()),
-                       outer_size, inner_size, axis_size, p);
+        dispatch_dtype(out_type, [&](auto rid) {
+            using R = typename decltype(rid)::type;
+            norm_kernel<T, R>(static_cast<const T*>(a.data()), static_cast<R*>(result.data()),
+                              outer_size, inner_size, axis_size, p);
+        });
     });
     return result;
 }

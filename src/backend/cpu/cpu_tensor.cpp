@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -14,17 +15,15 @@
 
 namespace {
 
-// 64-byte alignment: covers AVX-512 (64B) and AVX2 (32B) for aligned loads.
+// 64 字节对齐：可覆盖 AVX-512（64B）与 AVX2（32B）的对齐加载。
 constexpr size_t kCpuBufferAlignment = 64;
 
-// Per-thread pool: each OpenMP thread gets its own unsynchronized pool, so
-// there's zero mutex contention on the hot path. Correctness:
-//  - Each thread allocates/frees into its own pool → no race.
-//  - If a tensor is allocated in thread A and freed in thread B, B's pool
-//    absorbs it (PMR pool treats any same-size block as interchangeable).
-//    That can grow B's high-water mark slightly in producer/consumer pipelines,
-//    but typical OpenMP parallel-for (each thread does balanced alloc+free
-//    inside its own iterations) hits the fast path 100%.
+// 每线程一个池：每个 OpenMP 线程拥有自己无同步的池，因此热点路径上零锁竞争。
+// 正确性：
+//  - 每个线程只在自己的池中分配/释放 → 无竞争。
+//  - 若张量在线程 A 分配、线程 B 释放，由 B 的池吸收（PMR pool 视同尺寸块为
+//    可互换）。这在生产者/消费者流水线中可能略微抬高 B 的高水位线，但典型的
+//    OpenMP parallel-for（每个线程在自己的迭代内配平分配+释放）100% 走快路径。
 std::pmr::unsynchronized_pool_resource& thread_pool() {
     thread_local std::pmr::unsynchronized_pool_resource pool;
     return pool;
@@ -135,14 +134,17 @@ std::shared_ptr<ContextImpl> CPUTensor::context() const {
 void CPUTensor::init(void* ptr, size_t numel, DataType dtype) {
     m_dtype = dtype;
     m_numel = numel;
-    size_t total_bytes = m_numel * calc_dtype_size(m_dtype);
-    void* raw_ptr = cpu_pool_allocate(total_bytes);
+    const size_t total_bytes = m_numel * calc_dtype_size(m_dtype);
+    // 空张量也要拥有有效分配：data() 绝不能为空，而且池需要一个非零 size class
+    // 来跟踪该块。
+    const size_t alloc_bytes = total_bytes == 0 ? 1 : total_bytes;
+    void* raw_ptr = cpu_pool_allocate(alloc_bytes);
     if (!raw_ptr) throw std::bad_alloc();
     if (ptr != nullptr) std::memcpy(raw_ptr, ptr, total_bytes);
-    // Reassign with the byte-count carried in the deleter so the pool knows
-    // which size-class freelist to return the block to.
+    // 重新赋值时把字节数放进 deleter，好让池知道该把块还给哪个 size class 的
+    // 空闲链表。
     m_data = std::unique_ptr<void, cpu_tensor_detail::PoolDeleter>(
-        raw_ptr, cpu_tensor_detail::PoolDeleter{total_bytes});
+        raw_ptr, cpu_tensor_detail::PoolDeleter{alloc_bytes});
 }
 
 CPUTensor::CPUTensor(std::shared_ptr<CPUContext> ctx, size_t numel, DataType dtype)
@@ -223,6 +225,8 @@ std::unique_ptr<TensorImpl> CPUTensor::clone_as_contiguous(const Metadata& meta)
 void CPUTensor::copy_to(std::shared_ptr<TensorImpl> dst) const {
     if (!dst->data()) throw std::runtime_error("Destination pointer is null");
     if (!m_data)       throw std::runtime_error("Source data is null");
-    size_t bytes = m_numel * calc_dtype_size(m_dtype);
+    // m_numel 是共享基础 buffer 的元素数；dst 可能是更小的视图。按源长度拷贝会
+    // 写越 dst 的分配区。
+    size_t bytes = std::min(m_numel, dst->numel()) * calc_dtype_size(m_dtype);
     std::memcpy(dst->data(), m_data.get(), bytes);
 }

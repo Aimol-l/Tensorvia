@@ -13,26 +13,33 @@
 
 namespace ops {
 
+// BOOL 输出会规范化：源 BOOL 字节（比如 2）选中真，写回为 1，绝不原样写字节。
+template <typename T>
+inline T normalized_bool(T v) {
+    if constexpr (std::is_same_v<T, uint8_t>) return v != 0 ? uint8_t{1} : uint8_t{0};
+    else return v;
+}
+
 // cond 判真规则：非零为真（与 NumPy where 一致，兼容任意 dtype 的 cond）
 template <typename C, typename T>
 void where_kernel(const C* cond, const T* a, const T* b, T* out, size_t n) {
     #pragma omp parallel for if (n > 4096)
     for (size_t i = 0; i < n; ++i)
-        out[i] = (cond[i] != C(0)) ? a[i] : b[i];
+        out[i] = normalized_bool((cond[i] != C(0)) ? a[i] : b[i]);
 }
 
 template <typename C, typename T>
 void where_kernel_scalar_b(const C* cond, const T* a, T b, T* out, size_t n) {
     #pragma omp parallel for if (n > 4096)
     for (size_t i = 0; i < n; ++i)
-        out[i] = (cond[i] != C(0)) ? a[i] : b;
+        out[i] = normalized_bool((cond[i] != C(0)) ? a[i] : b);
 }
 
 template <typename C, typename T>
 void where_kernel_scalar_a(const C* cond, T a, const T* b, T* out, size_t n) {
     #pragma omp parallel for if (n > 4096)
     for (size_t i = 0; i < n; ++i)
-        out[i] = (cond[i] != C(0)) ? a : b[i];
+        out[i] = normalized_bool((cond[i] != C(0)) ? a : b[i]);
 }
 
 // 3 路广播（cond/a/b → out）：flat 输出索引解码到坐标再累加偏移。
@@ -55,7 +62,7 @@ void where_broadcast(const C* c, std::span<const int64_t> sc,
             off_a += idx * size_t(sa[d]);
             off_b += idx * size_t(sb[d]);
         }
-        o[i] = (c[off_c] != C(0)) ? a[off_a] : b[off_b];
+        o[i] = normalized_bool((c[off_c] != C(0)) ? a[off_a] : b[off_b]);
     }
 }
 
@@ -111,7 +118,7 @@ Tensor WhereImpl<Device::CPU>::execute(const Tensor& cond, const Tensor& a, cons
 }
 
 Tensor WhereImpl<Device::CPU>::execute(const Tensor& cond, const Tensor& a, float b) {
-    const DataType res_type = compute_type(a.dtype(), DataType::FLOAT32);
+    const DataType res_type = scalar_promote_type(a.dtype());
     Tensor pa, lc, la;
     const Tensor* A = &a;
     if (a.dtype() != res_type) { pa = ops::Typecast(a, res_type); A = &pa; }
@@ -159,7 +166,7 @@ Tensor WhereImpl<Device::CPU>::execute(const Tensor& cond, const Tensor& a, floa
 }
 
 Tensor WhereImpl<Device::CPU>::execute(const Tensor& cond, float a, const Tensor& b) {
-    const DataType res_type = compute_type(DataType::FLOAT32, b.dtype());
+    const DataType res_type = scalar_promote_type(b.dtype());
     Tensor pb, lc, lb;
     const Tensor* B = &b;
     if (b.dtype() != res_type) { pb = ops::Typecast(b, res_type); B = &pb; }

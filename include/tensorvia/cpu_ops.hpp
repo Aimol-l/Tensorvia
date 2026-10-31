@@ -178,6 +178,15 @@ template <> struct GatherImpl<Device::CPU> {
     static Tensor execute(const Tensor& input, int dim, const Tensor& index);
 };
 
+template <Device D> struct SortImpl;
+template <Device D> struct TopkImpl;
+template <> struct SortImpl<Device::CPU> {
+    static SortResult execute(const Tensor& input, int dim, bool descending);
+};
+template <> struct TopkImpl<Device::CPU> {
+    static TopkResult execute(const Tensor& input, int64_t k, int dim, bool largest);
+};
+
 template <> struct ReluImpl<Device::CPU> {
     static void execute(Tensor& a);
     static Tensor execute(const Tensor& a);
@@ -549,10 +558,10 @@ void binary_op(const Tensor& a, const Tensor& b, Tensor& dst) {
     });
 }
 
-// ===== 逻辑比较：T,R -> INT8（支持 NumPy 广播）=====
+// ===== 逻辑比较：T,R -> BOOL（支持 NumPy 广播）=====
 // 输入类型不统一提升（kernel 内 PromotedType 比较，保留混合 dtype 零拷贝），
-// 结果固定 INT8 表示布尔。
-// Op 需提供: template <class T, class R> static void kernel(int8_t* out, const T* a, const R* b, size_t n);
+// 结果固定 BOOL 表示布尔（1-byte，规范化为 0/1）。
+// Op 需提供: template <class T, class R> static void kernel(uint8_t* out, const T* a, const R* b, size_t n);
 template <class Op>
 Tensor logical_op(const Tensor& a, const Tensor& b) {
     Tensor lin_a, lin_b;
@@ -565,8 +574,8 @@ Tensor logical_op(const Tensor& a, const Tensor& b) {
     } else if (!broadcast_shapes(A->shape(), B->shape(), out_shape)) {
         throw std::runtime_error("logical op: shapes are not broadcastable");
     }
-    Tensor result(std::span<const int64_t>(out_shape), DataType::INT8, Device::CPU);
-    int8_t* out_ptr = static_cast<int8_t*>(result.data());
+    Tensor result(std::span<const int64_t>(out_shape), DataType::BOOL, Device::CPU);
+    uint8_t* out_ptr = static_cast<uint8_t*>(result.data());
 
     auto va = data_as_const_variant(A->dtype(), A->data());
     auto vb = data_as_const_variant(B->dtype(), B->data());
@@ -581,7 +590,7 @@ Tensor logical_op(const Tensor& a, const Tensor& b) {
             broadcast_drive(pa, std::span<const int64_t>(sa), pb,
                             std::span<const int64_t>(sb), out_ptr,
                             std::span<const int64_t>(out_shape),
-                [](const TA* x, const TB* y, int8_t* o, size_t n) {
+                [](const TA* x, const TB* y, uint8_t* o, size_t n) {
                     Op::template kernel<TA, TB>(o, x, y, n);
                 });
         }
@@ -595,8 +604,8 @@ template <class Op>
 Tensor logical_op_scalar(const Tensor& a, float val) {
     Tensor storage;
     const Tensor* A = &linearize(a, storage);
-    Tensor result(A->shape(), DataType::INT8, Device::CPU);
-    int8_t* out_ptr = static_cast<int8_t*>(result.data());
+    Tensor result(A->shape(), DataType::BOOL, Device::CPU);
+    uint8_t* out_ptr = static_cast<uint8_t*>(result.data());
     auto va = data_as_const_variant(A->dtype(), A->data());
     std::visit([&](auto pa) {
         using TA = std::remove_cv_t<std::remove_pointer_t<decltype(pa)>>;

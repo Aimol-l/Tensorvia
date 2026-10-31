@@ -23,15 +23,14 @@ namespace {
 struct Registry {
     std::mutex                                     mtx;
     std::condition_variable                        cv;
-    // Keyed by (kind, index): one entry per device instance.
+    // 按 (kind, index) 作键：每个设备实例一条。
     std::unordered_map<DeviceId, TensorImplFactory, DeviceIdHash>  factories;
     std::unordered_map<DeviceId, DeviceControl, DeviceIdHash>      controls;
-    // Keyed by kind: an initializer builds one instance, whoever asks for it.
+    // 按 kind 作键：无论谁请求，初始化器只构建一个实例。
     std::unordered_map<Device, BackendInitializer> initializers;
     std::unordered_map<Device, BackendProbe>       probes;
-    // Instances whose initializer has already been invoked. Without this, a
-    // backend that declines an index without registering anything would make
-    // find_factory loop forever; with it, "tried and got nothing" is final.
+    // 已调用过初始化器的实例。没有它，某个拒绝某索引且什么也不注册的后端会让
+    // find_factory 死循环；有了它，“试过但没拿到”就是最终结论。
     std::unordered_set<DeviceId, DeviceIdHash>     attempted;
     std::unordered_set<DeviceId, DeviceIdHash>     in_flight;
     std::unordered_map<Device, DeviceProbe>        probe_cache;
@@ -43,9 +42,8 @@ Registry& registry() {
     return r;
 }
 
-// Returns the tensor factory for `device`, running the backend's lazy
-// initializer for that instance the first time it is asked for. Empty when the
-// backend is absent or the instance does not exist.
+// 返回 `device` 的张量工厂，首次请求时为该实例运行后端的惰性初始化器。后端缺席
+// 或该实例不存在时返回空。
 TensorImplFactory find_factory(DeviceId device) {
     auto& reg = registry();
     std::unique_lock<std::mutex> lock(reg.mtx);
@@ -57,13 +55,13 @@ TensorImplFactory find_factory(DeviceId device) {
             reg.cv.wait(lock);
             continue;
         }
-        // Initialized before, registered nothing: this instance does not exist.
+        // 之前初始化过却没注册任何东西：该实例不存在。
         if (reg.attempted.contains(device)) return {};
 
         auto init = reg.initializers.find(device.kind);
         if (init == reg.initializers.end()) return {};
 
-        // Copied, not moved: index 1 and index 2 still need to run it.
+        // 拷贝而非移动：索引 1 和索引 2 仍需要运行它。
         BackendInitializer fn = init->second;
         reg.attempted.insert(device);
         reg.in_flight.insert(device);
@@ -80,8 +78,8 @@ TensorImplFactory find_factory(DeviceId device) {
         reg.in_flight.erase(device);
         reg.cv.notify_all();
         if (failure) {
-            // Let the next call try again rather than latching a transient
-            // failure (a busy driver, say) as "this device does not exist".
+            // 让下一次调用重试，而不是把暂时性失败（比如驱动忙）固化成“该设备
+            // 不存在”。
             reg.attempted.erase(device);
             std::rethrow_exception(failure);
         }
@@ -143,17 +141,16 @@ DeviceProbe device_probe(Device device) {
         reg.probe_in_flight.erase(device);
         reg.cv.notify_all();
         if (failure) std::rethrow_exception(failure);
-        // A probe answers once: the device set does not change under us.
+        // 探测只答一次：设备集合不会在运行中变化。
         reg.probe_cache[device] = *result;
         return *result;
     }
 }
 
 namespace {
-// Thread-local, keyed by backend kind: two threads may be working on different
-// GPUs of the same backend without coordinating. An entry appears the first
-// time the index is asked for, and is then pinned to the probe's default so a
-// program that never calls set_device keeps one stable answer.
+// 线程私有，按后端种类作键：两个线程可以各自操作同一后端的不同 GPU 而无需协调。
+// 条目在首次询问该索引时出现，随后被钉在探测得到的默认值上，这样从不调用
+// set_device 的程序始终得到同一个稳定答案。
 thread_local std::unordered_map<Device, int> tls_current_device;
 }  // namespace
 
@@ -193,15 +190,14 @@ void register_device_control(DeviceId device, DeviceControl control) {
 std::vector<std::pair<DeviceId, DeviceControl>> live_device_controls() {
     auto& reg = registry();
     std::lock_guard<std::mutex> lock(reg.mtx);
-    // A backend registers its control from inside its lazy initializer, so the
-    // presence of an entry is exactly "this device instance is up".
+    // 后端在惰性初始化器内部注册自己的 control，所以某条目存在恰好意味着
+    // “该设备实例已启动”。
     return {reg.controls.begin(), reg.controls.end()};
 }
 
+// numel == 0 是空张量：后端仍会给出有效的（1 字节占位）分配，使 data() 永不为空，
+// 统一的析构/拷贝路径得以继续工作。
 std::shared_ptr<TensorImpl> create_tensor_impl(size_t numel, DataType dtype, DeviceId device) {
-    if (numel <= 0) {
-        throw std::invalid_argument("numel must be bigger than 0");
-    }
     auto factory = find_factory(device);
     if (!factory) {
         throw std::runtime_error(std::format(
@@ -213,9 +209,6 @@ std::shared_ptr<TensorImpl> create_tensor_impl(size_t numel, DataType dtype, Dev
 std::shared_ptr<TensorImpl> create_tensor_impl(void* ptr, size_t numel, DataType dtype, DeviceId device) {
     if (ptr == nullptr) {
         throw std::runtime_error("create_tensor_impl: ptr is null");
-    }
-    if (numel <= 0) {
-        throw std::invalid_argument("numel must be bigger than 0");
     }
     auto factory = find_factory(device);
     if (!factory) {

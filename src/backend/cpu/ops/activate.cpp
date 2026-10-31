@@ -245,7 +245,7 @@ void layer_norm_kernel(const T* src, const R* weight, const R* bias, R* dst,
         for (size_t o = 0; o < outer_size; ++o) {
             const float* xr = x + o * norm_size;
             float* yr = y + o * norm_size;
-            // mean
+            // 均值
             __m256 acc = _mm256_setzero_ps();
             size_t i = 0;
             for (; i + 8 <= norm_size; i += 8)
@@ -253,7 +253,7 @@ void layer_norm_kernel(const T* src, const R* weight, const R* bias, R* dst,
             float sum = hsum_ps(acc);
             for (; i < norm_size; ++i) sum += xr[i];
             const float mean = sum / static_cast<float>(norm_size);
-            // var = mean((x-mean)²)
+            // var = mean((x-mean)²)（方差）
             const __m256 vmean = _mm256_set1_ps(mean);
             __m256 vacc = _mm256_setzero_ps();
             for (i = 0; i + 8 <= norm_size; i += 8) {
@@ -314,7 +314,7 @@ void rms_norm_kernel(const T* src, const R* weight, R* dst,
         for (size_t o = 0; o < outer_size; ++o) {
             const float* xr = x + o * norm_size;
             float* yr = y + o * norm_size;
-            // ms = mean(x²)
+            // ms = mean(x²)（二阶矩）
             __m256 acc = _mm256_setzero_ps();
             size_t i = 0;
             for (; i + 8 <= norm_size; i += 8) {
@@ -364,7 +364,7 @@ struct SiluOp {
     template <class T, class R = T>
     static void kernel(const T* src, R* dst, size_t n) { silu_kernel<T, R>(src, dst, n); }
     static DataType result_type(DataType in) {
-        return in <= DataType::INT64 ? DataType::FLOAT32 : in;
+        return is_integral_dtype(in) ? DataType::FLOAT32 : in;
     }
     static constexpr bool identity_result = false;
 };
@@ -372,7 +372,7 @@ struct TanhOp {
     template <class T, class R = T>
     static void kernel(const T* src, R* dst, size_t n) { tanh_kernel<T, R>(src, dst, n); }
     static DataType result_type(DataType in) {
-        return in <= DataType::INT64 ? DataType::FLOAT32 : in;
+        return is_integral_dtype(in) ? DataType::FLOAT32 : in;
     }
     static constexpr bool identity_result = false;
 };
@@ -380,7 +380,7 @@ struct SigmoidOp {
     template <class T, class R = T>
     static void kernel(const T* src, R* dst, size_t n) { sigmoid_kernel<T, R>(src, dst, n); }
     static DataType result_type(DataType in) {
-        return in <= DataType::INT64 ? DataType::FLOAT32 : in;
+        return is_integral_dtype(in) ? DataType::FLOAT32 : in;
     }
     static constexpr bool identity_result = false;
 };
@@ -405,7 +405,7 @@ Tensor SoftmaxImpl<Device::CPU>::execute(const Tensor& a, int axis) {
     for (int i = axis + 1; i < dim; ++i)
         inner_size *= a.shape(i);
     DataType res_type = a.dtype();
-    if (a.dtype() <= DataType::INT64)
+    if (is_integral_dtype(a.dtype()))
         res_type = DataType::FLOAT32;
     Tensor res(a.shape(), res_type, a.device());
     dispatch_dtype(a.dtype(), [&](auto type_id) {
@@ -428,7 +428,7 @@ Tensor LogSoftmaxImpl<Device::CPU>::execute(const Tensor& a, int axis) {
     for (int i = axis + 1; i < dim; ++i)
         inner_size *= a.shape(i);
     DataType res_type = a.dtype();
-    if (a.dtype() <= DataType::INT64)
+    if (is_integral_dtype(a.dtype()))
         res_type = DataType::FLOAT32;
     Tensor res(a.shape(), res_type, a.device());
     dispatch_dtype(a.dtype(), [&](auto type_id) {
@@ -449,7 +449,7 @@ Tensor LayerNormImpl<Device::CPU>::execute(const Tensor& a, const Tensor& weight
     for (int i = axis; i < dim; ++i) norm_size *= a_shape[i];
 
     DataType res_type = a.dtype();
-    if (a.dtype() <= DataType::INT64) res_type = DataType::FLOAT32;
+    if (is_integral_dtype(a.dtype())) res_type = DataType::FLOAT32;
     Tensor res(a.shape(), res_type, Device::CPU);
     dispatch_dtype(a.dtype(), [&](auto type_id) {
         using T = typename decltype(type_id)::type;
@@ -471,7 +471,7 @@ Tensor RmsNormImpl<Device::CPU>::execute(const Tensor& a, const Tensor& weight, 
     for (int i = axis; i < dim; ++i) norm_size *= a_shape[i];
 
     DataType res_type = a.dtype();
-    if (a.dtype() <= DataType::INT64) res_type = DataType::FLOAT32;
+    if (is_integral_dtype(a.dtype())) res_type = DataType::FLOAT32;
     Tensor res(a.shape(), res_type, Device::CPU);
     dispatch_dtype(a.dtype(), [&](auto type_id) {
         using T = typename decltype(type_id)::type;

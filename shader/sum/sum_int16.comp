@@ -16,7 +16,7 @@ layout(std430, binding = 0) buffer InputA {
 }src;
 
 layout(std430, binding = 1) buffer OutputB {
-    int data[];
+    int64_t data[];
 }dst;
 
 shared int sharedMem[256];
@@ -26,12 +26,12 @@ void main() {
     uint idx = gl_GlobalInvocationID.x;
     uint block_size = gl_WorkGroupSize.x;
     uint group_size = gl_NumWorkGroups.x * block_size;
-    // grid stride
+    // 网格跨步
     int sum = 0;
     for (uint s = idx; s < params.numel; s += group_size) {
         sum += src.data[s];
     }
-    // block stride
+    // 块跨步
     sharedMem[tid] = sum;
     barrier();
     for (uint stride = block_size / 2; stride > 32; stride >>= 1) {

@@ -264,7 +264,7 @@ struct SinOp {
     template <class T, class R = T>
     static void kernel(const T* src, R* dst, size_t n) { sin_kernel<T, R>(src, dst, n); }
     static DataType result_type(DataType in) {
-        return in <= DataType::INT64 ? DataType::FLOAT32 : in;
+        return is_integral_dtype(in) ? DataType::FLOAT32 : in;
     }
     static constexpr bool identity_result = false;
 };
@@ -272,7 +272,7 @@ struct CosOp {
     template <class T, class R = T>
     static void kernel(const T* src, R* dst, size_t n) { cos_kernel<T, R>(src, dst, n); }
     static DataType result_type(DataType in) {
-        return in <= DataType::INT64 ? DataType::FLOAT32 : in;
+        return is_integral_dtype(in) ? DataType::FLOAT32 : in;
     }
     static constexpr bool identity_result = false;
 };
@@ -280,7 +280,7 @@ struct TanOp {
     template <class T, class R = T>
     static void kernel(const T* src, R* dst, size_t n) { tan_kernel<T, R>(src, dst, n); }
     static DataType result_type(DataType in) {
-        return in <= DataType::INT64 ? DataType::FLOAT32 : in;
+        return is_integral_dtype(in) ? DataType::FLOAT32 : in;
     }
     static constexpr bool identity_result = false;
 };
@@ -288,7 +288,7 @@ struct ExpOp {
     template <class T, class R = T>
     static void kernel(const T* src, R* dst, size_t n) { exp_kernel<T, R>(src, dst, n); }
     static DataType result_type(DataType in) {
-        return in <= DataType::INT64 ? DataType::FLOAT32 : in;
+        return is_integral_dtype(in) ? DataType::FLOAT32 : in;
     }
     static constexpr bool identity_result = false;
 };
@@ -296,7 +296,7 @@ struct SqrtOp {
     template <class T, class R = T>
     static void kernel(const T* src, R* dst, size_t n) { sqrt_kernel<T, R>(src, dst, n); }
     static DataType result_type(DataType in) {
-        return in <= DataType::INT64 ? DataType::FLOAT32 : in;
+        return is_integral_dtype(in) ? DataType::FLOAT32 : in;
     }
     static constexpr bool identity_result = false;
 };
@@ -304,7 +304,7 @@ struct ErfOp {
     template <class T, class R = T>
     static void kernel(const T* src, R* dst, size_t n) { erf_kernel<T, R>(src, dst, n); }
     static DataType result_type(DataType in) {
-        return in <= DataType::INT64 ? DataType::FLOAT32 : in;
+        return is_integral_dtype(in) ? DataType::FLOAT32 : in;
     }
     static constexpr bool identity_result = false;
 };
@@ -312,7 +312,7 @@ struct PowOp {
     template <class T, class R = T>
     static void kernel(const T* src, R* dst, size_t n, float val) { pow_kernel<T, R>(src, dst, n, val); }
     static DataType result_type(DataType in) {
-        return in <= DataType::INT64 ? DataType::FLOAT32 : in;
+        return is_integral_dtype(in) ? DataType::FLOAT32 : in;
     }
     static constexpr bool identity_result = false;
 };
@@ -320,7 +320,7 @@ struct LogOp {
     template <class T, class R = T>
     static void kernel(const T* src, R* dst, size_t n, float val) { log_kernel<T, R>(src, dst, n, val); }
     static DataType result_type(DataType in) {
-        return in <= DataType::INT64 ? DataType::FLOAT32 : in;
+        return is_integral_dtype(in) ? DataType::FLOAT32 : in;
     }
     static constexpr bool identity_result = false;
 };

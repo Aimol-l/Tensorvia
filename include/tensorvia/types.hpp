@@ -46,8 +46,7 @@ using float64 = double;
 #endif
 
 // 张量维度数硬上限：超过属于极端场景，直接拒绝（错误信息明确）。
-// `inline` gives the constant external linkage, which the header-first facade
-// needs in order to re-export it with `export using`.
+// `inline` 给常量外部链接，头文件式 facade 需要用 `export using` 重新导出它。
 inline constexpr size_t kMaxTensorDims = 8;
 
 // 内联固定容量的维度数组：栈上直接容纳 8 维，消除每个 Tensor 的
@@ -170,8 +169,12 @@ struct DeviceIdHash {
     }
 };
 
+// BOOL 是一等 dtype：每元素 1 字节（uint8_t），值规范化为 0/1，绝不做 bit-packing。
+// 它的枚举值排在有符号整数之前，让包含它的序号比较继续成立；但类型提升与算术
+// 门禁一律用下面的类别判定函数，不看序号。
 enum class DataType {
-    INT8 = 0,
+    BOOL = 0,
+    INT8,
     INT16,
     INT32,
     INT64,
@@ -179,6 +182,58 @@ enum class DataType {
     FLOAT16,
     FLOAT32,
     FLOAT64
+};
+
+constexpr bool is_bool_dtype(DataType t) { return t == DataType::BOOL; }
+
+// 只包含有符号整型（BOOL 由契约单独处理）。
+constexpr bool is_integer_dtype(DataType t) {
+    return t == DataType::INT8 || t == DataType::INT16 ||
+           t == DataType::INT32 || t == DataType::INT64;
+}
+
+constexpr bool is_floating_dtype(DataType t) {
+    return t == DataType::BFLOAT16 || t == DataType::FLOAT16 ||
+           t == DataType::FLOAT32 || t == DataType::FLOAT64;
+}
+
+// BOOL 加有符号整型：NumPy 眼中的 integral 类型。
+constexpr bool is_integral_dtype(DataType t) {
+    return is_bool_dtype(t) || is_integer_dtype(t);
+}
+
+// 库级默认浮点 dtype。与 current device 一样是线程私有的：一个线程修改它不能影响
+// 其它线程的工厂。存储槽定义在 src/core/dtype.cpp（facade 生成器把公共头里开出的
+// 每个命名空间都视为粘性的，所以这里不引入辅助命名空间）。
+DataType default_dtype();
+void set_default_dtype(DataType dtype);
+
+// 调用方未指定设备时新张量落到的设备。与上面的默认值一样按线程私有；初值为 CPU:0。
+// 只带 dtype 的工厂经它解析，`TensorOptions{}` 也从它起步。
+DeviceId default_device();
+void set_default_device(DeviceId id);
+
+// 工厂描述“造什么”的载体：shape 单独传，其余全在这里（FR-7）。
+// `device_index == -1` 表示 `device` 后端上调用线程的 current device——
+// 裸 `Device` 本来就是这层意思。
+struct TensorOptions {
+    // 默认构造的 options 携带进程默认值（FR-7）：dtype 取 default_dtype()，
+    // 实例取 default_device()。只给 `Device` 不给索引时沿用“线程 current device”规则。
+    DataType dtype = default_dtype();
+    Device   device = default_device().kind;
+    int      device_index = default_device().index;
+
+    TensorOptions() = default;
+    explicit TensorOptions(DataType dt) : dtype(dt) {}
+    explicit TensorOptions(Device dev, int index = -1) : device(dev), device_index(index) {}
+    TensorOptions(DataType dt, Device dev, int index = -1)
+        : dtype(dt), device(dev), device_index(index) {}
+
+    TensorOptions& with_dtype(DataType dt) { dtype = dt; return *this; }
+    TensorOptions& with_device(Device dev, int index = -1) { device = dev; device_index = index; return *this; }
+    TensorOptions& with_device(DeviceId id) { device = id.kind; device_index = id.index; return *this; }
+
+    DeviceId resolved_id() const;  // device_index < 0 时取 `device` 的 current device
 };
 
 inline const char* op_to_string(OpType op) {
@@ -246,14 +301,14 @@ constexpr std::string_view device_to_string(Device d) {
     }
 }
 
-// "CUDA:0" — used in every cross-device error message, so a mismatch names the
-// index rather than just the backend.
+// "CUDA:0" —— 所有跨设备错误信息都用它，因此不匹配时能点名实例而不只是后端。
 inline std::string device_id_to_string(const DeviceId& id) {
     return std::format("{}:{}", device_to_string(id.kind), id.index);
 }
 
 constexpr std::string_view dtype_to_string(DataType t) {
     switch (t) {
+        case DataType::BOOL:     return "bool";
         case DataType::INT8:     return "int8";
         case DataType::INT16:    return "int16";
         case DataType::INT32:    return "int32";
@@ -270,13 +325,13 @@ inline std::string make_pipeline_key(OpType op, DataType dt) {
     return std::format("{}_{}", op_to_string(op), dtype_to_string(dt));
 }
 
-// Accumulator / output dtype for full reductions. The Vulkan shaders promote
-// block-local sums like this; the CPU side promotes inline in the kernels.
-//   int8/int16 -> int32, int32/int64 -> int64, f16/bf16 -> float32.
+// Sum/Prod 的累加/输出 dtype（PyTorch 的 reduction_type）：整型一律按 int64 累加；
+// f16/bf16 提升到 float32；宽浮点保持自身 dtype。
 constexpr DataType reduction_type(DataType dtype) {
     switch (dtype) {
+        case DataType::BOOL:
         case DataType::INT8:
-        case DataType::INT16:    return DataType::INT32;
+        case DataType::INT16:
         case DataType::INT32:
         case DataType::INT64:    return DataType::INT64;
         case DataType::BFLOAT16:
@@ -287,10 +342,11 @@ constexpr DataType reduction_type(DataType dtype) {
     }
 }
 
-// Output dtype for Mean: NumPy semantics, so integer inputs become FLOAT32 and
-// only FLOAT64 stays FLOAT64.
+// Mean 的输出 dtype：NumPy 语义——整型输入变成 FLOAT32，只有 FLOAT64 保持 FLOAT64。
+// BOOL 没有 Mean（契约在到达这个函数之前就拒绝了）。
 constexpr DataType float_reduction_type(DataType dtype) {
     switch (dtype) {
+        case DataType::BOOL:
         case DataType::INT8:
         case DataType::INT16:
         case DataType::INT32:
@@ -305,6 +361,7 @@ constexpr DataType float_reduction_type(DataType dtype) {
 
 inline size_t calc_dtype_size(DataType dtype) {
     switch (dtype) {
+        case DataType::BOOL:     return 1;
         case DataType::INT8:     return 1;
         case DataType::INT16:    return 2;
         case DataType::INT32:    return 4;
@@ -318,10 +375,11 @@ inline size_t calc_dtype_size(DataType dtype) {
 }
 
 using CppDTypeVariant = std::variant<
-    int8_t*, int16_t*, int32_t*, int64_t*,
+    uint8_t*, int8_t*, int16_t*, int32_t*, int64_t*,
     float16*, bfloat16*, float*, double*
 >;
 using ConstCppDTypeVariant = std::variant<
+    const uint8_t*,
     const int8_t*,
     const int16_t*,
     const int32_t*,
@@ -341,6 +399,7 @@ ConstCppDTypeVariant make_variant(const void* src) {
 
 inline ConstCppDTypeVariant data_as_const_variant(DataType type, const void* src) {
     switch (type) {
+        case DataType::BOOL:     return make_variant<uint8_t>(src);
         case DataType::INT8:     return make_variant<int8_t>(src);
         case DataType::INT16:    return make_variant<int16_t>(src);
         case DataType::INT32:    return make_variant<int32_t>(src);
@@ -356,6 +415,7 @@ inline ConstCppDTypeVariant data_as_const_variant(DataType type, const void* src
 template <typename Func>
 void dispatch_dtype(DataType type, Func&& f) {
     switch (type) {
+        case DataType::BOOL:     f(std::type_identity<uint8_t>{}); break;
         case DataType::INT8:     f(std::type_identity<int8_t>{}); break;
         case DataType::INT16:    f(std::type_identity<int16_t>{}); break;
         case DataType::INT32:    f(std::type_identity<int32_t>{}); break;
@@ -369,54 +429,61 @@ void dispatch_dtype(DataType type, Func&& f) {
 }
 
 inline const std::set<std::pair<DataType, DataType>>& valid_casts() {
-    static const std::set<std::pair<DataType, DataType>> casts = {
-        {DataType::INT8,     DataType::FLOAT32},
-        {DataType::INT16,    DataType::FLOAT32},
-        {DataType::INT16,    DataType::FLOAT64},
-        {DataType::INT32,    DataType::FLOAT32},
-        {DataType::INT32,    DataType::FLOAT64},
-        {DataType::INT64,    DataType::FLOAT64},
-        {DataType::FLOAT32,  DataType::FLOAT16},
-        {DataType::FLOAT32,  DataType::INT32},
-        {DataType::FLOAT32,  DataType::INT64},
-        {DataType::INT8,     DataType::INT16},
-        {DataType::INT8,     DataType::INT32},
-        {DataType::INT8,     DataType::INT64},
-        {DataType::INT16,    DataType::INT32},
-        {DataType::INT32,    DataType::INT64},
-        {DataType::FLOAT16,  DataType::FLOAT32},
-        {DataType::FLOAT16,  DataType::FLOAT64},
-        {DataType::FLOAT16,  DataType::BFLOAT16},
-        {DataType::BFLOAT16, DataType::FLOAT32},
-        {DataType::BFLOAT16, DataType::FLOAT64},
-        {DataType::BFLOAT16, DataType::FLOAT16},
-        {DataType::FLOAT32,  DataType::FLOAT64},
-        {DataType::FLOAT64,  DataType::FLOAT32},
-    };
+    // PyTorch 的 `.to(dtype)` 接受任意 dtype 对，包括 BOOL <-> 数值。
+    // 仍以这个集合为唯一事实来源，保持公开助手的接口形状，但改为穷举生成而不是
+    // 手工罗列。
+    static const std::set<std::pair<DataType, DataType>> casts = [] {
+        constexpr DataType all[] = {
+            DataType::BOOL,     DataType::INT8,     DataType::INT16,
+            DataType::INT32,    DataType::INT64,    DataType::BFLOAT16,
+            DataType::FLOAT16,  DataType::FLOAT32,  DataType::FLOAT64};
+        std::set<std::pair<DataType, DataType>> out;
+        for (DataType a : all)
+            for (DataType b : all) out.emplace(a, b);
+        return out;
+    }();
     return casts;
 }
 
+// PyTorch 类型提升规则：
+//   * BOOL 与任何 dtype 相遇都是对方（bool + bool 仍是 bool）；
+//   * 整型 + 整型 -> 更宽的整型；
+//   * 浮点 + 浮点 -> 更宽的浮点，但 bfloat16 + float16 -> float32；
+//   * 整型 + 浮点 -> 浮点 dtype。
 inline DataType compute_type(DataType type0, DataType type1) {
     if (type0 == type1) return type0;
-    if (type0 <= DataType::INT64 && type1 <= DataType::INT64) {
-        return std::max(type0, type1);
-    } else if (type0 > DataType::INT64 && type1 > DataType::INT64) {
-        return std::max(std::max(type0, DataType::FLOAT32), std::max(type1, DataType::FLOAT32));
-    } else {
-        if (type0 == DataType::INT64 || type1 == DataType::INT64) return DataType::FLOAT64;
-        return std::max(std::max(type0, DataType::FLOAT32), std::max(type1, DataType::FLOAT32));
+    if (is_bool_dtype(type0)) return type1;
+    if (is_bool_dtype(type1)) return type0;
+
+    const bool f0 = is_floating_dtype(type0);
+    const bool f1 = is_floating_dtype(type1);
+    if (f0 && f1) {
+        const bool low0 = type0 == DataType::BFLOAT16 || type0 == DataType::FLOAT16;
+        const bool low1 = type1 == DataType::BFLOAT16 || type1 == DataType::FLOAT16;
+        if (low0 && low1) return DataType::FLOAT32;
+        return type0 > type1 ? type0 : type1;
     }
+    if (f0) return type0;
+    if (f1) return type1;
+    return type0 > type1 ? type0 : type1;
+}
+
+// 张量与“类 Python float 标量”运算的结果 dtype。PyTorch 把这种标量视为弱类型数值：
+// 浮点张量保持自身 dtype，整型或 BOOL 张量则采用默认浮点 dtype。
+inline DataType scalar_promote_type(DataType tensor_dtype) {
+    return is_floating_dtype(tensor_dtype) ? tensor_dtype : default_dtype();
 }
 
 inline bool is_cast_valid(DataType src, DataType dst) {
-    return src == dst || valid_casts().contains({src, dst});
+    return valid_casts().contains({src, dst});
 }
 
+// 长度为 0 的维合法（空张量）；负数不合法的。
 inline size_t calc_numel(const std::vector<int64_t>& shape) {
     size_t numel = 1;
-    for (int dim : shape) {
-        if (dim <= 0) throw std::runtime_error("Invalid tensor dimension");
-        numel *= dim;
+    for (int64_t dim : shape) {
+        if (dim < 0) throw std::runtime_error("Invalid tensor dimension");
+        numel *= size_t(dim);
     }
     return numel;
 }
@@ -424,7 +491,7 @@ inline size_t calc_numel(const std::vector<int64_t>& shape) {
 inline size_t calc_numel(const DimArray& shape) {
     size_t numel = 1;
     for (int64_t dim : shape) {
-        if (dim <= 0) throw std::runtime_error("Invalid tensor dimension");
+        if (dim < 0) throw std::runtime_error("Invalid tensor dimension");
         numel *= size_t(dim);
     }
     return numel;
@@ -432,8 +499,8 @@ inline size_t calc_numel(const DimArray& shape) {
 
 inline size_t calc_numel(std::initializer_list<int64_t> shape) {
     size_t numel = 1;
-    for (int dim : shape) {
-        if (dim <= 0) throw std::runtime_error("Invalid tensor dimension");
+    for (int64_t dim : shape) {
+        if (dim < 0) throw std::runtime_error("Invalid tensor dimension");
         numel *= dim;
     }
     return numel;
