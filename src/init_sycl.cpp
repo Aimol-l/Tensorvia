@@ -8,8 +8,8 @@
 #include "sycl_island.h"
 
 namespace {
-// The queue and the USM allocator are only touched when the first
-// Device::SYCL tensor is requested; CPU-only programs never load libsycl.
+// 队列与 USM 分配器只有在请求第一个 Device::SYCL 张量时才会被触及；纯 CPU 程序
+// 从不加载 libsycl。
 struct SyclLazyRegistrar {
     SyclLazyRegistrar() {
         register_device_probe(Device::SYCL, [] {
@@ -21,6 +21,12 @@ struct SyclLazyRegistrar {
                                  [ctx](void* ptr, size_t numel, DataType dtype) {
                                      return std::make_shared<SYCLTensor>(ptr, numel, dtype, ctx);
                                  });
+            // 队列是 in-order 的：等它清空就是设备级同步。USM 由驱动直接管理，没有
+            // 缓存可清。SYCL 没有 per-thread 的流，所以这一条覆盖所有宿主线程。
+            register_device_control(DeviceId{Device::SYCL, index}, DeviceControl{
+                [ctx] { ctx->wait(); },
+                [] {},
+            });
         });
     }
 } sycl_lazy_registrar;

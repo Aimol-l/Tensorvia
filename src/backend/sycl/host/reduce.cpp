@@ -1,9 +1,9 @@
-// Global and per-axis sum/min/max/mean, argmax/argmin, all/any and the NonZero
-// count — the Device::SYCL host driver.
+// 全局与单轴的 sum/min/max/mean、argmax/argmin、all/any 以及 NonZero 计数
+// ——Device::SYCL 宿主驱动。
 //
-// The kernels index a flat row-major buffer, so a strided view is materialized
-// once here. Tensor::data() (not the impl's base pointer) is passed on, so a
-// contiguous view with a non-zero offset reads its own elements.
+// 内核索引扁平行主序 buffer，所以视图在这里一次性物化。传下去的是
+// Tensor::data()（而不是 impl 的基址指针），因此带非零 offset 的连续视图读取的是
+// 自己的元素。
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
@@ -61,14 +61,15 @@ AxisLayout axis_layout(const Tensor& a, int axis, const char* what) {
     for (int i = 0; i < dim; ++i) {
         if (i != axis) layout.shape.push_back(a.shape(i));
     }
-    // Dropping the only dimension of a 1D input leaves rank 0, which tensors do
-    // not support; {1} matches the CPU/Vulkan fallback.
+    // 单轴内核早于 rank-0 张量出现，把空的归约形状写作 {1}；核心层通过
+    // with_reduced_shape 把结果重塑为真正的 0-dim 张量，所以该回退永远不会到达
+    // 公开 API。
     if (layout.shape.empty()) layout.shape = {1};
     return layout;
 }
 
-// Global reductions fold into one FLOAT64 element on the device and are
-// narrowed to float on the host, which is the API's return type.
+// 全局归约在设备上折叠为一个 FLOAT64 元素，再在宿主收窄为 float——这正是 API
+// 的返回类型。
 double reduce_all_value(const Tensor& a, int op, const char* what) {
     const Tensor src = materialize(a);
     auto ctx = context_of(src, what);
@@ -81,7 +82,6 @@ double reduce_all_value(const Tensor& a, int op, const char* what) {
                           static_cast<int>(src.dtype()),
                           static_cast<int>(DataType::FLOAT64), op),
                       what);
-    ctx->wait();
 
     out.to_host();
     return static_cast<const double*>(out.data())[0];
@@ -99,7 +99,6 @@ Tensor axis_reduce(const Tensor& a, int axis, DataType out_type, int op, const c
                           static_cast<int>(src.dtype()), static_cast<int>(out_type),
                           op, &layout.params),
                       what);
-    ctx->wait();
     return out;
 }
 
@@ -115,15 +114,13 @@ Tensor arg_reduce(const Tensor& a, int axis, bool is_max, const char* what) {
                           static_cast<int>(src.dtype()), is_max ? 1 : 0,
                           &layout.params),
                       what);
-    ctx->wait();
     return out;
 }
 
 bool all_any_value(const Tensor& a, float value, bool is_all, const char* what) {
     const Tensor src = materialize(a);
     auto ctx = context_of(src, what);
-    // The kernel initializes this word itself (init launch, then atomics), so
-    // it does not need a host round-trip before the reduction.
+    // 内核自己初始化这个字（先 init 启动，再原子操作），所以归约前无需宿主往返。
     Tensor out({1}, DataType::INT32, Device::SYCL);
 
     ctx->activate();
@@ -133,7 +130,6 @@ bool all_any_value(const Tensor& a, float value, bool is_all, const char* what) 
                           static_cast<int>(src.dtype()), is_all ? 1 : 0,
                           static_cast<double>(value)),
                       what);
-    ctx->wait();
 
     out.to_host();
     return static_cast<const int32_t*>(out.data())[0] != 0;
@@ -146,8 +142,8 @@ float SumImpl<Device::SYCL>::execute(const Tensor& a) {
 }
 
 Tensor SumImpl<Device::SYCL>::execute(const Tensor& a, int axis) {
-    // Sum widens narrow integers and 16-bit floats to a real accumulator type;
-    // the Vulkan backend uses the same rule (the CPU one keeps the input dtype).
+    // Sum 把窄整型与 16 位浮点拓宽到真正的累加类型；所有后端遵循同一条
+    // reduction_type 规则。
     return axis_reduce(a, axis, reduction_type(a.dtype()), tvv::sycl::kReduceSum, "Sum");
 }
 
@@ -168,7 +164,7 @@ Tensor MaxImpl<Device::SYCL>::execute(const Tensor& a, int axis) {
 }
 
 float MeanImpl<Device::SYCL>::execute(const Tensor& a) {
-    // Divide in double: above 2^24 a float divisor is no longer exact.
+    // 用 double 做除法：超过 2^24 后 float 除数不再精确。
     const double sum = reduce_all_value(a, tvv::sycl::kReduceSum, "Mean");
     return static_cast<float>(sum / static_cast<double>(a.numel()));
 }
@@ -197,8 +193,8 @@ bool AnyImpl<Device::SYCL>::execute(const Tensor& a, float value) {
 size_t NonZeroImpl<Device::SYCL>::execute(const Tensor& a) {
     const Tensor src = materialize(a);
     auto ctx = context_of(src, "NonZero");
-    // The seam's atomic counter is a 32-bit word (OpenCL 1.2 has no 64-bit
-    // atomics); the host widens the count to size_t.
+    // 接缝的原子计数器是 32 位字（OpenCL 1.2 没有 64 位原子操作）；宿主再把计数
+    // 拓宽到 size_t。
     Tensor out({1}, DataType::INT32, Device::SYCL);
 
     ctx->activate();
@@ -207,7 +203,6 @@ size_t NonZeroImpl<Device::SYCL>::execute(const Tensor& a) {
                           static_cast<int64_t>(src.numel()),
                           static_cast<int>(src.dtype())),
                       "NonZero launch");
-    ctx->wait();
 
     out.to_host();
     return static_cast<size_t>(static_cast<const int32_t*>(out.data())[0]);

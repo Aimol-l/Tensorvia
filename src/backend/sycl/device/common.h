@@ -1,9 +1,8 @@
-// Shared vocabulary for the SYCL device units.
+// SYCL 设备单元共享的词汇表。
 //
-// These units are compiled by the DPC++ compiler, not by the project's host
-// compiler, and they only ever see sycl_island.h. Nothing here allocates or
-// throws across the seam: the launch entry points catch device-side failures
-// and report the status code defined by the island header.
+// 这些单元由 DPC++ 编译器编译，而非项目的宿主编译器，它们只能看到
+// sycl_island.h。此处不会跨接缝分配内存或抛异常：启动入口捕获设备侧失败，并
+// 报告 island 头文件中定义的状态码。
 #ifndef TVV_SYCL_DEVICE_COMMON_H
 #define TVV_SYCL_DEVICE_COMMON_H
 
@@ -22,10 +21,9 @@ using tvv::sycl::kMaxDims;
 
 inline constexpr size_t kWorkGroup = 256;
 
-// The queue lives here so every unit can recover it from the opaque handle.
-// Index -1 means "whatever default_selector_v picks"; a non-negative index is a
-// position in sycl::device::get_devices(), which is the index space the
-// external device probe reports.
+// queue 放在这里，每个单元都能从那个不透明句柄取回它。索引 -1 表示“由
+// default_selector_v 决定”；非负索引是 sycl::device::get_devices() 中的位置，
+// 也就是外部设备探测所报告的那个索引空间。
 struct Context {
     ::sycl::queue queue;
     explicit Context(int device_index = -1)
@@ -47,8 +45,8 @@ inline ::sycl::queue& queue_of(void* ctx) {
 }
 
 // ---------------------------------------------------------------------------
-// Scalar vocabulary. sycl::half and oneAPI bfloat16 are storage types: every
-// arithmetic and reduction path widens them to float first.
+// 标量词汇表。sycl::half 与 oneAPI bfloat16 是存储类型：所有算术与归约路径都
+// 先把它们拓宽为 float。
 // ---------------------------------------------------------------------------
 
 template <class T>
@@ -70,8 +68,7 @@ using promoted_t = std::conditional_t<is_low_precision<T>::value, float, T>;
 template <class T>
 using unary_compute_t = std::conditional_t<std::is_integral_v<T>, double, promoted_t<T>>;
 
-// Narrow integers and 16-bit floats must not wrap or lose bits before the
-// result is written.
+// 窄整型与 16 位浮点在结果写出之前不得回绕或丢位。
 template <class T>
 using reduction_acc_t = std::conditional_t<
     std::is_integral_v<T>,
@@ -144,7 +141,7 @@ inline T inf_value() {
 }
 
 // ---------------------------------------------------------------------------
-// Numeric contract, mirrored from the CPU/CUDA backends.
+// 数值契约，镜像自 CPU/CUDA 后端。
 // ---------------------------------------------------------------------------
 
 namespace contract {
@@ -270,7 +267,7 @@ inline T div_contract(T x, T y) {
 }  // namespace contract
 
 // ---------------------------------------------------------------------------
-// dtype dispatch.
+// dtype 派发。
 // ---------------------------------------------------------------------------
 
 template <class T>
@@ -278,11 +275,12 @@ struct type_tag {
     using type = T;
 };
 
-// `f` returns an int status; the first matching arm wins. Every dtype is
-// instantiated, so a lambda with `if constexpr` inside remains cheap.
+// `f` 返回 int 状态码；第一个匹配的分支生效。所有 dtype 都会被实例化，因此内部
+// 带 `if constexpr` 的 lambda 依然廉价。
 template <class F>
 inline int dispatch_dtype(int dtype, F&& f) {
     switch (dtype) {
+        case tvv::sycl::kBool:     return f(type_tag<uint8_t>{});
         case tvv::sycl::kInt8:     return f(type_tag<int8_t>{});
         case tvv::sycl::kInt16:    return f(type_tag<int16_t>{});
         case tvv::sycl::kInt32:    return f(type_tag<int32_t>{});
@@ -295,8 +293,8 @@ inline int dispatch_dtype(int dtype, F&& f) {
     }
 }
 
-// Decode a flat output index against the broadcast shape, accumulating each
-// operand's element offset with its own (already broadcast) stride array.
+// 按广播形状解码扁平输出下标，用各自（已完成广播的）步长数组累加每个操作数的
+// 元素 offset。
 inline int64_t bcast_offset(int64_t idx, const tvv::sycl::Bcast& p,
                             const int64_t* strides) {
     int64_t off = 0;
@@ -309,8 +307,8 @@ inline int64_t bcast_offset(int64_t idx, const tvv::sycl::Bcast& p,
     return off;
 }
 
-// 64-bit hash used by Random. Self-contained: no oneDPL or <random> in the
-// device units, and no per-element generator state to allocate.
+// Random 使用的 64 位哈希。自包含：设备单元中不用 oneDPL 或 <random>，也无需
+// 为每元素生成器状态分配内存。
 inline uint64_t splitmix64(uint64_t x) {
     x += 0x9E3779B97F4A7C15ull;
     x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ull;
@@ -318,7 +316,7 @@ inline uint64_t splitmix64(uint64_t x) {
     return x ^ (x >> 31);
 }
 
-// Uniform [0, 1), 53 bits of mantissa.
+// 均匀分布在 [0, 1)，尾数 53 位。
 inline double uniform01(uint64_t seed, int64_t index) {
     const uint64_t bits = splitmix64(seed ^ (static_cast<uint64_t>(index) *
                                              0x9E3779B97F4A7C15ull));
@@ -326,8 +324,8 @@ inline double uniform01(uint64_t seed, int64_t index) {
 }
 
 // ---------------------------------------------------------------------------
-// Kernel submission helpers. The queue is in-order, so successive submissions
-// from one host thread never need explicit dependencies.
+// 内核提交辅助。队列是 in-order 的，因此同一宿主线程的连续提交永远不需要显式
+// 依赖。
 // ---------------------------------------------------------------------------
 
 inline ::sycl::range<1> range_of(int64_t n) {

@@ -1,4 +1,4 @@
-// Broadcast and scalar comparison kernels; the result is INT8 holding 0 or 1.
+// 广播与标量比较内核；结果是不含 0 即 1 的 BOOL。
 #include "common.h"
 
 using namespace tvv::sycl_dev;
@@ -8,19 +8,35 @@ namespace {
 
 template <class T>
 inline int8_t cmp_value(int op, T x, T y, double abs_tol, double rel_tol) {
-    using C = promoted_t<T>;
-    const C cx = to_compute<C>(x);
-    const C cy = to_compute<C>(y);
-    switch (op) {
-        case tvv::sycl::kCmpEqual:
-            return contract::cmp_close<C>(cx, cy, abs_tol, rel_tol) ? 1 : 0;
-        case tvv::sycl::kCmpNotEqual:
-            return contract::cmp_close<C>(cx, cy, abs_tol, rel_tol) ? 0 : 1;
-        case tvv::sycl::kCmpGreater:      return cx > cy ? 1 : 0;
-        case tvv::sycl::kCmpLess:         return cx < cy ? 1 : 0;
-        case tvv::sycl::kCmpGreaterEqual: return cx >= cy ? 1 : 0;
-        case tvv::sycl::kCmpLessEqual:    return cx <= cy ? 1 : 0;
-        default:                          return 0;
+    if constexpr (std::is_same_v<T, uint8_t>) {
+        // BOOL 读取按真值解释：外部写入的字节（比如 2）表示真，所以比较前先
+        // 规范化。
+        const bool bx = x != 0;
+        const bool by = y != 0;
+        switch (op) {
+            case tvv::sycl::kCmpEqual:        return bx == by ? 1 : 0;
+            case tvv::sycl::kCmpNotEqual:     return bx != by ? 1 : 0;
+            case tvv::sycl::kCmpGreater:      return bx > by ? 1 : 0;
+            case tvv::sycl::kCmpLess:         return bx < by ? 1 : 0;
+            case tvv::sycl::kCmpGreaterEqual: return bx >= by ? 1 : 0;
+            case tvv::sycl::kCmpLessEqual:    return bx <= by ? 1 : 0;
+            default:                          return 0;
+        }
+    } else {
+        using C = promoted_t<T>;
+        const C cx = to_compute<C>(x);
+        const C cy = to_compute<C>(y);
+        switch (op) {
+            case tvv::sycl::kCmpEqual:
+                return contract::cmp_close<C>(cx, cy, abs_tol, rel_tol) ? 1 : 0;
+            case tvv::sycl::kCmpNotEqual:
+                return contract::cmp_close<C>(cx, cy, abs_tol, rel_tol) ? 0 : 1;
+            case tvv::sycl::kCmpGreater:      return cx > cy ? 1 : 0;
+            case tvv::sycl::kCmpLess:         return cx < cy ? 1 : 0;
+            case tvv::sycl::kCmpGreaterEqual: return cx >= cy ? 1 : 0;
+            case tvv::sycl::kCmpLessEqual:    return cx <= cy ? 1 : 0;
+            default:                          return 0;
+        }
     }
 }
 
@@ -39,8 +55,8 @@ void compare_kernel(sycl::queue& q, const T* a, const T* b, int8_t* out,
 template <class T>
 void compare_scalar_kernel(sycl::queue& q, const T* a, int8_t* out, int64_t numel,
                            int op, double scalar, double abs_tol, double rel_tol) {
-    // The scalar arrives as double; convert once so half arithmetic stays in
-    // the same native type the tensor uses.
+    // 标量以 double 传入；在此转换一次，使半精度运算保持在张量所用的同一原生
+    // 类型中。
     const T s = store_from_double<T>(scalar);
     q.parallel_for(range_of(numel), [=](sycl::id<1> idx) {
         const int64_t i = static_cast<int64_t>(idx[0]);

@@ -1,7 +1,7 @@
-// Context, USM allocation, host transfers and queue synchronization.
+// 上下文、USM 分配、宿主传输与队列同步。
 //
-// The queue is the whole device state: SYCL kernels are submitted to it and
-// the in-order property makes the synchronous host drivers trivially correct.
+// 队列就是设备的全部状态：SYCL 内核提交给它，其 in-order 特性让同步式宿主驱动
+// 天然正确。
 #include "common.h"
 
 #include <cstring>
@@ -13,9 +13,8 @@ extern "C" {
 void* sycl_c_context_create(int device_index) {
     try {
         auto* ctx = new Context(device_index);
-        // A queue with default_selector_v always names a device; if the device
-        // is unusable the first launch reports it. Returning the handle here
-        // keeps "no device" (nullptr) reserved for construction failures.
+        // 带 default_selector_v 的队列总会有设备；若设备不可用，首次启动就会
+        // 报错。这里返回句柄，使 nullptr（“无设备”）只保留给构造失败。
         return ctx;
     } catch (...) {
         return nullptr;
@@ -27,7 +26,7 @@ void sycl_c_context_destroy(void* ctx) {
     try {
         delete static_cast<Context*>(ctx);
     } catch (...) {
-        // Destructors do not throw; nothing actionable on a failed teardown.
+        // 析构函数不抛异常；清理失败时无计可施。
     }
 }
 
@@ -82,8 +81,8 @@ int sycl_c_device_name(void* ctx, char* out, int cap) {
 void* sycl_c_malloc(void* ctx, size_t bytes) {
     if (ctx == nullptr) return nullptr;
     try {
-        // malloc_device(0) is not portable; a zero-byte tensor still needs a
-        // valid handle so the destructor and copy paths stay uniform.
+        // malloc_device(0) 不可移植；零字节张量仍需有效句柄，好让析构与拷贝路径
+        // 保持统一。
         return sycl::malloc_device(bytes == 0 ? 1 : bytes, queue_of(ctx));
     } catch (...) {
         return nullptr;
@@ -92,10 +91,24 @@ void* sycl_c_malloc(void* ctx, size_t bytes) {
 
 void sycl_c_free(void* ctx, void* ptr) {
     if (ctx == nullptr || ptr == nullptr) return;
+    auto& queue = queue_of(ctx);
     try {
-        sycl::free(ptr, queue_of(ctx));
+        // 块可能仍被队列里尚未完成的 kernel 引用。in-order 队列保证这个 host task
+        // 排在它们之后，于是释放既不用阻塞宿主，也不会回收仍在使用的内存。
+        queue.submit([ptr, &queue](sycl::handler& h) {
+            h.host_task([ptr, &queue] { sycl::free(ptr, queue); });
+        });
     } catch (...) {
-        // A failed release is not actionable from a destructor path.
+        // 入队失败：先等队列清空再直接释放。慢，但不会释放仍在使用的内存。
+        try {
+            queue.wait_and_throw();
+        } catch (...) {
+        }
+        try {
+            sycl::free(ptr, queue);
+        } catch (...) {
+            // 析构路径上的释放失败无计可施。
+        }
     }
 }
 
@@ -106,8 +119,8 @@ int sycl_c_memcpy(void* ctx, void* dst, const void* src, size_t bytes, int kind)
         kind != tvv::sycl::kDeviceToDevice)
         return tvv::sycl::kSyclInvalid;
     try {
-        // queue::memcpy selects the USM copy path; the in-order queue plus the
-        // wait below makes the copy complete before the caller's buffer dies.
+        // queue::memcpy 选择 USM 拷贝路径；in-order 队列加上下面的等待，使拷贝在
+        // 调用方 buffer 销毁前完成。
         queue_of(ctx).memcpy(dst, src, bytes).wait_and_throw();
         return tvv::sycl::kSyclOk;
     } catch (...) {

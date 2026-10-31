@@ -1,4 +1,4 @@
-// Element-wise dtype conversion.
+// 逐元素 dtype 转换。
 #include "common.h"
 
 using namespace tvv::sycl_dev;
@@ -10,7 +10,15 @@ void cast_kernel(sycl::queue& q, const T* in, R* out, int64_t numel) {
     using C = promoted_t<T>;
     q.parallel_for(range_of(numel), [=](sycl::id<1> idx) {
         const int64_t i = static_cast<int64_t>(idx[0]);
-        out[i] = store_as<R>(to_compute<C>(in[i]));
+        if constexpr (std::is_same_v<R, uint8_t>) {
+            // 数值 -> BOOL：任何非零值都为真，写为 1。
+            out[i] = to_compute<C>(in[i]) != C(0) ? uint8_t{1} : uint8_t{0};
+        } else if constexpr (std::is_same_v<T, uint8_t>) {
+            // BOOL -> 数值：真为 1，假为 0（绝不用原始字节）。
+            out[i] = store_as<R>(C(in[i] != 0 ? 1 : 0));
+        } else {
+            out[i] = store_as<R>(to_compute<C>(in[i]));
+        }
     });
 }
 

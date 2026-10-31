@@ -1,8 +1,7 @@
-// SYCL runtime: queue lifetime, USM allocation, host transfers and the
-// SYCLTensor buffer management.
+// SYCL 运行时：队列生命周期、USM 分配、宿主传输以及 SYCLTensor 的 buffer 管理。
 //
-// The queue itself lives in the device unit (runtime.sycl); this file only
-// forwards to the seam and translates the status codes into exceptions.
+// 队列本身位于设备单元（runtime.sycl）；本文件只是转发到接缝并把状态码翻译成
+// 异常。
 #include <algorithm>
 #include <cstddef>
 #include <memory>
@@ -26,8 +25,7 @@ void check(int status, const char* what) {
     throw std::runtime_error(std::string("SYCL error in ") + what);
 }
 
-// The public contract is "copies are complete on return", so a caller can free
-// its staging buffer immediately.
+// 公开契约是“返回时拷贝已完成”，因此调用方可以立刻释放自己的暂存 buffer。
 int copy_bytes(void* ctx, void* dst, const void* src, size_t bytes, int kind) {
     if (bytes == 0) return tvv::sycl::kSyclOk;
     if (dst == nullptr || src == nullptr) return tvv::sycl::kSyclInvalid;
@@ -37,7 +35,7 @@ int copy_bytes(void* ctx, void* dst, const void* src, size_t bytes, int kind) {
 }  // namespace
 
 // ---------------------------------------------------------------------------
-// Context
+// 上下文
 // ---------------------------------------------------------------------------
 
 struct SYCLContext::Impl {
@@ -83,7 +81,7 @@ std::string SYCLContext::device_name() const {
 }
 
 // ---------------------------------------------------------------------------
-// Device buffers
+// 设备 buffer
 // ---------------------------------------------------------------------------
 
 SYCLTensor::SYCLTensor(size_t numel, DataType dtype, std::shared_ptr<SYCLContext> context) {
@@ -103,8 +101,8 @@ void SYCLTensor::init(void* ptr, size_t numel, DataType dtype,
     if (!m_context) throw std::runtime_error("SYCLTensor: null SYCLContext");
 
     const size_t bytes = numel * calc_dtype_size(dtype);
-    // A zero-byte tensor still needs a valid handle so the destructor and copy
-    // paths stay uniform (the seam maps 0 bytes to one byte).
+    // 零字节张量也需要有效句柄，好让析构和拷贝路径保持统一（接缝把 0 字节映射为
+    // 1 字节）。
     m_data = ::sycl_c_malloc(m_context->handle(), bytes);
     if (m_data == nullptr) throw std::runtime_error("SYCLTensor: device allocation failed");
 
@@ -112,7 +110,7 @@ void SYCLTensor::init(void* ptr, size_t numel, DataType dtype,
         const int status = copy_bytes(m_context->handle(), m_data, ptr, bytes,
                                       tvv::sycl::kHostToDevice);
         if (status != tvv::sycl::kSyclOk) {
-            // The object's destructor does not run when a constructor throws.
+            // 构造函数抛出时，对象的析构函数不会运行。
             ::sycl_c_free(m_context->handle(), m_data);
             m_data = nullptr;
             check(status, "SYCLTensor::init: host-to-device copy");
@@ -122,7 +120,7 @@ void SYCLTensor::init(void* ptr, size_t numel, DataType dtype,
 
 SYCLTensor::~SYCLTensor() {
     if (m_data != nullptr) {
-        // Destructors do not throw; a failed release is not actionable here.
+        // 析构函数不抛异常；释放失败在这里也无从处理。
         ::sycl_c_free(m_context->handle(), m_data);
         m_data = nullptr;
     }
@@ -142,8 +140,8 @@ void SYCLTensor::copy_to(std::shared_ptr<TensorImpl> dst) const {
         throw std::invalid_argument("Cannot copy between different SYCL contexts!");
     }
 
-    // m_numel is the shared base buffer's element count; dst may be a smaller
-    // view. Copying the source length would write past dst's allocation.
+    // m_numel 是共享基础 buffer 的元素数；dst 可能是更小的视图。按源长度拷贝会
+    // 写越 dst 的分配区。
     const size_t count = std::min(m_numel, sycl_dst->m_numel);
     check(copy_bytes(m_context->handle(), sycl_dst->m_data, m_data,
                      count * calc_dtype_size(m_dtype), tvv::sycl::kDeviceToDevice),
@@ -167,7 +165,6 @@ std::unique_ptr<TensorImpl> SYCLTensor::clone_as_contiguous(const Metadata& meta
               static_cast<int32_t>(calc_dtype_size(meta.dtype)),
               meta.shape.data(), meta.strides.data()),
           "repack");
-    m_context->wait();
     return cloned;
 }
 

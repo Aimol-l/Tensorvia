@@ -1,4 +1,4 @@
-// Element-wise dtype conversion for Device::SYCL.
+// Device::SYCL 的逐元素 dtype 转换。
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
@@ -18,7 +18,7 @@ namespace ops {
 namespace {
 
 Tensor cast_tensor(const Tensor& a, DataType dst_type) {
-    // The kernel reads a flat buffer; materialize any strided view.
+    // 内核读取扁平 buffer；任何跨步视图都要先物化。
     const Tensor src = a.is_contiguous() ? a : a.clone();
     Tensor out(src.shape(), dst_type, Device::SYCL);
 
@@ -29,7 +29,6 @@ Tensor cast_tensor(const Tensor& a, DataType dst_type) {
                           static_cast<int64_t>(src.numel()),
                           static_cast<int>(src.dtype()), static_cast<int>(dst_type)),
                       "Typecast launch");
-    ctx->wait();
     return out;
 }
 

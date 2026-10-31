@@ -1,8 +1,7 @@
-// Fill and random initialization.
+// 填充与随机初始化。
 //
-// Random uses a counter-based splitmix64 hash of (seed, element index): no
-// per-element generator state, no oneDPL dependency, and the same distribution
-// on every device.
+// Random 使用基于计数器的 splitmix64 哈希 (seed, 元素下标)：没有逐元素的生成器
+// 状态，不依赖 oneDPL，且在每台设备上分布相同。
 #include "common.h"
 
 using namespace tvv::sycl_dev;
@@ -34,12 +33,14 @@ extern "C" {
 
 int sycl_c_launch_fill(void* ctx, void* out, int64_t numel, int dtype, double value) {
     if (ctx == nullptr || out == nullptr) return tvv::sycl::kSyclInvalid;
+    // BOOL 写入会规范化：任何非零填充值都表示真（1）。
+    const double v = (dtype == tvv::sycl::kBool) ? (value != 0.0 ? 1.0 : 0.0) : value;
     try {
         auto& q = queue_of(ctx);
         return dispatch_dtype(dtype, [&](auto tag) -> int {
             using T = typename decltype(tag)::type;
             fill_kernel<T>(q, static_cast<T*>(out), numel,
-                           store_from_double<T>(value));
+                           store_from_double<T>(v));
             return tvv::sycl::kSyclOk;
         });
     } catch (...) {

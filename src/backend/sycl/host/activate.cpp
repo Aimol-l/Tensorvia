@@ -1,8 +1,8 @@
-// Softmax (the only activation that reduces along an axis) and the host driver
-// for Relu/Silu/Tanh/Sigmoid/Softmax on Device::SYCL.
+// Softmax（唯一沿轴归约的激活）以及 Device::SYCL 上
+// Relu/Silu/Tanh/Sigmoid/Softmax 的宿主驱动。
 //
-// Relu/Silu/Tanh/Sigmoid reuse the element-wise unary path in :sycl_ufunc;
-// Softmax needs outer x axis x inner geometry, so it fills a ReduceAxis.
+// Relu/Silu/Tanh/Sigmoid 复用 :sycl_ufunc 中的逐元素一元路径；Softmax 需要
+// outer x axis x inner 几何形状，因此填一个 ReduceAxis。
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
@@ -29,8 +29,8 @@ Tensor softmax_impl(const Tensor& a, int axis) {
     if (axis < 0 || axis >= dim)
         throw std::runtime_error("sycl Softmax: axis out of range");
 
-    // Softmax reads and writes one reduction axis at a time; the kernel works
-    // on a flat row-major buffer, so a strided operand is materialized first.
+    // Softmax 每次只读写一条归约轴；内核处理扁平行主序 buffer，所以跨步操作数要先
+    // 物化。
     const Tensor src = a.is_contiguous() ? a : a.clone();
     tvv::sycl::ReduceAxis p{};
     p.axis  = a.shape(axis);
@@ -39,10 +39,10 @@ Tensor softmax_impl(const Tensor& a, int axis) {
     p.outer = 1;
     for (int i = 0; i < axis; ++i) p.outer *= a.shape(i);
 
-    // Integers have no meaningful probability output; the other backends
-    // promote them to FLOAT32, everything else keeps its storage type.
+    // 整数没有有意义的概率输出；其它后端将其提升到 FLOAT32，其余类型保持其存储
+    // 类型。
     const DataType out_type =
-        src.dtype() <= DataType::INT64 ? DataType::FLOAT32 : src.dtype();
+        is_integral_dtype(src.dtype()) ? DataType::FLOAT32 : src.dtype();
     Tensor out(src.shape(), out_type, Device::SYCL);
 
     auto ctx = sycl_ufunc::context_of(src, "Softmax");
@@ -51,7 +51,6 @@ Tensor softmax_impl(const Tensor& a, int axis) {
                           sycl_ufunc::handle_of(*ctx), src.data(), out.data(),
                           static_cast<int>(src.dtype()), static_cast<int>(out_type), &p),
                       "Softmax launch");
-    ctx->wait();
     return out;
 }
 
