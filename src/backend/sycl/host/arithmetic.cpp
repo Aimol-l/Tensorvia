@@ -130,6 +130,11 @@ void ExpImpl<Device::SYCL>::execute(Tensor& a) {
 Tensor ExpImpl<Device::SYCL>::execute(const Tensor& a) {
     return unary_float_out(a, tvv::sycl::kUnaryExp, 0.0f, 0.0f, "Exp");
 }
+
+Tensor ErfImpl<Device::SYCL>::execute(const Tensor& a) {
+    // Erf 与 Exp 同族：整型输入在 double 里算（unary_compute_t）再提升到 FLOAT32。
+    return unary_float_out(a, tvv::sycl::kUnaryErf, 0.0f, 0.0f, "Erf");
+}
 void SqrtImpl<Device::SYCL>::execute(Tensor& a) {
     unary_float_inplace(a, tvv::sycl::kUnarySqrt, 0.0f, 0.0f, "Sqrt");
 }

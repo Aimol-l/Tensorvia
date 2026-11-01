@@ -79,6 +79,9 @@ template <> struct ExpImpl<Device::CUDA> {
     static void execute(Tensor& a);
     static Tensor execute(const Tensor& a);
 };
+template <> struct ErfImpl<Device::CUDA> {
+    static Tensor execute(const Tensor& a);
+};
 template <> struct SqrtImpl<Device::CUDA> {
     static void execute(Tensor& a);
     static Tensor execute(const Tensor& a);

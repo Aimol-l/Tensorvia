@@ -79,6 +79,9 @@ template <> struct ExpImpl<Device::SYCL> {
     static void execute(Tensor& a);
     static Tensor execute(const Tensor& a);
 };
+template <> struct ErfImpl<Device::SYCL> {
+    static Tensor execute(const Tensor& a);
+};
 template <> struct SqrtImpl<Device::SYCL> {
     static void execute(Tensor& a);
     static Tensor execute(const Tensor& a);

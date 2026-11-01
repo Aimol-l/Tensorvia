@@ -253,6 +253,10 @@ Tensor TanImpl<Device::VULKAN>::execute(const Tensor& a) {
 Tensor ExpImpl<Device::VULKAN>::execute(const Tensor& a) {
     return unary_out_of_place<ExpImpl<Device::VULKAN>>(a, OpType::Exp, "Exp");
 }
+
+Tensor ErfImpl<Device::VULKAN>::execute(const Tensor& a) {
+    return unary_out_of_place<ErfImpl<Device::VULKAN>>(a, OpType::Erf, "Erf");
+}
 Tensor SqrtImpl<Device::VULKAN>::execute(const Tensor& a) {
     return unary_out_of_place<SqrtImpl<Device::VULKAN>>(a, OpType::Sqrt, "Sqrt");
 }

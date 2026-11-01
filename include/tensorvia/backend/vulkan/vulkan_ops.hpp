@@ -71,6 +71,9 @@ template <> struct ExpImpl<Device::VULKAN> {
     static void execute(Tensor& a);
     static Tensor execute(const Tensor& a);
 };
+template <> struct ErfImpl<Device::VULKAN> {
+    static Tensor execute(const Tensor& a);
+};
 template <> struct SqrtImpl<Device::VULKAN> {
     static void execute(Tensor& a);
     static Tensor execute(const Tensor& a);

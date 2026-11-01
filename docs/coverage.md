@@ -28,7 +28,7 @@
 | `Cumsum` | native | native | native | native |  |
 | `Div` | native | native | native | native |  |
 | `Equal` | native | native | native | native |  |
-| `Erf` | native | unsupported | unsupported | unsupported | require_cpu 显式拒绝 |
+| `Erf` | native | native | native | native |  |
 | `Exp` | native | native | native | native |  |
 | `Eye` | native | emulated | emulated | emulated | 宿主生成后 to_device 搬运 |
 | `Fill` | native | native | native | native |  |
@@ -92,9 +92,9 @@
 | 后端 | native | emulated | unsupported | 支持率 |
 |------|--------|----------|-------------|--------|
 | CPU | 65 | 12 | 0 | 100.0% |
-| CUDA | 48 | 21 | 8 | 89.6% |
-| SYCL | 48 | 21 | 8 | 89.6% |
-| VULKAN | 48 | 21 | 8 | 89.6% |
+| CUDA | 49 | 21 | 7 | 90.9% |
+| SYCL | 49 | 21 | 7 | 90.9% |
+| VULKAN | 49 | 21 | 7 | 90.9% |
 
 支持率 = (native + emulated) / 算子总数（77）。
 

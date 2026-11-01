@@ -607,6 +607,95 @@ TEST_F(DeviceOps, ProdReductionMatchesReference) {
     EXPECT_THROW(ops::Prod(flag), std::runtime_error);
 }
 
+// Erf 的精度契约（Task 3）：设备实现对照 CPU 参考（std::erf）。容差按 dtype 的
+// ulp 分档——CUDA erff/erf 与 SYCL 内置约 2 ulp，Vulkan 着色器在 double 里算完
+// 再舍入（f32 与 std::erf 逐位一致），这里按最宽松的一档要求。参考值还写了几个
+// 已知常数，避免"两边都错成一样"。
+TEST_F(DeviceOps, ErfMatchesStdErfWithinTolerance) {
+    // 负半轴、0、±1 附近、饱和区（|x|>3 后 erf≈±1）、极小值与极大值。
+    const std::vector<float> xs = {-6.0f, -5.9f, -3.7f, -3.0f, -2.0f, -1.0f, -0.5f,
+                                   -0.1f, -1e-8f, 0.0f, 1e-8f, 0.1f, 0.5f, 1.0f, 2.0f,
+                                   3.0f, 3.7f, 5.9f, 6.0f};
+    const int64_t n = static_cast<int64_t>(xs.size());
+    const Tensor cpu = from_values<float>(xs, {n});
+    const Tensor dev = moved_to(from_values<float>(xs, {n}), kTestDevice);
+
+    const Tensor got = ops::Erf(dev);
+    EXPECT_EQ(got.device(), kTestDevice);
+    EXPECT_EQ(got.dtype(), DataType::FLOAT32);
+    const std::vector<float> out = host_values<float>(got);
+    const std::vector<float> want = host_values<float>(ops::Erf(cpu));
+    ASSERT_EQ(out.size(), want.size());
+    for (size_t i = 0; i < out.size(); ++i) {
+        // float32 的 2 ulp 相对误差 + 1e-6 绝对下限（0 附近 erf(x)≈1.128x）。
+        EXPECT_NEAR(out[i], want[i], std::max(1e-6f, 2.4e-7f * std::abs(want[i])))
+            << "erf(" << xs[i] << ")";
+    }
+    // 写死的已知值：erf(1)=0.84270079…、erf(2)=0.99532227…、erf(0)=0、erf(6)=1。
+    EXPECT_NEAR(out[13], 0.84270079f, 1e-6f);
+    EXPECT_NEAR(out[14], 0.99532227f, 1e-6f);
+    EXPECT_FLOAT_EQ(out[9], 0.0f);
+    EXPECT_FLOAT_EQ(out[18], 1.0f);
+
+    // float64：紧一档（设备侧连分式/库内实现都应在 1e-13 相对以内）。
+    const Tensor cpu64 = from_values<double>(
+        {-6.0, -2.5, -1.0, -0.3, 0.0, 0.3, 1.0, 2.5, 6.0}, {9});
+    const Tensor dev64 = moved_to(from_values<double>(
+        {-6.0, -2.5, -1.0, -0.3, 0.0, 0.3, 1.0, 2.5, 6.0}, {9}), kTestDevice);
+    const Tensor got64 = ops::Erf(dev64);
+    EXPECT_EQ(got64.dtype(), DataType::FLOAT64);
+    const std::vector<double> out64 = host_values<double>(got64);
+    const std::vector<double> want64 = host_values<double>(ops::Erf(cpu64));
+    ASSERT_EQ(out64.size(), want64.size());
+    for (size_t i = 0; i < out64.size(); ++i)
+        EXPECT_NEAR(out64[i], want64[i], 1e-13 * std::max(1.0, std::abs(want64[i])))
+            << "erf f64 at " << i;
+
+    // float16 / bfloat16：各自 ulp 量级（f16 ≈ 1e-3，bf16 ≈ 8e-3）。
+    std::vector<float16> h16 = {float16(-2.0f), float16(-0.5f), float16(0.0f),
+                                float16(0.5f), float16(2.0f)};
+    const Tensor cpu16(h16, std::vector<int64_t>{5});
+    const Tensor dev16 = moved_to(Tensor(h16, std::vector<int64_t>{5}), kTestDevice);
+    const std::vector<float16> out16 = host_values<float16>(ops::Erf(dev16));
+    const std::vector<float16> want16 = host_values<float16>(ops::Erf(cpu16));
+    ASSERT_EQ(out16.size(), want16.size());
+    for (size_t i = 0; i < out16.size(); ++i)
+        EXPECT_NEAR(float(out16[i]), float(want16[i]), 2e-3f) << "erf f16 at " << i;
+
+    // 非连续输入：跨步视图与连续输入结果一致。
+    const Tensor wide_cpu = from_values<float>({-2.0f, 9.0f, -0.5f, 9.0f, 1.0f, 9.0f}, {3, 2});
+    const Tensor wide_dev = moved_to(
+        from_values<float>({-2.0f, 9.0f, -0.5f, 9.0f, 1.0f, 9.0f}, {3, 2}), kTestDevice);
+    const Tensor col_cpu = wide_cpu.narrow(1, 0, 1);
+    const Tensor col_dev = wide_dev.narrow(1, 0, 1);
+    EXPECT_FALSE(col_dev.is_contiguous());
+    const std::vector<float> col_out = host_values<float>(ops::Erf(col_dev));
+    const std::vector<float> col_want = host_values<float>(ops::Erf(col_cpu));
+    ASSERT_EQ(col_out.size(), col_want.size());
+    for (size_t i = 0; i < col_out.size(); ++i)
+        EXPECT_NEAR(col_out[i], col_want[i], 1e-6f) << "erf strided at " << i;
+
+    // 整型输入提升到 FLOAT32（与 Exp 的 dtype 契约一致）。
+    const Tensor ints = moved_to(from_values<int32_t>({0, 1, 2}, {3}), kTestDevice);
+    const Tensor ei = ops::Erf(ints);
+    EXPECT_EQ(ei.dtype(), DataType::FLOAT32);
+    const std::vector<float> ei_v = host_values<float>(ei);
+    ASSERT_EQ(ei_v.size(), 3u);
+    EXPECT_FLOAT_EQ(ei_v[0], 0.0f);
+    EXPECT_NEAR(ei_v[1], 0.84270079f, 1e-6f);
+    EXPECT_NEAR(ei_v[2], 0.99532227f, 1e-6f);
+
+    // NaN/Inf 传播：erf(NaN)=NaN、erf(+Inf)=+1、erf(-Inf)=-1（IEEE 语义）。
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
+    const Tensor special = moved_to(from_values<float>({nan, inf, -inf}, {3}), kTestDevice);
+    const std::vector<float> sv = host_values<float>(ops::Erf(special));
+    ASSERT_EQ(sv.size(), 3u);
+    EXPECT_TRUE(std::isnan(sv[0]));
+    EXPECT_FLOAT_EQ(sv[1], 1.0f);
+    EXPECT_FLOAT_EQ(sv[2], -1.0f);
+}
+
 TEST_F(DeviceOps, GeneratorsLandOnTheDevice) {
     TensorOptions opts(DataType::FLOAT32);
     opts.with_device(kTestDevice, 0);
@@ -855,13 +944,14 @@ TEST_F(DeviceOps, UnsupportedOpsFailExplicitlyOnDevices) {
         EXPECT_NO_THROW(ops::Erf(T));
         GTEST_SKIP() << "the CPU backend implements every op in this list";
     }
-    EXPECT_THROW(ops::Erf(T), std::runtime_error);
+    // Erf 已落到每个后端（Task 3），不再属于拒绝清单；Sort/Topk 仍只有 CPU 实现。
+    EXPECT_NO_THROW(ops::Erf(T));
     EXPECT_THROW(ops::Sort(T), std::runtime_error);
     EXPECT_THROW(ops::Topk(T, 1), std::runtime_error);
 
     // 错误必须点名后端，而不是悄悄退回 CPU 或先算出错误结果。
     try {
-        (void)ops::Erf(T);
+        (void)ops::Sort(T);
     } catch (const std::runtime_error& e) {
         EXPECT_NE(std::string(e.what()).find(device_to_string(kTestDevice)), std::string::npos)
             << e.what();

@@ -142,7 +142,7 @@ enum class OpType {
     Add, Sub, Mul, Div,
     AddVec, SubVec, MulVec, DivVec,
     Abs, Repack,
-    Sin, Cos, Tan, Exp, Relu, Silu, Tanh, Sqrt, Sigmoid, Pow, Log, Softmax,
+    Sin, Cos, Tan, Exp, Erf, Relu, Silu, Tanh, Sqrt, Sigmoid, Pow, Log, Softmax,
     Clamp, Sum, SumVec, Min, MinVec, Max, MaxVec, Mean, Prod, ProdVec, Concat,
     Transpose2d, TransposeNd, Equal, NotEqual, Greater, Less, GreaterEqual, LessEqual,
     All, Any, Nonzero, Argmax, Argmin,
@@ -258,6 +258,7 @@ inline const char* op_to_string(OpType op) {
         case OpType::Cos:           return "cos";
         case OpType::Tan:           return "tan";
         case OpType::Exp:           return "exp";
+        case OpType::Erf:           return "erf";
         case OpType::Relu:          return "relu";
         case OpType::Silu:          return "silu";
         case OpType::Tanh:          return "tanh";

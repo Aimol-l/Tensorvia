@@ -306,18 +306,18 @@ class RealTreeTests(unittest.TestCase):
 
     def test_cpu_only_ops_are_unsupported_on_devices(self):
         # FR-2 点名、且尚未落到设备后端的算子必须显式拒绝（矩阵是唯一事实源）。
-        # Task 2 落地 Prod 后此清单逐项收缩：Task 3 Erf、Task 4 Sort/Topk。
+        # Task 2 落地 Prod、Task 3 落地 Erf 后此清单逐项收缩；Task 4 是 Sort/Topk。
         matrix = cm.build_matrix(REPO)
-        for op in ("Erf", "MaskedSelect", "MaskedFill", "Sort", "Topk"):
+        for op in ("MaskedSelect", "MaskedFill", "Sort", "Topk"):
             for backend in cm.DEVICE_BACKENDS:
                 self.assertEqual(matrix.rows[op][backend].value, "unsupported",
                                  f"{op} on {backend}")
 
-    def test_prod_is_native_on_every_backend(self):
+    def test_erf_is_native_on_every_backend(self):
         matrix = cm.build_matrix(REPO)
         for backend in cm.BACKENDS:
-            self.assertEqual(matrix.rows["Prod"][backend].value, "native",
-                             f"Prod on {backend}")
+            self.assertEqual(matrix.rows["Erf"][backend].value, "native",
+                             f"Erf on {backend}")
 
     def test_check_passes_on_clean_tree(self):
         result = subprocess.run(

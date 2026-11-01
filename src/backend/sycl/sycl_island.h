@@ -59,6 +59,7 @@ inline constexpr int kUnarySilu    = 9;
 inline constexpr int kUnaryTanh    = 10;
 inline constexpr int kUnarySigmoid = 11;
 inline constexpr int kUnaryClamp   = 12;  // p0 = 下界，p1 = 上界
+inline constexpr int kUnaryErf     = 13;
 
 inline constexpr int kReduceSum  = 0;
 inline constexpr int kReduceMin  = 1;

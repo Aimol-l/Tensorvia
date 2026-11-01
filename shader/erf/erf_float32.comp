@@ -1,0 +1,83 @@
+#version 460
+
+#extension GL_ARB_gpu_shader_fp64 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform Params {
+    int64_t numel;
+} params;
+
+layout(std430, binding = 0) buffer InputA {
+    float data[];
+} a;
+
+layout(std430, binding = 1) buffer InputB {
+    float data[];
+} b;
+
+// erf 在 GLSL 里没有内置函数。本实现分三段，全程在 double 里计算——连分式的
+// 累加误差在 float 里会超过 2 ulp，而 double 对 f16/bf16/f32 的输出都是先算准
+// 再舍入（与 std::erf 对照：double 最大相对误差 2.6e-15，float32 舍入后逐位一致）：
+//   |x| >= 6.5  erfc 在 double 里已低于 1e-16，直接给 ±1（也兜住 ±Inf：
+//               +Inf -> +1、-Inf -> -1，与 std::erf 一致）
+//   |x| <  1.5  Maclaurin 级数 erf(x) = 2/sqrt(pi) * sum (-1)^n x^(2n+1)/(n!(2n+1))
+//               （1.5 处 26 项收敛，固定 40 项；级数自带符号）
+//   其余        erfc 的正则化不完全伽马连分式 Q(1/2, x^2)，即 Numerical Recipes
+//               的 gcf 形式（a=1/2），Lentz 迭代（1.5 处 44 次收敛，固定 64 次）：
+//               erfc(x) = exp(-x^2) * x / sqrt(pi) * h，结果非负，最后取 x 的符号
+// NaN 自然传播：所有比较对 NaN 为假 -> 落进连分式 -> NaN 算术 -> NaN。
+// 这里不用 clamp 收口：GLSL 的 clamp 对 NaN 是未定义行为，而连分式在
+// ax < 6.5 的区间里各项同号，不会给出域外值。
+//
+// glslang 的 GLSL 前端不提供 double 的 exp/log 内置（sqrt 有），所以 exp 用
+// Taylor + 反复平方自己算：自变量只在 [-42.25, 0]（|x| < 6.5 时 -x^2 的范围）。
+// z = y/1024 后 |z| <= 0.042，8 项 Taylor 截断约 1e-18；10 次平方的舍入累积
+// 约 3e-13，而它只乘在 erfc 上（<= 0.034），对 erf 的相对贡献被压到 1e-14 以下。
+double tvv_exp_neg(double y) {
+    const double z = y / 1024.0;
+    double e = 1.0 + z * (1.0 + z * (0.5 + z * (1.0 / 6.0 + z * (1.0 / 24.0
+              + z * (1.0 / 120.0 + z * (1.0 / 720.0 + z * (1.0 / 5040.0)))))));
+    for (int i = 0; i < 10; ++i) e *= e;
+    return e;
+}
+
+double tvv_erf(double x) {
+    const double ax = abs(x);
+    if (ax >= 6.5) return x > 0.0 ? 1.0 : -1.0;
+    if (ax < 1.5) {
+        double s = 0.0;
+        double term = x;
+        for (int n = 0; n < 40; ++n) {
+            s += term;
+            term = -term * x * x * double(2 * n + 1) / double((n + 1) * (2 * n + 3));
+        }
+        return 1.12837916709551257390 * s;  // 2 / sqrt(pi)
+    }
+    const double xa = ax * ax;
+    double b = xa + 0.5;                    // b0 = xa + 1 - a，a = 1/2
+    double c = 1.0 / 1e-300;
+    double d = 1.0 / b;
+    double h = d;
+    for (int i = 1; i <= 64; ++i) {
+        const double an = -double(i) * (double(i) - 0.5);
+        b += 2.0;
+        d = an * d + b;
+        if (abs(d) < 1e-300) d = 1e-300;
+        c = b + an / c;
+        if (abs(c) < 1e-300) c = 1e-300;
+        d = 1.0 / d;
+        h *= d * c;
+    }
+    const double erfc = tvv_exp_neg(-xa) * ax * 0.56418958354775628695 * h;  // 1/sqrt(pi)
+    const double v = 1.0 - erfc;
+    return x < 0.0 ? -v : v;
+}
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (int64_t(idx) >= params.numel) return;
+
+    b.data[idx] = float(tvv_erf(double(a.data[idx])));
+}

@@ -65,7 +65,6 @@ CrossEntropyLoss.CPU = { note = "LogSoftmax + NllLoss 组合", parts = ["LogSoft
 # 显式拒绝（unsupported）：设备上调用抛错，不会静默回退 CPU。
 [unsupported]
 # require_cpu 带算子名拒绝
-Erf.devices = { note = "require_cpu 显式拒绝", evidence = "src/core/ops.cpp:Erf" }
 MseLoss.devices = { note = "require_cpu 显式拒绝", evidence = "src/core/ops.cpp:MseLoss" }
 NllLoss.devices = { note = "require_cpu 显式拒绝", evidence = "src/core/ops.cpp:NllLoss" }
 MaskedSelect.devices = { note = "require_cpu 显式拒绝", evidence = "src/core/ops.cpp:MaskedSelect" }

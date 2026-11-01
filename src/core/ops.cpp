@@ -1031,8 +1031,7 @@ Tensor Erf(const Tensor& a) {
     require_live(a);
     require_not_bool(a, "erf");
     if (is_empty(a)) return empty_on(a, a.shape(), elementwise_result_type(a.dtype(), false));
-    require_cpu(a, "erf");
-    return ErfImpl<Device::CPU>::execute(a);
+    return execute_on<ErfImpl>(a.device_id(), a);
 }
 Tensor LayerNorm(const Tensor& a, const Tensor& weight, const Tensor& bias, int axis, float eps) {
     require_live(a);

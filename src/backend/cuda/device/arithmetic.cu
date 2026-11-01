@@ -132,6 +132,11 @@ TVV_CUDA_HD C unary_value(int op, C x, C p0, C p1) {
         case tvv::cuda::kUnarySigmoid:
             if constexpr (std::is_same_v<C, float>) return 1.0f / (1.0f + expf(-x));
             else return 1.0 / (1.0 + ::exp(-x));
+        case tvv::cuda::kUnaryErf:
+            // erff/erf 的误差约 2 ulp（CUDA 编程手册）；整型在 double 里算再收窄。
+            if constexpr (std::is_same_v<C, float>) return erff(x);
+            else if constexpr (std::is_same_v<C, double>) return erf(x);
+            else return static_cast<C>(erf(static_cast<double>(x)));
         case tvv::cuda::kUnaryClamp:
             return contract::clamp_contract(x, p0, p1);
         default:
@@ -326,6 +331,11 @@ void ExpImpl<Device::CUDA>::execute(Tensor& a) {
 }
 Tensor ExpImpl<Device::CUDA>::execute(const Tensor& a) {
     return unary_float_out(a, tvv::cuda::kUnaryExp, 0.0f, 0.0f, "Exp");
+}
+
+Tensor ErfImpl<Device::CUDA>::execute(const Tensor& a) {
+    // Erf 与 Exp 同族：整型输入提升到 FLOAT32，16 位浮点保持自身 dtype。
+    return unary_float_out(a, tvv::cuda::kUnaryErf, 0.0f, 0.0f, "Erf");
 }
 void SqrtImpl<Device::CUDA>::execute(Tensor& a) {
     unary_float_inplace(a, tvv::cuda::kUnarySqrt, 0.0f, 0.0f, "Sqrt");

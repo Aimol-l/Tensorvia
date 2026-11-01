@@ -40,6 +40,7 @@ inline C unary_value(int op, C x, C p0, C p1) {
         case tvv::sycl::kUnarySilu:    return x / (C(1) + sycl::exp(-x));
         case tvv::sycl::kUnaryTanh:    return sycl::tanh(x);
         case tvv::sycl::kUnarySigmoid: return C(1) / (C(1) + sycl::exp(-x));
+        case tvv::sycl::kUnaryErf:     return sycl::erf(x);
         case tvv::sycl::kUnaryClamp:   return contract::clamp_contract(x, p0, p1);
         default:                       return x;
     }

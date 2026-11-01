@@ -264,6 +264,8 @@ void VulkanContext::registerPipelines() {
 
     registerOp(OpType::Abs, AllTypes, 2, sizeof(int64_t));
     registerOp(OpType::Exp, FloatTypes, 2, sizeof(int64_t));
+
+    registerOp(OpType::Erf, FloatTypes, 2, sizeof(int64_t));
     registerOp(OpType::Sqrt, FloatTypes, 2, sizeof(int64_t));
     registerOp(OpType::Pow, FloatTypes, 2, sizeof(ValueParams<float>));
     registerOp(OpType::Log, FloatTypes, 2, sizeof(ValueParams<float>));
