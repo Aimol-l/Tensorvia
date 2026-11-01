@@ -372,7 +372,11 @@ cmake -B build -DBACKEND_CPU=ON -DCMAKE_BUILD_TYPE=Release -DBUILD_TEST=ON && cm
 # cmake -B build -DBACKEND_SYCL=ON -DCMAKE_BUILD_TYPE=Release -DBUILD_TEST=ON && cmake --build build --parallel
 ```
 
-`tests/` 是头文件范式（`#include "tensorvia.hpp"`），mcpp 与 CMake 两条路径编译同一批文件。每个 `tests/*.cpp` 各自是一个独立的测试二进制：`device`（后端生命周期、多设备寻址、CUDA context/stream）、`view`（视图/offset/引用语义）、`ops`（算子与数值覆盖）、`contract`（FR-1/FR-2/FR-3 契约）、`p0`（P0 语义契约 FR-3..FR-7）、`p1`（FR-9..FR-12：N-D matmul、推理关键算子的跨后端一致性、搬运算子、不支持组合的显式报错）、`dim`；共享夹具与助手在 `tests/test_support.hpp`。另有 `benchmark/bench.cpp`（基准，自带 main；`mcpp.toml` 的 `[test] discover` 与 `-DBUILD_BENCH=ON` 都会构建它）。上面的 lane 命令验证的是**该 lane 完整构建 + 公共测试通过**；各设备后端编入后的算子行为由消费方冒烟覆盖。测试通过 `[dev-dependencies]` 拿 GoogleTest——它只进测试二进制，不进 `libtensorvia.so`。模块导出面（`import tensorvia;` 的符号清单）由 `tools/gen_facade.py --check` 在每次 `mcpp build` 时守卫。
+`tests/` 是头文件范式（`#include "tensorvia.hpp"`），mcpp 与 CMake 两条路径编译同一批文件。每个 `tests/*.cpp` 各自是一个独立的测试二进制：`device`（后端生命周期、多设备寻址、CUDA context/stream）、`view`（视图/offset/引用语义）、`ops`（算子与数值覆盖）、`contract`（FR-1/FR-2/FR-3 契约）、`p0`（P0 语义契约 FR-3..FR-7）、`p1`（FR-9..FR-12：N-D matmul、推理关键算子的跨后端一致性、搬运算子、不支持组合的显式报错）、`dim`、`async_contract`（隐式同步断言：提交阶段零等待，显式点各计一次）；共享夹具与助手在 `tests/test_support.hpp`。另有 `benchmark/bench.cpp`（基准，自带 main；`mcpp.toml` 的 `[test] discover` 与 `-DBUILD_BENCH=ON` 都会构建它；`bench [cpu\|cuda\|vulkan\|sycl]` 选后端，不传参时测本构建编译进来的后端）。上面的 lane 命令验证的是**该 lane 完整构建 + 公共测试通过**；各设备后端编入后的算子行为由消费方冒烟覆盖。测试通过 `[dev-dependencies]` 拿 GoogleTest——它只进测试二进制，不进 `libtensorvia.so`。模块导出面（`import tensorvia;` 的符号清单）由 `tools/gen_facade.py --check` 在每次 `mcpp build` 时守卫。
+
+## 📊 性能基线
+
+`benchmark/bench.cpp` 把每次调用拆成 submit（调用返回）/ sync（`synchronize()` 耗时）/ total 三段，冷启动（JIT / 流水线创建）单独一列；吞吐按 total 计算。同机基线表（含硬件 / 驱动 / 编译器 / profile 与逐用例三段耗时）在 [`benchmark/baseline/`](benchmark/baseline/)——性能结论以那份表与同机比值为准，本文不手写数字。
 
 > **SYCL lane 的 llvm 构建需要 mcpp ≥ 2026.10.26.1**：该版本起 mcpp 把
 > libsycl 带来的 libstdc++ 识别为 C++ ABI island 并做链接后验证，`.so` 内
