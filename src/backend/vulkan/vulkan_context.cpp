@@ -2,6 +2,8 @@
 
 #include "tensorvia/backend/vulkan/spv_registry.hpp"
 
+#include "_sync_counters.h"
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -701,7 +703,10 @@ void VulkanContext::submitAsync(vk::CommandBuffer cmd, vk::DescriptorSet ds) {
     reapCompletedLocked(ch);
     // 描述符池上限 2000 个集合；积压过多时先等最老的一次，保证池里还有空位。
     constexpr size_t kMaxInFlight = 512;
-    if (ch.inflight.size() >= kMaxInFlight) waitLocked(ch);
+    if (ch.inflight.size() >= kMaxInFlight) {
+        waitLocked(ch);
+        tensorvia::sync::note_wait(tensorvia::sync::Wait::Backlog);
+    }
 
     vk::Fence fence = m_device->createFence({});
     vk::SubmitInfo submitInfo{};
@@ -756,6 +761,7 @@ void VulkanContext::synchronize() {
     for (auto& channel : m_queues) {
         std::lock_guard<std::recursive_mutex> lock(channel->mutex);
         waitLocked(*channel);
+        tensorvia::sync::note_wait(tensorvia::sync::Wait::Synchronize);
     }
 }
 
@@ -844,6 +850,7 @@ void VulkanContext::downloadBuffer(vk::Buffer src, void* dst, size_t bytes) {
     // 同步一致；跨线程交接的数据需要调用方先 ops::synchronize()）。
     submitAsync(cmd);
     waitLocked(ch);
+    tensorvia::sync::note_wait(tensorvia::sync::Wait::Copy);
 
     vmaInvalidateAllocation(m_vma.handle, staging.allocation(), 0, VK_WHOLE_SIZE);
     std::memcpy(dst, staging.mapped(), bytes);

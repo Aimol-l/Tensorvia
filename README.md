@@ -57,7 +57,8 @@ native / emulated（组合实现）/ unsupported（显式拒绝），由 `tools/
 
 设备端未覆盖的算子（在设备张量上调用会带算子名抛错，不会静默回退 CPU）不在这里手写清单：
 以 [docs/coverage.md](docs/coverage.md) 的矩阵为准，其中 `unsupported` 的每一格都注明拒绝位置
-（`require_cpu` 或 `execute_on` 的“后端未实现”路径）。
+（`require_cpu` 或 `execute_on` 的“后端未实现”路径）。算子提交的同步语义（哪些调用会让宿主
+等待设备）见 [docs/async-semantics.md](docs/async-semantics.md)。
 
 `examples/inference.cpp` 按真实推理引擎的分段跑一次前向：text → tokens → embedding →
 prefill（整段 prompt 一次算完，K/V 写进 cache）→ decode（一次一个 token，复用 cache）→ logits。

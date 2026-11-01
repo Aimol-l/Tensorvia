@@ -98,6 +98,17 @@
 
 支持率 = (native + emulated) / 算子总数（77）。
 
+## 异步状态
+
+同步点完整清单与理由见 [async-semantics.md](async-semantics.md)；提交阶段无隐式同步由 `tests/async_contract.cpp` 的计数器断言。
+
+| 后端 | 异步状态 |
+|------|----------|
+| CPU | 同步后端：算子在调用线程上直接算完，没有提交/等待之分 |
+| CUDA | 入队即返回（隐式流 + 按流分池）；搬运在拷贝后同步当前流，synchronize 逐流等待 |
+| SYCL | 入队即返回（每线程 in-order 队列）；搬运经 memcpy+wait 同步，synchronize 逐队列等待 |
+| VULKAN | 入队即返回（在飞通道 + fence 回收）；下载等队首 fence，上传只入队；在飞超过 512 个提交时等最老的一次 |
+
 ## 宿主侧 API（不经过后端派发，不在矩阵中）
 
 `DeviceGuard`、`SortResult`、`TopkResult`、`current_device`、`device_count`、`empty_cache`、`export_csv`、`println`、`set_device`、`synchronize`。

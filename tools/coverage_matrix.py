@@ -186,6 +186,7 @@ class Overrides:
         self.core_impl: dict[str, Entry] = {}
         self.emulated: list[Entry] = []
         self.unsupported: list[Entry] = []
+        self.async_notes: dict[str, str] = {}  # 后端 -> 异步状态摘要
 
 
 def _leaf_entries(section: dict, section_name: str) -> list[tuple[str, dict]]:
@@ -270,6 +271,19 @@ def load_overrides(path: pathlib.Path) -> Overrides:
             raise CoverageError(f"[{section}] must be a table")
         for key, leaf in _leaf_entries(table, section):
             target.append(_entry_from(key, leaf, section))
+
+    # [async]：每后端异步状态的一句话摘要，随矩阵一并渲染（ docs/async-semantics.md
+    # 是完整清单，这里是指针）。键必须是四个后端之一。
+    async_table = data.get("async", {})
+    if not isinstance(async_table, dict):
+        raise CoverageError("[async] must be a table")
+    for backend, note in async_table.items():
+        if backend not in BACKENDS:
+            raise CoverageError(
+                f"[async]: unknown backend {backend} (expected one of {', '.join(BACKENDS)})")
+        if not isinstance(note, str) or not note.strip():
+            raise CoverageError(f"[async]: {backend}: note must be a non-empty string")
+        ov.async_notes[backend] = note.strip()
     return ov
 
 
@@ -287,6 +301,7 @@ class Matrix:
     def __init__(self) -> None:
         self.rows: dict[str, dict[str, Cell]] = {}
         self.host_side: list[str] = []
+        self.async_notes: dict[str, str] = {}
 
     def stats(self) -> dict[str, dict[str, int]]:
         out = {}
@@ -460,6 +475,7 @@ def build_matrix(root: pathlib.Path) -> Matrix:
     # ---- 汇总：每个非宿主侧算子 × 四个后端都必须有取值 ----
     matrix = Matrix()
     matrix.host_side = ov.host_side
+    matrix.async_notes = ov.async_notes
     for op in public:
         if op in host_side:
             continue
@@ -550,6 +566,23 @@ def render(matrix: Matrix) -> str:
         "",
         f"支持率 = (native + emulated) / 算子总数（{total}）。",
         "",
+    ]
+    if matrix.async_notes:
+        lines += [
+            "## 异步状态",
+            "",
+            "同步点完整清单与理由见 [async-semantics.md](async-semantics.md)；"
+            "提交阶段无隐式同步由 `tests/async_contract.cpp` 的计数器断言。",
+            "",
+            "| 后端 | 异步状态 |",
+            "|------|----------|",
+        ]
+        for backend in BACKENDS:
+            note = matrix.async_notes.get(backend)
+            if note:
+                lines.append(f"| {backend} | {note} |")
+        lines.append("")
+    lines += [
         "## 宿主侧 API（不经过后端派发，不在矩阵中）",
         "",
         "、".join(f"`{name}`" for name in matrix.host_side) + "。",

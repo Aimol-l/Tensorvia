@@ -10,6 +10,8 @@
 #include <mutex>
 #include <new>
 #include <stdexcept>
+
+#include "_sync_counters.h"
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -210,6 +212,7 @@ inline void CachingAllocator::release_free_segments() noexcept {
         }
         // cudaFree 隐含一次设备同步，因此回收"空闲但流上可能还有活"的块是安全的；
         // 这也是 empty_cache 与 OOM 补救路径会阻塞的原因。
+        tensorvia::sync::note_wait(tensorvia::sync::Wait::OomFree);
         (void)cudaFree(seg.ptr);
         seg = Segment{};   // ptr == nullptr 标记它已归还
     }

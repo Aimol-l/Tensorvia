@@ -7,6 +7,8 @@
 #include "allocator.cuh"
 #include "cuda_launch.hpp"
 
+#include "_sync_counters.h"
+
 #include <algorithm>
 #include <atomic>
 #include <cstddef>
@@ -146,6 +148,7 @@ void CUDAContext::synchronize_current_stream() const {
     tvv::cuda::check_cuda(
         cudaStreamSynchronize(static_cast<cudaStream_t>(current_stream().handle)),
         "cudaStreamSynchronize");
+    tensorvia::sync::note_wait(tensorvia::sync::Wait::Synchronize);
 }
 
 void CUDAContext::synchronize_all() const {
@@ -160,6 +163,7 @@ void CUDAContext::synchronize_all() const {
     for (const cudaStream_t stream : streams) {
         if (stream == nullptr) continue;
         tvv::cuda::check_cuda(cudaStreamSynchronize(stream), "cudaStreamSynchronize");
+        tensorvia::sync::note_wait(tensorvia::sync::Wait::Synchronize);
     }
 }
 
@@ -198,7 +202,10 @@ cudaError_t copy_bytes(cudaStream_t stream, void* dst, const void* src, size_t b
     if (dst == nullptr || src == nullptr) return cudaErrorInvalidValue;
     const cudaError_t err = cudaMemcpyAsync(dst, src, bytes, kind, stream);
     if (err != cudaSuccess) return err;
-    return cudaStreamSynchronize(stream);
+    const cudaError_t waited = cudaStreamSynchronize(stream);
+    // 每次“返回时拷贝已完成”的契约都是一次宿主等待：FR-4.4 的可观测计数。
+    tensorvia::sync::note_wait(tensorvia::sync::Wait::Copy);
+    return waited;
 }
 
 cudaStream_t stream_of(const std::shared_ptr<CUDAContext>& ctx) {
