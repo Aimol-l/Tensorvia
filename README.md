@@ -53,6 +53,11 @@
 仍为 CPU-only 的算子（设备张量调用抛 `"only the CPU backend implements this op"`，不会静默回退 CPU）：
 `Erf`、`MaskedSelect`、`MaskedFill`、`Sort`、`Topk`、`Prod`。
 
+`examples/inference.cpp` 按真实推理引擎的分段跑一次前向：text → tokens → embedding →
+prefill（整段 prompt 一次算完，K/V 写进 cache）→ decode（一次一个 token，复用 cache）→ logits。
+模型是随机权重的两层 decoder-only Transformer：词表与位置查表走 `IndexSelect`，多头注意力的
+因果掩码走 `Where`。`inference [cpu|cuda|vulkan|sycl] [prompt]` 指定后端与提示词。
+
 ## 📦 依赖
 
 | 构建方式 | 依赖 |
