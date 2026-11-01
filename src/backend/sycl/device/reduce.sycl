@@ -198,8 +198,10 @@ int sycl_c_launch_reduce_all(void* ctx, const void* in, void* out, int64_t numel
                 return tvv::sycl::kSyclOk;
             });
         });
+    } catch (const std::exception& e) {
+        return record_failure(e);
     } catch (...) {
-        return tvv::sycl::kSyclFailure;
+        return record_failure();
     }
 }
 
@@ -219,8 +221,10 @@ int sycl_c_launch_reduce_axis(void* ctx, const void* in, void* out,
                 return tvv::sycl::kSyclOk;
             });
         });
+    } catch (const std::exception& e) {
+        return record_failure(e);
     } catch (...) {
-        return tvv::sycl::kSyclFailure;
+        return record_failure();
     }
 }
 
@@ -236,8 +240,10 @@ int sycl_c_launch_arg_reduce(void* ctx, const void* in, void* out, int dtype,
                                  static_cast<int32_t*>(out), *p, is_max);
             return tvv::sycl::kSyclOk;
         });
+    } catch (const std::exception& e) {
+        return record_failure(e);
     } catch (...) {
-        return tvv::sycl::kSyclFailure;
+        return record_failure();
     }
 }
 
@@ -255,8 +261,10 @@ int sycl_c_launch_all_any(void* ctx, const void* in, void* out, int64_t numel,
                               static_cast<unsigned int*>(out), numel, is_all, value);
             return tvv::sycl::kSyclOk;
         });
+    } catch (const std::exception& e) {
+        return record_failure(e);
     } catch (...) {
-        return tvv::sycl::kSyclFailure;
+        return record_failure();
     }
 }
 
@@ -273,8 +281,10 @@ int sycl_c_launch_nonzero(void* ctx, const void* in, void* out, int64_t numel,
                                     static_cast<unsigned int*>(out), numel);
             return tvv::sycl::kSyclOk;
         });
+    } catch (const std::exception& e) {
+        return record_failure(e);
     } catch (...) {
-        return tvv::sycl::kSyclFailure;
+        return record_failure();
     }
 }
 

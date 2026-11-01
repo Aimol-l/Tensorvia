@@ -213,4 +213,22 @@ template <> struct MatMulImpl<Device::SYCL> {
     static Tensor execute(const Tensor& a, const Tensor& b);
 };
 
+// ---------------------------------------------------------------------------
+// 条件选择、索引与累积和。
+// ---------------------------------------------------------------------------
+template <> struct WhereImpl<Device::SYCL> {
+    static Tensor execute(const Tensor& cond, const Tensor& a, const Tensor& b);
+    static Tensor execute(const Tensor& cond, const Tensor& a, float b);
+    static Tensor execute(const Tensor& cond, float a, const Tensor& b);
+};
+template <> struct IndexSelectImpl<Device::SYCL> {
+    static Tensor execute(const Tensor& input, int dim, const Tensor& index);
+};
+template <> struct GatherImpl<Device::SYCL> {
+    static Tensor execute(const Tensor& input, int dim, const Tensor& index);
+};
+template <> struct CumsumImpl<Device::SYCL> {
+    static Tensor execute(const Tensor& a, int axis);
+};
+
 }  // namespace ops

@@ -135,14 +135,9 @@ Tensor GatherImpl<Device::CPU>::execute(const Tensor& input, int dim, const Tens
     const auto in_shape = in->shape();
     const auto idx_shape = idx->shape();
     const size_t ndim = in_shape.size();
-    if (idx_shape.size() != ndim)
-        throw std::runtime_error("gather: index must have the same rank as input");
+    // 秩与非 dim 维尺寸由 ops::Gather 在派发前校验：那是所有后端共用的契约，
+    // 放在这里会让设备后端各行其是。
     const int64_t axis_len = in_shape[dim];
-
-    // 非 dim 维度 index 尺寸不得超出 input（否则坐标解码会越界读）
-    for (size_t d = 0; d < ndim; ++d)
-        if (d != size_t(dim) && idx_shape[d] > in_shape[d])
-            throw std::runtime_error("gather: index size exceeds input along non-dim axes");
 
     std::vector<int64_t> out_shape_v(idx_shape.begin(), idx_shape.end());
     Tensor result(out_shape_v, input.dtype(), Device::CPU);

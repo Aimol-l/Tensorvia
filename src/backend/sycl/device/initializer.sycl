@@ -43,8 +43,10 @@ int sycl_c_launch_fill(void* ctx, void* out, int64_t numel, int dtype, double va
                            store_from_double<T>(v));
             return tvv::sycl::kSyclOk;
         });
+    } catch (const std::exception& e) {
+        return record_failure(e);
     } catch (...) {
-        return tvv::sycl::kSyclFailure;
+        return record_failure();
     }
 }
 
@@ -58,8 +60,10 @@ int sycl_c_launch_random(void* ctx, void* out, int64_t numel, int dtype,
             random_kernel<T>(q, static_cast<T*>(out), numel, lo, hi, seed);
             return tvv::sycl::kSyclOk;
         });
+    } catch (const std::exception& e) {
+        return record_failure(e);
     } catch (...) {
-        return tvv::sycl::kSyclFailure;
+        return record_failure();
     }
 }
 

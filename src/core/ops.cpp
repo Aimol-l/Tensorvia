@@ -1295,8 +1295,7 @@ Tensor Cumsum(const Tensor& a, int axis) {
     if (is_empty(a)) return empty_on(a, a.shape(), a.dtype());
     Tensor storage;
     const Tensor& A = linearize(a, storage);
-    require_cpu(A, "cumsum");
-    return CumsumImpl<Device::CPU>::execute(A, axis);
+    return execute_on<CumsumImpl>(A.device_id(), A, axis);
 }
 
 namespace {
@@ -1496,7 +1495,20 @@ Tensor Norm(const Tensor& a, float p, int axis, bool keepdim, DataType dtype) {
     return cast_reduction_result(Norm(a, p, axis, keepdim), dtype, "norm");
 }
 
-float MseLoss(const Tensor& input, const Tensor& target) {
+namespace {
+
+// 损失内核在宿主上按 float 累加，拿回来的是一个标量。这里把它包成与归约一致的
+// 0 维张量：设备跟着输入走，dtype 走 mean 的规则（整型与 16 位浮点输入回到
+// FLOAT32，FLOAT64 保持 FLOAT64）。损失目前只有 CPU 实现，所以这里的设备在
+// 调用点已经由 require_cpu 限定为 CPU。
+Tensor loss_result(float value, const Tensor& like) {
+    return Fill(std::vector<int64_t>{}, float_reduction_type(like.dtype()), value,
+                like.device_id());
+}
+
+}  // namespace
+
+Tensor MseLoss(const Tensor& input, const Tensor& target) {
     if (input.device_id() != target.device_id()) throw std::runtime_error("Tensor Device mismatch!");
     if (input.numel() == 0) throw std::runtime_error("mse_loss: empty input");
     require_not_bool(input, "mse_loss");
@@ -1508,9 +1520,9 @@ float MseLoss(const Tensor& input, const Tensor& target) {
     const Tensor& A = linearize(input, sa);
     const Tensor& B = linearize(target, sb);
     require_cpu(A, "mse_loss");
-    return MseLossImpl<Device::CPU>::execute(A, B);
+    return loss_result(MseLossImpl<Device::CPU>::execute(A, B), input);
 }
-float NllLoss(const Tensor& input, const Tensor& target) {
+Tensor NllLoss(const Tensor& input, const Tensor& target) {
     if (input.device_id() != target.device_id()) throw std::runtime_error("Tensor Device mismatch!");
     if (input.numel() == 0) throw std::runtime_error("nll_loss: empty input");
     require_not_bool(input, "nll_loss");
@@ -1522,9 +1534,9 @@ float NllLoss(const Tensor& input, const Tensor& target) {
     const Tensor& A = linearize(input, sa);
     const Tensor& T = linearize(target, st);
     require_cpu(A, "nll_loss");
-    return NllLossImpl<Device::CPU>::execute(A, T);
+    return loss_result(NllLossImpl<Device::CPU>::execute(A, T), input);
 }
-float CrossEntropyLoss(const Tensor& input, const Tensor& target) {
+Tensor CrossEntropyLoss(const Tensor& input, const Tensor& target) {
     if (input.shape().size() != 2) throw std::runtime_error("cross_entropy: input must be 2D (N, C)");
     Tensor ls = LogSoftmax(input, 1);
     return NllLoss(ls, target);
@@ -1725,32 +1737,29 @@ Tensor LessEqual(const Tensor& a, float val) {
 Tensor Where(const Tensor& cond, const Tensor& a, const Tensor& b) {
     if (cond.device_id() != a.device_id() || cond.device_id() != b.device_id())
         throw std::runtime_error("Tensor Device mismatch!");
-    require_cpu(cond, "where");
     if (is_empty(cond) || is_empty(a) || is_empty(b)) {
         const DimArray out = broadcast_shape_or_throw(cond, a, b, "where");
         return empty_on(cond, out, compute_type(a.dtype(), b.dtype()));
     }
-    return WhereImpl<Device::CPU>::execute(cond, a, b);
+    return execute_on<WhereImpl>(cond.device_id(), cond, a, b);
 }
 Tensor Where(const Tensor& cond, const Tensor& a, float b) {
     if (cond.device_id() != a.device_id())
         throw std::runtime_error("Tensor Device mismatch!");
-    require_cpu(cond, "where");
     if (is_empty(cond) || is_empty(a)) {
         const DimArray out = broadcast_shape_or_throw(cond, a, "where");
         return empty_on(cond, out, scalar_promote_type(a.dtype()));
     }
-    return WhereImpl<Device::CPU>::execute(cond, a, b);
+    return execute_on<WhereImpl>(cond.device_id(), cond, a, b);
 }
 Tensor Where(const Tensor& cond, float a, const Tensor& b) {
     if (cond.device_id() != b.device_id())
         throw std::runtime_error("Tensor Device mismatch!");
-    require_cpu(cond, "where");
     if (is_empty(cond) || is_empty(b)) {
         const DimArray out = broadcast_shape_or_throw(cond, b, "where");
         return empty_on(cond, out, scalar_promote_type(b.dtype()));
     }
-    return WhereImpl<Device::CPU>::execute(cond, a, b);
+    return execute_on<WhereImpl>(cond.device_id(), cond, a, b);
 }
 
 bool All(const Tensor& a, float val) {
@@ -2154,13 +2163,12 @@ Tensor IndexSelect(const Tensor& input, int dim, const Tensor& index) {
     dim = dim < 0 ? dim + static_cast<int>(input.shape().size()) : dim;
     if (dim < 0 || dim >= static_cast<int>(input.shape().size()))
         throw std::runtime_error("index_select: dim out of range");
-    require_cpu(input, "index_select");
     if (index.numel() == 0) {
         std::vector<int64_t> out_shape(input.shape().begin(), input.shape().end());
         out_shape[dim] = 0;
         return empty_on(input, out_shape, input.dtype());
     }
-    return IndexSelectImpl<Device::CPU>::execute(input, dim, index);
+    return execute_on<IndexSelectImpl>(input.device_id(), input, dim, index);
 }
 
 Tensor Gather(const Tensor& input, int dim, const Tensor& index) {
@@ -2171,18 +2179,15 @@ Tensor Gather(const Tensor& input, int dim, const Tensor& index) {
     dim = dim < 0 ? dim + static_cast<int>(input.shape().size()) : dim;
     if (dim < 0 || dim >= static_cast<int>(input.shape().size()))
         throw std::runtime_error("gather: dim out of range");
-    require_cpu(input, "gather");
+    // 秩与非 dim 维的尺寸都在这里校验：设备内核直接用 index 的形状解码输入坐标，
+    // 放一个更宽的 index 过去就是越界读。
+    if (index.shape().size() != input.shape().size())
+        throw std::runtime_error("gather: index must have the same rank as input");
+    for (size_t d = 0; d < index.shape().size(); ++d)
+        if (static_cast<int>(d) != dim && index.shape(d) > input.shape(d))
+            throw std::runtime_error("gather: index size exceeds input along non-dim axes");
     if (index.numel() == 0) return empty_on(input, index.shape(), input.dtype());
-    return GatherImpl<Device::CPU>::execute(input, dim, index);
-}
-
-void Temp(Tensor& t) {
-    require_contiguous(t, "temp");
-    require_live(t);
-    if (is_empty(t)) return;
-    require_contiguous(t, "temp");
-    require_cpu(t, "temp");
-    TempImpl<Device::CPU>::execute(t);
+    return execute_on<GatherImpl>(input.device_id(), input, dim, index);
 }
 
 namespace {

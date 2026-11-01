@@ -656,7 +656,10 @@ TEST(Numeric, NormsAndLosses) {
     Tensor p(pv, {3});
     std::vector<float> qv{1, 3, 5};
     Tensor q(qv, {3});
-    EXPECT_NEAR(ops::MseLoss(p, q), (0.0f + 1.0f + 4.0f) / 3.0f, kEps);
+    const Tensor mse = ops::MseLoss(p, q);
+    EXPECT_EQ(mse.dims(), 0);  // 与归约一致：标量结果就是 0 维张量
+    EXPECT_EQ(mse.dtype(), DataType::FLOAT32);
+    EXPECT_NEAR(mse.item<float>(), (0.0f + 1.0f + 4.0f) / 3.0f, kEps);
 
     // nll_loss：-mean(log_prob[n, target[n]])
     std::vector<float> lpv{std::log(0.5f), std::log(0.3f), std::log(0.2f),
@@ -664,12 +667,16 @@ TEST(Numeric, NormsAndLosses) {
     Tensor logp(lpv, {2, 3});
     std::vector<std::int64_t> tv{0, 1};
     Tensor tgt(tv, {2});
-    EXPECT_NEAR(ops::NllLoss(logp, tgt), -(std::log(0.5f) + std::log(0.7f)) / 2.0f, kEps);
+    const Tensor nll = ops::NllLoss(logp, tgt);
+    EXPECT_EQ(nll.dims(), 0);
+    EXPECT_NEAR(nll.item<float>(), -(std::log(0.5f) + std::log(0.7f)) / 2.0f, kEps);
 
     // cross_entropy = nll(log_softmax(logits))
     std::vector<float> lgv{1, 2, 3, 0, 1, 2};
     Tensor logits(lgv, {2, 3});
-    EXPECT_NEAR(ops::CrossEntropyLoss(logits, tgt),
-                ops::NllLoss(ops::LogSoftmax(logits, 1), tgt), kEps);
+    const Tensor ce = ops::CrossEntropyLoss(logits, tgt);
+    EXPECT_EQ(ce.dims(), 0);
+    EXPECT_NEAR(ce.item<float>(),
+                ops::NllLoss(ops::LogSoftmax(logits, 1), tgt).item<float>(), kEps);
 }
 

@@ -145,7 +145,10 @@ enum class OpType {
     Sin, Cos, Tan, Exp, Relu, Silu, Tanh, Sqrt, Sigmoid, Pow, Log, Softmax,
     Clamp, Sum, SumVec, Min, MinVec, Max, MaxVec, Mean, Concat,
     Transpose2d, TransposeNd, Equal, NotEqual, Greater, Less, GreaterEqual, LessEqual,
-    All, Any, Nonzero, Argmax, Argmin, Temp
+    All, Any, Nonzero, Argmax, Argmin,
+    // 条件选择、索引与累积和。也只有 Vulkan 需要把它们写进流水线键：其余后端
+    // 直接跑实现，不查表。
+    Where, IndexSelect, Gather, Cumsum
 };
 
 enum class Device { CPU, CUDA, SYCL, VULKAN };
@@ -286,7 +289,10 @@ inline const char* op_to_string(OpType op) {
         case OpType::Nonzero:       return "nonzero";
         case OpType::Argmax:        return "argmax";
         case OpType::Argmin:        return "argmin";
-        case OpType::Temp:          return "temp";
+        case OpType::Where:         return "where";
+        case OpType::IndexSelect:   return "index_select";
+        case OpType::Gather:        return "gather";
+        case OpType::Cumsum:        return "cumsum";
         default: throw std::invalid_argument("Unknown OpType");
     }
 }

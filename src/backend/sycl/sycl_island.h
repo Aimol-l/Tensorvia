@@ -134,7 +134,48 @@ struct Transpose {
     int64_t axes[kMaxDims]        = {};
 };
 
+// 三路广播选择（where）：cond / a / b 各一套广播步长，各自叠加视图偏移。
+// `cond_dtype` 是 DataType 的序号；cond 的标量类型在设备侧查表读取。
+struct Select {
+    int64_t numel      = 0;
+    int32_t ndim       = 0;
+    int32_t cond_dtype = 0;
+    int64_t shape[kMaxDims] = {};
+    int64_t sc[kMaxDims]    = {};
+    int64_t sa[kMaxDims]    = {};
+    int64_t sb[kMaxDims]    = {};
+    int64_t off_c = 0;
+    int64_t off_a = 0;
+    int64_t off_b = 0;
+    int64_t off_o = 0;
+};
+
+// index_select 与 cumsum 的几何：输入视为 outer x axis_len x inner。
+// `idx_len` 只对 index_select 有意义。
+struct IndexAxis {
+    int64_t outer    = 0;
+    int64_t axis_len = 0;
+    int64_t inner    = 0;
+    int64_t idx_len  = 0;
+};
+
+// gather：输出形状与 index 相同，非 dim 维坐标决定输入 base。
+struct Gather {
+    int64_t numel       = 0;
+    int32_t ndim        = 0;
+    int32_t idx_dtype   = 0;
+    int64_t out_shape[kMaxDims]  = {};
+    int64_t in_strides[kMaxDims] = {};
+    int64_t axis_dim    = 0;
+    int64_t axis_stride = 0;
+    int32_t dim         = 0;
+    int32_t reserved    = 0;
+};
+
 static_assert(std::is_trivially_copyable_v<Bcast>, "seam POD");
+static_assert(std::is_trivially_copyable_v<Select>, "seam POD");
+static_assert(std::is_trivially_copyable_v<IndexAxis>, "seam POD");
+static_assert(std::is_trivially_copyable_v<Gather>, "seam POD");
 static_assert(std::is_trivially_copyable_v<ReduceAxis>, "seam POD");
 static_assert(std::is_trivially_copyable_v<Repack>, "seam POD");
 static_assert(std::is_trivially_copyable_v<Slice>, "seam POD");
@@ -155,16 +196,21 @@ extern "C" {
 // ---------------------------------------------------------------------------
 
 // 在设备 `device_index` 上创建上下文（含其后所有线程共享的 sycl::context）：
-// -1 表示 sycl::default_selector_v（优先 GPU，以 OpenCL CPU 兜底），0.. 表示
-// sycl::device::get_devices() 中的对应位置。没有可用设备时返回 nullptr。
+// -1 表示默认设备（第一块 GPU，没有 GPU 时才用 sycl::default_selector_v），
+// 0.. 表示 sycl::device::get_devices() 中的对应位置。没有可用设备时返回 nullptr。
 // 上下文本身不持有队列：队列按（线程, 上下文）惰性创建，见 sycl_c_current_queue。
 void* sycl_c_context_create(int device_index);
 void  sycl_c_context_destroy(void* ctx);
 // 本进程可见的设备数量。设备索引空间是这个后端自己的：即
 // sycl::device::get_devices() 中的位置。SYCL 运行时无法枚举时返回 0。
 int   sycl_c_device_count();
-// sycl::default_selector_v 会选中的设备索引，或 -1。
+// 默认设备的索引（第一块 GPU，没有 GPU 时退回 sycl::default_selector_v），或 -1。
 int   sycl_c_default_device_index();
+// 最近一次失败在调用线程上的原始描述（sycl 运行时抛出的 what()）。状态码只有
+// "失败"三个字，这一句才是能查的东西；没有失败时为 nullptr。
+const char* sycl_c_last_error();
+// 记录/清空上述描述；启动函数在 catch 里调用，宿主侧不直接调。
+void  sycl_c_record_error(const char* what);
 // 等待本上下文上**所有线程的队列**清空（设备级同步，对应 torch.cuda.synchronize）。
 int   sycl_c_wait(void* ctx);
 // 把设备名拷入 `out`；返回写入的字节数。
@@ -239,6 +285,23 @@ int sycl_c_launch_transpose(void* ctx, const void* in, void* out, int dtype,
 int sycl_c_launch_repack(void* ctx, const void* in, void* out, int64_t numel,
                          int64_t offset, int32_t ndim, int32_t dtype_size,
                          const int64_t* shape, const int64_t* strides);
+
+// where：cond 判真后从 a 或 b 取元素；写出 dtype 由 out_dtype 决定（BOOL 规范化）。
+int sycl_c_launch_select(void* ctx, const void* cond, const void* a, const void* b,
+                         void* out, int out_dtype, const tvv::sycl::Select* p);
+
+// index_select / gather：`flag` 非空时，任一索引落在 [0, axis_dim) 之外置 1。
+// 设备侧对越界索引做截断，因此即使调用方不读标志也不会越界读写。
+int sycl_c_launch_index_select(void* ctx, const void* in, const void* idx, void* out,
+                               int out_dtype, int idx_dtype,
+                               const tvv::sycl::IndexAxis* p, int32_t* flag);
+int sycl_c_launch_gather(void* ctx, const void* in, const void* idx, void* out,
+                         int out_dtype, int idx_dtype, const tvv::sycl::Gather* p,
+                         int32_t* flag);
+
+// 沿 axis 的累积和；输出与输入同形同 dtype。
+int sycl_c_launch_cumsum(void* ctx, const void* in, void* out, int dtype,
+                         const tvv::sycl::IndexAxis* p);
 
 }  // extern "C"
 

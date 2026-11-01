@@ -307,6 +307,13 @@ void VulkanContext::registerPipelines() {
     registerOp(OpType::Repack, DataType::INT8, 2, sizeof(RepackParams));
     registerOp(OpType::Transpose2d, AllTypes, 2, sizeof(Trans2DParams));
     registerOp(OpType::TransposeNd, AllTypes, 2, sizeof(TransNDParams));
+
+    // where 的参数放不进 push constant（三套广播步长 + 四个偏移在 8 维下超过 128
+    // 字节），与 concat 一样走 binding 0 的 SSBO，因此 params_size 为 0。
+    registerOp(OpType::Where, AllTypes, 5, 0);
+    registerOp(OpType::IndexSelect, AllTypes, 4, sizeof(IndexAxisParams));
+    registerOp(OpType::Gather, AllTypes, 4, sizeof(GatherParams));
+    registerOp(OpType::Cumsum, AllTypes, 2, sizeof(CumsumParams));
 }
 
 void VulkanContext::createDescriptorSetLayout(std::string ori_op, int tensor_count,

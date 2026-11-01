@@ -82,8 +82,10 @@ int sycl_c_launch_matmul(void* ctx, const void* a, const void* b, void* out,
                              static_cast<T*>(out), batch, rows, cols, k);
             return tvv::sycl::kSyclOk;
         });
+    } catch (const std::exception& e) {
+        return record_failure(e);
     } catch (...) {
-        return tvv::sycl::kSyclFailure;
+        return record_failure();
     }
 }
 

@@ -81,8 +81,10 @@ int sycl_c_launch_compare(void* ctx, const void* a, const void* b, void* out,
                               static_cast<int8_t*>(out), *p, op, tol_abs, tol_rel);
             return tvv::sycl::kSyclOk;
         });
+    } catch (const std::exception& e) {
+        return record_failure(e);
     } catch (...) {
-        return tvv::sycl::kSyclFailure;
+        return record_failure();
     }
 }
 
@@ -100,8 +102,10 @@ int sycl_c_launch_compare_scalar(void* ctx, const void* a, void* out, int64_t nu
                                      tol_abs, tol_rel);
             return tvv::sycl::kSyclOk;
         });
+    } catch (const std::exception& e) {
+        return record_failure(e);
     } catch (...) {
-        return tvv::sycl::kSyclFailure;
+        return record_failure();
     }
 }
 

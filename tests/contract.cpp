@@ -512,11 +512,14 @@ TEST(Empty, StructuralAndSupport) {
     EXPECT_EQ(cat2.at<float>({1, 0}), 4.0f);
     EXPECT_EQ(ops::Concat({empty0, empty0}, 0).shape(0), 0);
 
-    // 空索引 -> 空输出。
+    // 空索引 -> 空输出。gather 的索引与输入同秩（与 PyTorch 一致），所以它的空
+    // 索引要保留被索引以外的维度：{0, 3} 拿到的是形状 {0, 3} 的空结果。
     Tensor idx = Tensor::Zeros({0}, DataType::INT64);
     EXPECT_EQ(ops::IndexSelect(full, 0, idx).numel(), 0u);
     EXPECT_EQ(ops::IndexSelect(full, 0, idx).shape(1), 3);
-    EXPECT_EQ(ops::Gather(full, 0, idx).numel(), 0u);
+    Tensor gidx = Tensor::Zeros({0, 3}, DataType::INT64);
+    EXPECT_EQ(ops::Gather(full, 0, gidx).numel(), 0u);
+    EXPECT_EQ(ops::Gather(full, 0, gidx).shape(1), 3);
 }
 
 // 设备 lane：空张量在 GPU 上同样可分配、可归约，并且结果留在原设备上。

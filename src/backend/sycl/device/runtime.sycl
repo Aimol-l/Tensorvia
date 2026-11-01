@@ -22,6 +22,9 @@ std::atomic<uint64_t> g_next_context_id{1};
 // 线程的队列；新创建的队列同时登记到 context，供 wait 与析构使用。
 thread_local std::unordered_map<uint64_t, ::sycl::queue*> tls_queue;
 
+// 最近一次失败的原始描述，线程私有（与队列的线程亲和一致）。
+thread_local std::string t_last_error;
+
 }  // namespace
 
 Context::Context(int device_index)
@@ -79,7 +82,8 @@ void sycl_c_context_destroy(void* ctx) {
 
 int sycl_c_device_count() {
     try {
-        return static_cast<int>(sycl::device::get_devices().size());
+        // 只报“装得下我们内核”的设备，见 usable_device_indices。
+        return static_cast<int>(usable_device_indices().size());
     } catch (...) {
         return 0;
     }
@@ -87,14 +91,30 @@ int sycl_c_device_count() {
 
 int sycl_c_default_device_index() {
     try {
-        const sycl::device chosen{sycl::default_selector_v};
         const auto devices = sycl::device::get_devices();
-        for (size_t i = 0; i < devices.size(); ++i) {
-            if (devices[i] == chosen) return static_cast<int>(i);
+        const auto& usable = usable_device_indices();
+        // 默认设备 = 可用设备里的第一块 GPU，没有 GPU 就用第一块可用的。
+        // 不交给 default_selector_v：它在“GPU + OpenCL CPU”共存时会把 CPU 设备
+        // 排在前面，而 CUDA/Vulkan 后端只在 GPU 上选址，默认目标应当一致。
+        for (size_t slot = 0; slot < usable.size(); ++slot) {
+            if (devices[static_cast<size_t>(usable[slot])].is_gpu())
+                return static_cast<int>(slot);
         }
-        return 0;
+        return usable.empty() ? -1 : 0;
     } catch (...) {
         return -1;
+    }
+}
+
+const char* sycl_c_last_error() {
+    return t_last_error.empty() ? nullptr : t_last_error.c_str();
+}
+
+void sycl_c_record_error(const char* what) {
+    if (what == nullptr) {
+        t_last_error.clear();
+    } else {
+        t_last_error = what;
     }
 }
 
@@ -114,8 +134,10 @@ int sycl_c_wait(void* ctx) {
             q->wait_and_throw();
         }
         return tvv::sycl::kSyclOk;
+    } catch (const std::exception& e) {
+        return record_failure(e);
     } catch (...) {
-        return tvv::sycl::kSyclFailure;
+        return record_failure();
     }
 }
 
@@ -140,8 +162,10 @@ int sycl_c_device_name(void* ctx, char* out, int cap) {
         std::memcpy(out, name.c_str(), n);
         out[n] = '\0';
         return static_cast<int>(n);
+    } catch (const std::exception& e) {
+        return record_failure(e);
     } catch (...) {
-        return tvv::sycl::kSyclFailure;
+        return record_failure();
     }
 }
 
@@ -194,8 +218,10 @@ int sycl_c_memcpy(void* ctx, void* dst, const void* src, size_t bytes, int kind)
         // 调用方 buffer 销毁前完成。
         queue_of(ctx).memcpy(dst, src, bytes).wait_and_throw();
         return tvv::sycl::kSyclOk;
+    } catch (const std::exception& e) {
+        return record_failure(e);
     } catch (...) {
-        return tvv::sycl::kSyclFailure;
+        return record_failure();
     }
 }
 

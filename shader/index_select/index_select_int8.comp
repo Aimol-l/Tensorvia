@@ -1,0 +1,59 @@
+#version 460
+
+// index_select：沿 dim 用一维下标查表。
+
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_shader_8bit_storage : require
+#extension GL_EXT_shader_explicit_arithmetic_types : require
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform Params {
+    int outer;
+    int axis_len;
+    int inner;
+    int idx_len;
+    int idx_is_64;
+} p;
+
+layout(std430, binding = 0) readonly buffer Input { int8_t data[]; } src;
+
+layout(std430, binding = 1) readonly buffer Index { int words[]; } idx;
+
+layout(std430, binding = 2) writeonly buffer Output { int8_t data[]; } dst;
+
+layout(std430, binding = 3) buffer Flag { int data[]; } flag;
+
+// index 只有 INT32/INT64 两种（公开入口已经拒绝其它 dtype）。缓冲按 32 位字读，
+// `idx_is_64` 决定一个下标占一个字还是两个字；两种读法都落在缓冲边界内。
+int64_t load_index(int64_t i) {
+    if (p.idx_is_64 != 0) {
+        const uint lo = uint(idx.words[int(2 * i)]);
+        const uint hi = uint(idx.words[int(2 * i + 1)]);
+        return int64_t((uint64_t(hi) << 32) | uint64_t(lo));
+    }
+    return int64_t(idx.words[int(i)]);
+}
+
+// 越界下标截断到 0：宿主会读标志并抛 "index out of range"，但即使它没读，
+// 内核也不能越界读写。
+int64_t clamp_index(int64_t v, int64_t axis_len) {
+    if (v < 0 || v >= axis_len) {
+        flag.data[0] = 1;
+        return 0;
+    }
+    return v;
+}
+
+// 输出元素 (o, k, inn) = 输入 (o, idx[k], inn)；一个线程一个输出元素。
+void main() {
+    const int64_t total = int64_t(p.outer) * int64_t(p.idx_len) * int64_t(p.inner);
+    const int64_t i = int64_t(gl_GlobalInvocationID.x);
+    if (i >= total) return;
+    const int64_t inn = i % int64_t(p.inner);
+    const int64_t t   = i / int64_t(p.inner);
+    const int64_t k   = t % int64_t(p.idx_len);
+    const int64_t o   = t / int64_t(p.idx_len);
+    const int64_t r   = clamp_index(load_index(k), int64_t(p.axis_len));
+    dst.data[int(i)] = src.data[int((o * int64_t(p.axis_len) + r) * int64_t(p.inner) + inn)];
+}

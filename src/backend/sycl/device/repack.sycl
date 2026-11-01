@@ -47,8 +47,10 @@ int sycl_c_launch_repack(void* ctx, const void* in, void* out, int64_t numel,
                       static_cast<char*>(out), numel, offset, ndim, dtype_size,
                       shape, strides);
         return tvv::sycl::kSyclOk;
+    } catch (const std::exception& e) {
+        return record_failure(e);
     } catch (...) {
-        return tvv::sycl::kSyclFailure;
+        return record_failure();
     }
 }
 

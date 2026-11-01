@@ -38,7 +38,12 @@ inline void check(int status, const char* what) {
     const char* reason = status == ::tvv::sycl::kSyclInvalid     ? "invalid argument"
                          : status == ::tvv::sycl::kSyclUnsupported ? "unsupported dtype"
                                                                   : "device failure";
-    throw std::runtime_error(std::string("sycl ") + what + ": " + reason);
+    // 设备运行时抛了什么就带出来：接缝只有状态码，"device failure" 对排查毫无
+    // 用处，"No kernel named ... was found" 才能定位到设备镜像/选择器的问题。
+    const char* detail = ::sycl_c_last_error();
+    if (detail == nullptr || detail[0] == '\0')
+        throw std::runtime_error(std::string("sycl ") + what + ": " + reason);
+    throw std::runtime_error(std::string("sycl ") + what + ": " + reason + " (" + detail + ")");
 }
 
 inline void* handle_of(const SYCLContext& ctx) {

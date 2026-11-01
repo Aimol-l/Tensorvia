@@ -41,8 +41,10 @@ int sycl_c_launch_cast(void* ctx, const void* in, void* out, int64_t numel,
                 return tvv::sycl::kSyclOk;
             });
         });
+    } catch (const std::exception& e) {
+        return record_failure(e);
     } catch (...) {
-        return tvv::sycl::kSyclFailure;
+        return record_failure();
     }
 }
 

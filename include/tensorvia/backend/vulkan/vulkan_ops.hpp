@@ -188,4 +188,19 @@ template <> struct SliceImpl<Device::VULKAN> {
     static Tensor execute(const Tensor& t, const std::vector<std::pair<int64_t, int64_t>>& ranges);
 };
 
+template <> struct WhereImpl<Device::VULKAN> {
+    static Tensor execute(const Tensor& cond, const Tensor& a, const Tensor& b);
+    static Tensor execute(const Tensor& cond, const Tensor& a, float b);
+    static Tensor execute(const Tensor& cond, float a, const Tensor& b);
+};
+template <> struct IndexSelectImpl<Device::VULKAN> {
+    static Tensor execute(const Tensor& input, int dim, const Tensor& index);
+};
+template <> struct GatherImpl<Device::VULKAN> {
+    static Tensor execute(const Tensor& input, int dim, const Tensor& index);
+};
+template <> struct CumsumImpl<Device::VULKAN> {
+    static Tensor execute(const Tensor& a, int axis);
+};
+
 }  // namespace ops

@@ -128,6 +128,55 @@ struct BcastVecParams {
 };
 
 // ---------------------------------------------------------------------------
+// where / index_select / gather / cumsum 的参数。
+//
+// where 的参数放不进 push constant：三套广播步长 + 四个偏移在 8 维下就超过 128
+// 字节。它和 concat 一样放进 binding 0 的 SSBO，字段全部 8 字节，std430 的对齐
+// 与 GLSL 结构体逐字节一致。cond 进入着色器前已在宿主上转成 FLOAT64（见
+// src/backend/vulkan/index.cpp），因此这里不携带 cond 的 dtype。
+// ---------------------------------------------------------------------------
+struct WhereParams {
+    int64_t numel;
+    int64_t ndim;
+    int64_t shape[8];
+    int64_t sc[8];
+    int64_t sa[8];
+    int64_t sb[8];
+    int64_t off_c;
+    int64_t off_a;
+    int64_t off_b;
+    int64_t off_o;
+};
+
+// index_select 与 cumsum 共用的几何：输入视为 outer x axis_len x inner。
+// `idx_len` 只对 index_select 有意义，`idx_is_64` 表示 index 的标量宽度。
+struct IndexAxisParams {
+    int32_t outer;
+    int32_t axis_len;
+    int32_t inner;
+    int32_t idx_len;
+    int32_t idx_is_64;
+};
+
+// gather：输出形状与 index 相同，非 dim 维的坐标决定输入 base。
+struct GatherParams {
+    int32_t numel;
+    int32_t ndim;
+    int32_t dim;
+    int32_t idx_is_64;
+    int32_t axis_dim;
+    int32_t axis_stride;
+    int32_t out_shape[8];
+    int32_t in_strides[8];
+};
+
+struct CumsumParams {
+    int32_t outer;
+    int32_t axis_len;
+    int32_t inner;
+};
+
+// ---------------------------------------------------------------------------
 // 由 VMA 支撑的 buffer 持有者。
 //
 // Vulkan 只给出少量堆，并要求应用自己做子分配；每个张量单独分配一块

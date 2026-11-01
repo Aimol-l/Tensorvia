@@ -40,8 +40,10 @@ int sycl_c_launch_transpose(void* ctx, const void* in, void* out, int dtype,
             transpose_kernel<T>(q, static_cast<const T*>(in), static_cast<T*>(out), *p);
             return tvv::sycl::kSyclOk;
         });
+    } catch (const std::exception& e) {
+        return record_failure(e);
     } catch (...) {
-        return tvv::sycl::kSyclFailure;
+        return record_failure();
     }
 }
 

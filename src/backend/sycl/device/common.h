@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <limits>
 #include <mutex>
 #include <type_traits>
@@ -23,11 +24,71 @@ using tvv::sycl::kMaxDims;
 
 inline constexpr size_t kWorkGroup = 256;
 
+// 启动函数的 catch 走这里：先把运行时的原始描述记到调用线程上（接缝只有纯 C
+// 状态码，"device failure" 说明不了任何事），再返回失败。
+inline int record_failure(const std::exception& e) {
+    ::sycl_c_record_error(e.what());
+    return tvv::sycl::kSyclFailure;
+}
+
+inline int record_failure() {
+    ::sycl_c_record_error(nullptr);
+    return tvv::sycl::kSyclFailure;
+}
+
+// 设备能不能真的跑我们的内核。
+//
+// 一台机器可以同时暴露几块“SYCL 设备”，但其中有的装不下我们的设备镜像：本机的
+// NVIDIA 设备走 CUDA 适配器，运行时拿不到 fill_kernel<float>（"No kernel named
+// ... was found"），Intel OpenCL CPU 设备则跑得动。索引空间若不筛掉这类设备，
+// 调用方按序号逐个探测就会撞上一个永远失败的条目——那正是
+// DeviceId.SynchronizeCoversAllIndices 一直在报的错。
+//
+// 探测用一个最小内核（分配 + 1 个元素的 parallel_for + wait），而不是查设备属性：
+// 能失败的地方全在“这个运行时的镜像能不能落到这块设备上”，属性看不出来。
+inline bool device_runs_kernels(const ::sycl::device& device) {
+    int* buffer = nullptr;
+    bool ok = false;
+    try {
+        ::sycl::queue queue{device,
+                            ::sycl::property_list{::sycl::property::queue::in_order()}};
+        buffer = ::sycl::malloc_device<int>(1, queue);
+        if (buffer != nullptr) {
+            queue.parallel_for(::sycl::range<1>{1}, [=](::sycl::id<1> i) { buffer[i] = 1; });
+            queue.wait_and_throw();
+            ok = true;
+        }
+        // 释放必须走分配它的那条队列（同一个 context），不能另造一个 context。
+        if (buffer != nullptr) ::sycl::free(buffer, queue);
+    } catch (...) {
+        return false;
+    }
+    return ok;
+}
+
+// 可用设备在 sycl::device::get_devices() 里的下标，按原顺序；首次调用时探测一次
+// 并缓存。全部探测失败时退回“全部可用”——此时是运行时的探测能力出了问题，
+// 早退成 0 个设备会把整个后端藏起来，反而更难查。
+inline const std::vector<int>& usable_device_indices() {
+    static const std::vector<int> usable = [] {
+        const auto devices = ::sycl::device::get_devices();
+        std::vector<int> filtered;
+        for (size_t i = 0; i < devices.size(); ++i) {
+            if (device_runs_kernels(devices[i])) filtered.push_back(static_cast<int>(i));
+        }
+        if (filtered.empty()) {
+            for (size_t i = 0; i < devices.size(); ++i) filtered.push_back(static_cast<int>(i));
+        }
+        return filtered;
+    }();
+    return usable;
+}
+
 // 每条（线程, 上下文）一条 in-order 队列：首次使用时惰性创建，登记在 context
 // 里供 wait 与析构使用。所有队列都由同一个 sycl::context 构造——USM 分配归属
 // context，不共享 context 的队列之间不能互用同一块内存。
-// 索引 -1 表示“由 default_selector_v 决定”；非负索引是
-// sycl::device::get_devices() 中的位置，也就是外部设备探测所报告的那个索引空间。
+// 索引 -1 表示“默认设备”；非负索引是可用设备列表中的位置（见
+// usable_device_indices），也就是外部设备探测报告的那个索引空间。
 struct Context {
     ::sycl::device  device;
     ::sycl::context sycl_context;
@@ -44,13 +105,24 @@ struct Context {
     ::sycl::queue& current_queue();
 
     static ::sycl::device device_of(int device_index) {
-        if (device_index < 0) return ::sycl::device(::sycl::default_selector_v);
         const auto devices = ::sycl::device::get_devices();
-        if (device_index >= static_cast<int>(devices.size())) {
+        const auto& usable = usable_device_indices();
+        // 默认设备：可用设备里的第一块 GPU；没有 GPU 就取第一块可用的。
+        if (device_index < 0) {
+            for (int slot : usable) {
+                if (devices[static_cast<size_t>(slot)].is_gpu())
+                    return devices[static_cast<size_t>(slot)];
+            }
+            if (usable.empty()) {
+                throw ::sycl::exception(::sycl::errc::invalid, "no usable SYCL device");
+            }
+            return devices[static_cast<size_t>(usable.front())];
+        }
+        if (device_index >= static_cast<int>(usable.size())) {
             throw ::sycl::exception(::sycl::errc::invalid,
                                     "no SYCL device at the requested index");
         }
-        return devices[static_cast<size_t>(device_index)];
+        return devices[static_cast<size_t>(usable[static_cast<size_t>(device_index)])];
     }
 };
 

@@ -118,6 +118,43 @@ struct Transpose {
     int64_t axes[kMaxDims]        = {};
 };
 
+// 三路广播选择（where）：cond / a / b 各一套广播步长，各自叠加视图偏移。
+struct Select {
+    int64_t numel    = 0;
+    int32_t ndim     = 0;
+    int32_t cond_dtype = 0;  // DataType 的序号；cond 的标量类型在核心里查表
+    int64_t shape[kMaxDims] = {};
+    int64_t sc[kMaxDims]    = {};
+    int64_t sa[kMaxDims]    = {};
+    int64_t sb[kMaxDims]    = {};
+    int64_t off_c = 0;
+    int64_t off_a = 0;
+    int64_t off_b = 0;
+    int64_t off_o = 0;
+};
+
+// index_select 与 cumsum 的几何：输入视为 outer x axis_len x inner。
+// `idx_len` 只对 index_select 有意义。
+struct IndexAxis {
+    int64_t outer    = 0;
+    int64_t axis_len = 0;
+    int64_t inner    = 0;
+    int64_t idx_len  = 0;
+};
+
+// gather：输出形状与 index 相同，非 dim 维坐标决定输入 base。
+struct Gather {
+    int64_t numel       = 0;
+    int32_t ndim        = 0;
+    int32_t idx_dtype   = 0;  // DataType 的序号；index 的标量类型在核心里查表
+    int64_t out_shape[kMaxDims]  = {};
+    int64_t in_strides[kMaxDims] = {};
+    int64_t axis_dim    = 0;  // dim 维长度，用于越界判定
+    int64_t axis_stride = 0;  // dim 维在输入中的步长
+    int32_t dim         = 0;
+    int32_t reserved    = 0;
+};
+
 // ---------------------------------------------------------------------------
 // 错误处理。
 //
@@ -216,6 +253,25 @@ cudaError_t launch_transpose(cudaStream_t stream, const void* in, void* out,
 // 把跨步视图（由 `meta` 描述）物化为连续 buffer。
 cudaError_t launch_repack(cudaStream_t stream, const void* in, void* out,
                           const Metadata& meta);
+
+// where：cond 判真后从 a 或 b 取元素，写出 dtype 由 val_dtype 决定（BOOL 会规范化）。
+cudaError_t launch_select(cudaStream_t stream, const void* cond, const void* a,
+                          const void* b, void* out, DataType val_dtype, const Select& p);
+
+// index_select / gather：`flag` 是设备上的 int32 越界标志（可为 nullptr），
+// 任一索引落在 [0, axis_dim) 之外时置 1；核心里对越界索引做截断，因此即使调用方
+// 不读标志也不会越界读写。
+cudaError_t launch_index_select(cudaStream_t stream, const void* in, const void* idx,
+                                void* out, DataType val_dtype, DataType idx_dtype,
+                                const IndexAxis& p, int32_t* flag);
+
+cudaError_t launch_gather(cudaStream_t stream, const void* in, const void* idx,
+                          void* out, DataType val_dtype, DataType idx_dtype,
+                          const Gather& p, int32_t* flag);
+
+// 沿 axis 的累积和；输出与输入同形同 dtype。
+cudaError_t launch_cumsum(cudaStream_t stream, const void* in, void* out,
+                          DataType dtype, const IndexAxis& p);
 
 }  // namespace tvv::cuda
 

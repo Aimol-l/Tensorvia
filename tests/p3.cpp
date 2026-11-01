@@ -165,10 +165,9 @@ TEST_F(DeviceOps, TransposedComparisonMatchesContiguous) {
     expect_close(host_values<std::int8_t>(ops::Greater(at, bt)), want_gt, "A^T > B^T");
 }
 
-// where 的 cond/a 都是视图，且广播维来自标量分支。
-// where 目前只实现了 CPU 后端（公开入口不走 execute_on），设备 lane 跳过。
+// where 的 cond/a 都是视图，且广播维来自标量分支。设备实现会把非连续的 cond/a
+// 物化后再算，所以视图输入在各后端都要给出与连续输入一致的结果。
 TEST_F(DeviceOps, WhereOnViewsMatchesContiguous) {
-    if (dev != Device::CPU) GTEST_SKIP() << "where is CPU-only";
     constexpr int64_t rows = 4, cols = 5;
     std::vector<float> cond_v = ramp(rows * cols, 1.0f, 3.0f);  // 有正有负
     std::vector<float> av = ramp(rows * cols, 0.5f, 1.0f);

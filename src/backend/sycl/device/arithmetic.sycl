@@ -97,8 +97,10 @@ int sycl_c_launch_binary(void* ctx, const void* a, const void* b, void* out,
                              static_cast<T*>(out), *p, op);
             return tvv::sycl::kSyclOk;
         });
+    } catch (const std::exception& e) {
+        return record_failure(e);
     } catch (...) {
-        return tvv::sycl::kSyclFailure;
+        return record_failure();
     }
 }
 
@@ -112,8 +114,10 @@ int sycl_c_launch_scalar(void* ctx, void* buf, int64_t numel, int dtype,
             scalar_kernel<T>(q, static_cast<T*>(buf), numel, op, scalar);
             return tvv::sycl::kSyclOk;
         });
+    } catch (const std::exception& e) {
+        return record_failure(e);
     } catch (...) {
-        return tvv::sycl::kSyclFailure;
+        return record_failure();
     }
 }
 
@@ -138,8 +142,10 @@ int sycl_c_launch_unary(void* ctx, const void* in, void* out, int64_t numel,
             }
             return tvv::sycl::kSyclOk;
         });
+    } catch (const std::exception& e) {
+        return record_failure(e);
     } catch (...) {
-        return tvv::sycl::kSyclFailure;
+        return record_failure();
     }
 }
 

@@ -47,10 +47,11 @@
   全程留在设备上，无隐式回拷）
 - 归约：`Sum`、`Min`、`Max`、`Mean`、`Argmax`、`Argmin`（`Var/Std/Norm` 见上）
 - 比较/逻辑：`Equal`、`NotEqual`、`Greater`、`Less`、`GreaterEqual`、`LessEqual`、`All`、`Any`、`Nonzero`、`CountNonzero`
+- 条件/索引/扫描：`Where`（三路广播）、`IndexSelect`、`Gather`（embedding 取行与逐元素取址）、`Cumsum`
 - 形状/搬移/类型：`Concat`、`Transpose`、`Slice`、`Split`、`Chunk`、`Stack`、`Pad`、`Repeat`、`Flip`、`Roll`、`Typecast`
 
 仍为 CPU-only 的算子（设备张量调用抛 `"only the CPU backend implements this op"`，不会静默回退 CPU）：
-`Erf`、`Cumsum`、`Where`、`IndexSelect`、`Gather`、`MaskedSelect`、`MaskedFill`、`Sort`、`Topk`、`Prod`。
+`Erf`、`MaskedSelect`、`MaskedFill`、`Sort`、`Topk`、`Prod`。
 
 ## 📦 依赖
 

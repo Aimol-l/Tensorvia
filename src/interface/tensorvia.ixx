@@ -161,5 +161,4 @@ using ::ops::SortResult;
 using ::ops::TopkResult;
 using ::ops::Sort;
 using ::ops::Topk;
-using ::ops::Temp;
 }

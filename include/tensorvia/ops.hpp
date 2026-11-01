@@ -206,9 +206,11 @@ Tensor Std(const Tensor& a, int axis, bool keepdim, DataType dtype);
 Tensor Norm(const Tensor& a, float p, DataType dtype);
 Tensor Norm(const Tensor& a, float p, int axis, bool keepdim, DataType dtype);
 
-float MseLoss(const Tensor& input, const Tensor& target);
-float NllLoss(const Tensor& input, const Tensor& target);
-float CrossEntropyLoss(const Tensor& input, const Tensor& target);
+// 损失：返回 0 维张量（与归约一致），dtype 走 mean 的规则——整型与 16 位浮点
+// 输入回到 FLOAT32，FLOAT64 保持 FLOAT64。
+Tensor MseLoss(const Tensor& input, const Tensor& target);
+Tensor NllLoss(const Tensor& input, const Tensor& target);
+Tensor CrossEntropyLoss(const Tensor& input, const Tensor& target);
 
 void Typecast(Tensor& a, DataType dst_type);
 Tensor Typecast(const Tensor& a, DataType dst_type);
@@ -289,7 +291,5 @@ struct TopkResult {
 };
 SortResult Sort(const Tensor& t, int64_t dim = -1, bool descending = false);
 TopkResult Topk(const Tensor& t, int64_t k, int64_t dim = -1, bool largest = true);
-
-void Temp(Tensor& t);
 
 }  // namespace ops

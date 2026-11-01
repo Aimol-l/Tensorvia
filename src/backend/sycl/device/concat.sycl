@@ -78,8 +78,10 @@ int sycl_c_launch_concat(void* ctx, void* out, const void* const* inputs,
             if (status != tvv::sycl::kSyclOk) return status;
         }
         return tvv::sycl::kSyclOk;
+    } catch (const std::exception& e) {
+        return record_failure(e);
     } catch (...) {
-        return tvv::sycl::kSyclFailure;
+        return record_failure();
     }
 }
 

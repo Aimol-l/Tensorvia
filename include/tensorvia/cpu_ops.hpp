@@ -340,11 +340,6 @@ template <> struct ExportCsvImpl<Device::CPU> {
     static void execute(const Tensor& a, const std::string& path);
 };
 
-template <Device D> struct TempImpl;
-template <> struct TempImpl<Device::CPU> {
-    static void execute(Tensor& a);
-};
-
 // ================================================================
 // element-wise ufunc 框架：
 // 类型提升 / 非连续视图物化 / 输出分配 / dtype 分发统一在这里处理，

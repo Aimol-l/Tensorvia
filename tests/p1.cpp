@@ -18,6 +18,12 @@ std::vector<float> ramp(int64_t n, float step = 0.1f, float start = -1.0f) {
     return v;
 }
 
+// Tensor 的宿主构造要求源的具名左值；本文件多处只需要"一份临时数据 + 形状"。
+template <typename T>
+Tensor from_values(std::vector<T> values, std::initializer_list<int64_t> shape) {
+    return Tensor(values, shape);
+}
+
 // 同一个算子先在 CPU 上算一遍作为参考，再在设备上算一遍：形状、dtype、设备
 // 与数值都必须一致（设备路径是用已有算子组装的，参考的是同一套语义）。
 void expect_same_as_cpu(const Tensor& device_result, const Tensor& cpu_result,
@@ -539,6 +545,78 @@ TEST_F(DeviceOps, GeneratorsLandOnTheDevice) {
     EXPECT_EQ(rn.numel(), 64u);
 }
 
+// where / index_select / gather / cumsum 是注意力与 embedding 的骨架：三路广播、
+// 沿轴查表、沿轴前缀和。参考值直接写死，不经由被测代码。
+TEST_F(DeviceOps, SelectIndexAndScanMatchReference) {
+    // where：cond(2,1) 广播到 (2,3)，值来自 a 或 b。
+    const Tensor cond = moved_to(from_values<float>({1, 0}, {2, 1}), kTestDevice);
+    const Tensor wa = moved_to(from_values<float>({1, 2, 3, 4, 5, 6}, {2, 3}), kTestDevice);
+    const Tensor wb = moved_to(from_values<float>({-1, -2, -3, -4, -5, -6}, {2, 3}),
+                               kTestDevice);
+    const Tensor w = ops::Where(cond, wa, wb);
+    EXPECT_EQ(w.device(), kTestDevice);
+    EXPECT_EQ(w.dtype(), DataType::FLOAT32);
+    expect_close(host_values<float>(w), {1, 2, 3, -4, -5, -6}, "where");
+
+    // 标量版本两个方向。
+    expect_close(host_values<float>(ops::Where(cond, wa, 7.0f)),
+                 {1, 2, 3, 7, 7, 7}, "where scalar b");
+    expect_close(host_values<float>(ops::Where(cond, 7.0f, wb)),
+                 {7, 7, 7, -4, -5, -6}, "where scalar a");
+
+    // 非 BOOL 的 cond：非零即真，与 CPU 一致。
+    const Tensor num_cond = moved_to(from_values<std::int32_t>({0, 2}, {2, 1}), kTestDevice);
+    expect_close(host_values<float>(ops::Where(num_cond, wa, wb)),
+                 {-1, -2, -3, 4, 5, 6}, "where int cond");
+
+    // index_select：dim=0 的 embedding 查表与 dim=1 的列选取。
+    const Tensor emb = moved_to(from_values<float>(ramp(12, 1.0f, 0.0f), {4, 3}), kTestDevice);
+    const Tensor row_idx = moved_to(from_values<std::int32_t>({2, 0, 2}, {3}), kTestDevice);
+    const Tensor sel = ops::IndexSelect(emb, 0, row_idx);
+    EXPECT_EQ(sel.device(), kTestDevice);
+    expect_close(host_values<float>(sel), {6, 7, 8, 0, 1, 2, 6, 7, 8}, "index_select dim 0");
+
+    const Tensor col_idx = moved_to(from_values<std::int64_t>({2, 0}, {2}), kTestDevice);
+    expect_close(host_values<float>(ops::IndexSelect(emb, 1, col_idx)),
+                 {2, 0, 5, 3, 8, 6, 11, 9}, "index_select dim 1");
+
+    // 越界索引必须抛异常，而不是给出静默的错误结果。
+    const Tensor bad = moved_to(from_values<std::int32_t>({5}, {1}), kTestDevice);
+    EXPECT_THROW(ops::IndexSelect(emb, 0, bad), std::runtime_error);
+
+    // gather：PyTorch 语义，index 与 input 同秩。
+    const Tensor g = moved_to(from_values<float>({1, 2, 3, 4}, {2, 2}), kTestDevice);
+    const Tensor gi = moved_to(from_values<std::int32_t>({0, 0, 1, 0}, {2, 2}), kTestDevice);
+    expect_close(host_values<float>(ops::Gather(g, 1, gi)), {1, 1, 4, 3}, "gather dim 1");
+    const Tensor gi0 = moved_to(from_values<std::int32_t>({0, 1, 1, 0}, {2, 2}), kTestDevice);
+    expect_close(host_values<float>(ops::Gather(g, 0, gi0)), {1, 4, 3, 2}, "gather dim 0");
+
+    // 秩与非 dim 维尺寸是公共入口的契约：设备内核直接拿 index 的形状解码输入
+    // 坐标，放行就会越界读。这里确认每个后端都在入口处拒绝。
+    const Tensor gi_1d = moved_to(from_values<std::int32_t>({0, 1}, {2}), kTestDevice);
+    EXPECT_THROW(ops::Gather(g, 0, gi_1d), std::runtime_error);
+    const Tensor gi_wide = moved_to(from_values<std::int32_t>({0, 0, 0, 0, 0, 0}, {3, 2}),
+                                    kTestDevice);
+    EXPECT_THROW(ops::Gather(g, 1, gi_wide), std::runtime_error);
+    // 越界索引在 gather 上同样必须抛异常。
+    const Tensor gi_bad = moved_to(from_values<std::int32_t>({0, 2, 1, 0}, {2, 2}), kTestDevice);
+    EXPECT_THROW(ops::Gather(g, 1, gi_bad), std::runtime_error);
+
+    // cumsum：两个轴各一条，覆盖 outer/inner 都非 1 的情形。
+    const Tensor m = moved_to(from_values<float>(ramp(6, 1.0f, 1.0f), {2, 3}), kTestDevice);
+    const Tensor cs1 = ops::Cumsum(m, 1);
+    EXPECT_EQ(cs1.device(), kTestDevice);
+    expect_close(host_values<float>(cs1), {1, 3, 6, 4, 9, 15}, "cumsum axis 1");
+    expect_close(host_values<float>(ops::Cumsum(m, 0)), {1, 2, 3, 5, 7, 9},
+                 "cumsum axis 0");
+
+    // 更高秩：cumsum 沿中间轴，验证 outer/axis/inner 三段几何。
+    const Tensor cube = moved_to(from_values<float>(ramp(12, 1.0f, 0.0f), {2, 2, 3}),
+                                 kTestDevice);
+    expect_close(host_values<float>(ops::Cumsum(cube, 1)),
+                 {0, 1, 2, 3, 5, 7, 6, 7, 8, 15, 17, 19}, "cumsum axis 1 on 3-D");
+}
+
 TEST_F(DeviceOps, UnsupportedOpsFailExplicitlyOnDevices) {
     std::vector<float> tv = ramp(6);
     const Tensor T = moved_to(Tensor(tv, std::vector<int64_t>{2, 3}), kTestDevice);
@@ -546,23 +624,27 @@ TEST_F(DeviceOps, UnsupportedOpsFailExplicitlyOnDevices) {
     const Tensor I = moved_to(Tensor(iv, std::vector<int64_t>{2}), kTestDevice);
     const Tensor pred = ops::Greater(T, 0.0f);
 
+    // 条件选择、索引与累积和已经落到每个后端上，不再属于这张清单。
+    EXPECT_NO_THROW(ops::Cumsum(T, 1));
+    EXPECT_NO_THROW(ops::Where(pred, T, T));
+    EXPECT_NO_THROW(ops::IndexSelect(T, 0, I));
+    // gather 的索引与输入同秩：dim 0 上形状 {2,3} 的索引取到的是一份重排。
+    std::vector<int64_t> gv{0, 1, 1, 0, 1, 0};
+    const Tensor I2 = moved_to(Tensor(gv, std::vector<int64_t>{2, 3}), kTestDevice);
+    EXPECT_NO_THROW(ops::Gather(T, 0, I2));
+
     if (kTestDevice == Device::CPU) {
         // CPU 都实现了，这里只是确认它们不是被意外禁用。
         EXPECT_NO_THROW(ops::Erf(T));
-        EXPECT_NO_THROW(ops::Cumsum(T, 1));
         GTEST_SKIP() << "the CPU backend implements every op in this list";
     }
     EXPECT_THROW(ops::Erf(T), std::runtime_error);
-    EXPECT_THROW(ops::Cumsum(T, 1), std::runtime_error);
-    EXPECT_THROW(ops::Where(pred, T, T), std::runtime_error);
-    EXPECT_THROW(ops::IndexSelect(T, 0, I), std::runtime_error);
-    EXPECT_THROW(ops::Gather(T, 0, I), std::runtime_error);
     EXPECT_THROW(ops::Sort(T), std::runtime_error);
     EXPECT_THROW(ops::Topk(T, 1), std::runtime_error);
 
     // 错误必须点名后端，而不是悄悄退回 CPU 或先算出错误结果。
     try {
-        (void)ops::Cumsum(T, 1);
+        (void)ops::Erf(T);
     } catch (const std::runtime_error& e) {
         EXPECT_NE(std::string(e.what()).find(device_to_string(kTestDevice)), std::string::npos)
             << e.what();
