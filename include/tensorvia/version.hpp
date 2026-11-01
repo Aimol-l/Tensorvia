@@ -2,9 +2,8 @@
 
 #include <string_view>
 
-// Consumers of a prebuilt `mcpp pack` package compile this interface unit
-// themselves and do not inherit the library's -D flags, so the fallback must
-// carry the real version (keep it in sync with mcpp.toml / CMakeLists.txt).
+// 使用预编译 `mcpp pack` 包的一方会自己编译这个接口单元，拿不到库构建时的 -D
+// 宏，所以回退值必须就是真实版本（与 mcpp.toml / CMakeLists.txt 保持一致）。
 #ifndef TENSORVIA_VERSION
     #define TENSORVIA_VERSION "0.3.0"
 #endif

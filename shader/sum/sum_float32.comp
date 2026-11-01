@@ -23,13 +23,13 @@ void main() {
     uint block_size = gl_WorkGroupSize.x;
     uint group_size = gl_NumWorkGroups.x * block_size;
 
-    // grid stride
+    // 网格跨步
     float sum = 0.0f;
     for (uint s = idx; s < params.numel; s += group_size) {
         sum += src.data[s];
     }
 
-    // block stride
+    // 块跨步
     sharedMem[tid] = sum;
     barrier();
 

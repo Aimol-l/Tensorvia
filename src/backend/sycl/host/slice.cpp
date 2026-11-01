@@ -1,6 +1,5 @@
-// Start/stop slice of a strided input into a contiguous output, for
-// Device::SYCL. Every dimension carries a start offset (zero for dimensions
-// that are not sliced).
+// 跨步输入的起止切片，输出连续，用于 Device::SYCL。每一维都携带起始偏移
+// （未切片的维为 0）。
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
@@ -36,7 +35,7 @@ Tensor SliceImpl<Device::SYCL>::execute(
 
     tvv::sycl::Slice p{};
     p.numel = static_cast<int64_t>(out.numel());
-    // t.data() already points at the view origin; the kernel's offset stays 0.
+    // t.data() 已指向视图起点；内核的 offset 保持为 0。
     p.offset = 0;
     p.ndim = ndim;
     for (int d = 0; d < ndim; ++d) {
@@ -51,7 +50,6 @@ Tensor SliceImpl<Device::SYCL>::execute(
                           sycl_ufunc::handle_of(*ctx), t.data(), out.data(),
                           static_cast<int>(t.dtype()), &p),
                       "Slice launch");
-    ctx->wait();
     return out;
 }
 

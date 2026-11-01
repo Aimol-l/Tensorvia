@@ -1,5 +1,5 @@
-// Softmax along one axis. Relu/Silu/Tanh/Sigmoid are element-wise unary ops and
-// live in arithmetic.sycl.
+// 沿单轴做 Softmax。Relu/Silu/Tanh/Sigmoid 是逐元素一元算子，位于
+// arithmetic.sycl。
 #include "common.h"
 
 using namespace tvv::sycl_dev;
@@ -53,8 +53,10 @@ int sycl_c_launch_softmax(void* ctx, const void* in, void* out,
                 return tvv::sycl::kSyclOk;
             });
         });
+    } catch (const std::exception& e) {
+        return record_failure(e);
     } catch (...) {
-        return tvv::sycl::kSyclFailure;
+        return record_failure();
     }
 }
 

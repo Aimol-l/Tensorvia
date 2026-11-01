@@ -1,8 +1,7 @@
-// Concatenation along one axis, plus the host driver for ConcatImpl.
+// 沿单轴拼接，外加 ConcatImpl 的宿主驱动。
 //
-// The host entry point launches one kernel per input instead of staging a
-// device-side pointer array, so no managed memory or temporary allocation is
-// involved.
+// 宿主入口为每个输入启动一个内核，而不在设备侧暂存指针数组，因此不涉及托管内存
+// 或临时分配。
 #include "common.cuh"
 
 #include <cstdint>
@@ -33,8 +32,7 @@ struct ConcatOne {
     int64_t out_strides[kMaxDims];
 };
 
-// Decode the input's flat index, then re-encode it in the output, shifting the
-// coordinate on the concatenation axis by this input's prefix offset.
+// 解码输入的扁平下标，再在输出中重新编码，把拼接轴上的坐标偏移本输入的前缀量。
 template <class T>
 __global__ void concat_kernel(const T* in, T* out, ConcatOne p) {
     const int64_t stride = static_cast<int64_t>(gridDim.x) * blockDim.x;
@@ -125,8 +123,8 @@ Tensor ConcatImpl<Device::CUDA>::execute(const std::vector<Tensor>& tensors, int
     std::vector<int64_t> in_strides(n * static_cast<size_t>(ndim));
     int64_t prefix = 0;
     for (size_t i = 0; i < n; ++i) {
-        // tensor.data() includes the view offset, so a contiguous slice of a
-        // larger buffer concatenates its own elements.
+        // tensor.data() 含视图 offset，因此更大 buffer 上的连续切片会拼接自己
+        // 那些元素。
         inputs[i] = tensors[i].data();
         offsets[i] = prefix;
         prefix += tensors[i].shape(dim);
@@ -144,7 +142,6 @@ Tensor ConcatImpl<Device::CUDA>::execute(const std::vector<Tensor>& tensors, int
                                  dtype, out_strides.data(), in_shapes.data(),
                                  in_strides.data(), ndim, dim),
         "Concat launch");
-    ctx->wait();
     return out;
 }
 

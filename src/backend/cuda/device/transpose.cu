@@ -1,5 +1,5 @@
-// General N-D permutation into a contiguous output. A 2D transpose is the
-// {1,0} case; the same kernel covers batches and higher ranks.
+// 通用 N 维置换，输出连续。二维转置就是 {1,0} 的情形；同一个内核也覆盖 batch
+// 与更高秩。
 #include "common.cuh"
 
 #include <cstdint>
@@ -25,8 +25,7 @@ __global__ void transpose_kernel(const T* in, T* out, Transpose p) {
     const int64_t stride = static_cast<int64_t>(gridDim.x) * blockDim.x;
     for (int64_t i = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
          i < p.numel; i += stride) {
-        // Decode the contiguous input index with its strides, then encode the
-        // permuted coordinate in the output.
+        // 用输入步长解码连续输入下标，再在输出中编码置换后的坐标。
         int64_t rem = i;
         int64_t coord[kMaxDims];
         for (int d = 0; d < p.ndim; ++d) {
@@ -59,15 +58,15 @@ cudaError_t launch_transpose(cudaStream_t stream, const void* in, void* out,
 }  // namespace tvv::cuda
 
 // ---------------------------------------------------------------------------
-// Host driver.
+// 宿主驱动。
 // ---------------------------------------------------------------------------
 
 namespace ops {
 
 namespace {
 
-// Permute `a` (contiguous, possibly with a view offset) into `out`, which must
-// already have the permuted shape and a contiguous buffer.
+// 把 `a`（连续，可能带视图 offset）置换进 `out`，后者必须已具备置换后的形状与
+// 连续 buffer。
 void launch_transpose(const Tensor& a, Tensor& out, const std::vector<int64_t>& axes,
                       const char* what) {
     const int ndim = static_cast<int>(a.shape().size());
@@ -94,7 +93,7 @@ void launch_transpose(const Tensor& a, Tensor& out, const std::vector<int64_t>& 
         p.in_strides[d] = a.strides(d);
         p.axes[d] = axes[d];
     }
-    // Output is freshly allocated (or reshaped and contiguous): row-major.
+    // 输出是全新分配（或经 reshape 得到）且连续：行主序。
     for (int d = ndim - 1; d >= 0; --d) {
         p.out_strides[d] = (d == ndim - 1) ? 1 : p.out_strides[d + 1] * out.shape(d + 1);
     }
@@ -104,7 +103,6 @@ void launch_transpose(const Tensor& a, Tensor& out, const std::vector<int64_t>& 
         tvv::cuda::launch_transpose(static_cast<cudaStream_t>(ctx->stream()), a.data(),
                                     out.data(), a.dtype(), p),
         what);
-    ctx->wait();
 }
 
 std::vector<int64_t> permuted_shape(const Tensor& a,
@@ -118,7 +116,7 @@ std::vector<int64_t> permuted_shape(const Tensor& a,
 }  // namespace
 
 void TransposeImpl<Device::CUDA>::execute(Tensor& a) {
-    // The public API restricts this form to 2D contiguous tensors.
+    // 公开 API 把这种形式限定为二维连续张量。
     Tensor out({a.shape(1), a.shape(0)}, a.dtype(), Device::CUDA);
     launch_transpose(a, out, {1, 0}, "Transpose");
     a = std::move(out);
@@ -134,7 +132,7 @@ Tensor TransposeImpl<Device::CUDA>::execute(const Tensor& a,
 void TransposeImpl<Device::CUDA>::execute(const Tensor& a, Tensor& dst,
                                           std::initializer_list<int64_t> axes) {
     std::vector<int64_t> shape = permuted_shape(a, axes);
-    dst.reshape(shape);
+    dst = dst.reshape(shape);
     launch_transpose(a, dst, std::vector<int64_t>(axes), "Transpose");
 }
 

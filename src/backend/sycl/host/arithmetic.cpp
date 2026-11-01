@@ -1,10 +1,8 @@
-// Host driver that defines AddImpl/SubImpl/MulImpl/DivImpl/AbsImpl/... for
-// Device::SYCL.
+// 为 Device::SYCL 定义 AddImpl/SubImpl/MulImpl/DivImpl/AbsImpl/... 的宿主驱动。
 //
-// The device side is dtype-agnostic per launch: the host promotes both operands
-// (and the output) to a common dtype before calling in, so each seam call
-// dispatches a single scalar type. Mixed dtypes are rejected instead of
-// silently narrowing.
+// 设备侧每次启动都与 dtype 无关：宿主在调用前把两个操作数（以及输出）提升到公共
+// dtype，所以每次接缝调用只派发一种标量类型。混合 dtype 会被拒绝，而不是静默
+// 收窄。
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
@@ -23,7 +21,7 @@
 namespace ops {
 
 // ---------------------------------------------------------------------------
-// Scalar arithmetic.
+// 标量算术。
 // ---------------------------------------------------------------------------
 void AddImpl<Device::SYCL>::execute(Tensor& a, float b) {
     sycl_ufunc::scalar_inplace(a, tvv::sycl::kBinAdd, b, "Add");
@@ -52,7 +50,7 @@ Tensor DivImpl<Device::SYCL>::execute(const Tensor& a, float b) {
 }
 
 // ---------------------------------------------------------------------------
-// Tensor-tensor arithmetic: dtype promotion + NumPy broadcasting.
+// 张量-张量算术：dtype 提升 + NumPy 广播。
 // ---------------------------------------------------------------------------
 Tensor AddImpl<Device::SYCL>::execute(const Tensor& a, const Tensor& b) {
     return sycl_ufunc::binary_arith(tvv::sycl::kBinAdd, a, b, nullptr);
@@ -81,8 +79,8 @@ void DivImpl<Device::SYCL>::execute(const Tensor& a, const Tensor& b, Tensor& ds
 }
 
 // ---------------------------------------------------------------------------
-// Unary element-wise. Integer inputs are computed in FLOAT32 for the
-// transcendental operators; Abs/Clamp keep the input dtype.
+// 一元逐元素运算。超越算子的整型输入以 FLOAT32 计算；Abs/Clamp 保持输入
+// dtype。
 // ---------------------------------------------------------------------------
 namespace {
 
@@ -131,6 +129,11 @@ void ExpImpl<Device::SYCL>::execute(Tensor& a) {
 }
 Tensor ExpImpl<Device::SYCL>::execute(const Tensor& a) {
     return unary_float_out(a, tvv::sycl::kUnaryExp, 0.0f, 0.0f, "Exp");
+}
+
+Tensor ErfImpl<Device::SYCL>::execute(const Tensor& a) {
+    // Erf 与 Exp 同族：整型输入在 double 里算（unary_compute_t）再提升到 FLOAT32。
+    return unary_float_out(a, tvv::sycl::kUnaryErf, 0.0f, 0.0f, "Erf");
 }
 void SqrtImpl<Device::SYCL>::execute(Tensor& a) {
     unary_float_inplace(a, tvv::sycl::kUnarySqrt, 0.0f, 0.0f, "Sqrt");

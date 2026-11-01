@@ -8,9 +8,8 @@
 #include "tensorvia/tensor.hpp"
 #include "tensorvia/factory.hpp"
 
-// Host <-> device transfer lives on TensorImpl, so every backend participates
-// through the same two primitives and these symbols are defined exactly once
-// regardless of how many backends are compiled in.
+// 宿主 <-> 设备传输实现在 TensorImpl 上，所以每个后端都通过同样的两个原语参与，
+// 而这些符号无论编入了多少个后端都只定义一次。
 void copy_device_to_host(std::shared_ptr<TensorImpl> src,
                          std::shared_ptr<TensorImpl> dst,
                          DataType dtype) {

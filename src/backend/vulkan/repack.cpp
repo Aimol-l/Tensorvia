@@ -17,8 +17,7 @@ void vulkan_repack(const Metadata& meta, vk::Buffer input, vk::Buffer output,
     params.ndim       = static_cast<uint32_t>(meta.shape.size());
     params.dtype_size = static_cast<uint32_t>(calc_dtype_size(meta.dtype));
     params.numel      = static_cast<uint32_t>(meta.numel);
-    // View origin: without it, a sliced view is repacked from the buffer base
-    // with correct shape/strides but wholly wrong values.
+    // 视图起点：没有它，切片视图会从 buffer 基址重排，形状/步长都对，值却全错。
     params.offset = static_cast<uint32_t>(meta.offset);
     for (int i = 0; i < 6; ++i) {
         const size_t slot = static_cast<size_t>(i);
@@ -30,8 +29,8 @@ void vulkan_repack(const Metadata& meta, vk::Buffer input, vk::Buffer output,
                                 : 0;
     }
     const uint32_t gx = static_cast<uint32_t>((meta.numel + 255) / 256);
-    // Binding order must match repack_int8.comp: binding 0 is Dst (write),
-    // binding 1 is Src (read).
+    // 绑定顺序必须与 repack_int8.comp 一致：绑定 0 是 Dst（写），绑定 1 是 Src
+    // （读）。
     ctx->submitCompute(OpType::Repack, DataType::INT8, {output, input}, gx, 1, 1, &params,
                        sizeof(params));
 }

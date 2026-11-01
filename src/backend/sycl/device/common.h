@@ -1,16 +1,18 @@
-// Shared vocabulary for the SYCL device units.
+// SYCL 设备单元共享的词汇表。
 //
-// These units are compiled by the DPC++ compiler, not by the project's host
-// compiler, and they only ever see sycl_island.h. Nothing here allocates or
-// throws across the seam: the launch entry points catch device-side failures
-// and report the status code defined by the island header.
+// 这些单元由 DPC++ 编译器编译，而非项目的宿主编译器，它们只能看到
+// sycl_island.h。此处不会跨接缝分配内存或抛异常：启动入口捕获设备侧失败，并
+// 报告 island 头文件中定义的状态码。
 #ifndef TVV_SYCL_DEVICE_COMMON_H
 #define TVV_SYCL_DEVICE_COMMON_H
 
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <limits>
+#include <mutex>
 #include <type_traits>
+#include <vector>
 
 #include <sycl/sycl.hpp>
 
@@ -22,20 +24,120 @@ using tvv::sycl::kMaxDims;
 
 inline constexpr size_t kWorkGroup = 256;
 
-// The queue lives here so every unit can recover it from the opaque handle.
+// 启动函数的 catch 走这里：先把运行时的原始描述记到调用线程上（接缝只有纯 C
+// 状态码，"device failure" 说明不了任何事），再返回失败。
+inline int record_failure(const std::exception& e) {
+    ::sycl_c_record_error(e.what());
+    return tvv::sycl::kSyclFailure;
+}
+
+inline int record_failure() {
+    ::sycl_c_record_error(nullptr);
+    return tvv::sycl::kSyclFailure;
+}
+
+// 设备能不能真的跑我们的内核。
+//
+// 一台机器可以同时暴露几块“SYCL 设备”，但其中有的装不下我们的设备镜像：本机的
+// NVIDIA 设备走 CUDA 适配器，运行时拿不到 fill_kernel<float>（"No kernel named
+// ... was found"），Intel OpenCL CPU 设备则跑得动。索引空间若不筛掉这类设备，
+// 调用方按序号逐个探测就会撞上一个永远失败的条目——那正是
+// DeviceId.SynchronizeCoversAllIndices 一直在报的错。
+//
+// 探测用一个最小内核（分配 + 1 个元素的 parallel_for + wait），而不是查设备属性：
+// 能失败的地方全在“这个运行时的镜像能不能落到这块设备上”，属性看不出来。
+inline bool device_runs_kernels(const ::sycl::device& device) {
+    int* buffer = nullptr;
+    bool ok = false;
+    try {
+        ::sycl::queue queue{device,
+                            ::sycl::property_list{::sycl::property::queue::in_order()}};
+        buffer = ::sycl::malloc_device<int>(1, queue);
+        if (buffer != nullptr) {
+            queue.parallel_for(::sycl::range<1>{1}, [=](::sycl::id<1> i) { buffer[i] = 1; });
+            queue.wait_and_throw();
+            ok = true;
+        }
+        // 释放必须走分配它的那条队列（同一个 context），不能另造一个 context。
+        if (buffer != nullptr) ::sycl::free(buffer, queue);
+    } catch (...) {
+        return false;
+    }
+    return ok;
+}
+
+// 可用设备在 sycl::device::get_devices() 里的下标，按原顺序；首次调用时探测一次
+// 并缓存。全部探测失败时退回“全部可用”——此时是运行时的探测能力出了问题，
+// 早退成 0 个设备会把整个后端藏起来，反而更难查。
+inline const std::vector<int>& usable_device_indices() {
+    static const std::vector<int> usable = [] {
+        const auto devices = ::sycl::device::get_devices();
+        std::vector<int> filtered;
+        for (size_t i = 0; i < devices.size(); ++i) {
+            if (device_runs_kernels(devices[i])) filtered.push_back(static_cast<int>(i));
+        }
+        if (filtered.empty()) {
+            for (size_t i = 0; i < devices.size(); ++i) filtered.push_back(static_cast<int>(i));
+        }
+        return filtered;
+    }();
+    return usable;
+}
+
+// 每条（线程, 上下文）一条 in-order 队列：首次使用时惰性创建，登记在 context
+// 里供 wait 与析构使用。所有队列都由同一个 sycl::context 构造——USM 分配归属
+// context，不共享 context 的队列之间不能互用同一块内存。
+// 索引 -1 表示“默认设备”；非负索引是可用设备列表中的位置（见
+// usable_device_indices），也就是外部设备探测报告的那个索引空间。
 struct Context {
-    ::sycl::queue queue;
-    Context()
-        : queue(::sycl::default_selector_v, ::sycl::property::queue::in_order()) {}
+    ::sycl::device  device;
+    ::sycl::context sycl_context;
+    uint64_t        id = 0;
+    std::mutex      queues_mutex;
+    std::vector<::sycl::queue*> queues;  // 所有线程已创建的队列
+
+    explicit Context(int device_index = -1);
+    ~Context();
+    Context(const Context&) = delete;
+    Context& operator=(const Context&) = delete;
+
+    // 调用线程在本 context 上的队列；首次调用时创建并登记到 queues。
+    ::sycl::queue& current_queue();
+
+    static ::sycl::device device_of(int device_index) {
+        const auto devices = ::sycl::device::get_devices();
+        const auto& usable = usable_device_indices();
+        // 默认设备：可用设备里的第一块 GPU；没有 GPU 就取第一块可用的。
+        if (device_index < 0) {
+            for (int slot : usable) {
+                if (devices[static_cast<size_t>(slot)].is_gpu())
+                    return devices[static_cast<size_t>(slot)];
+            }
+            if (usable.empty()) {
+                throw ::sycl::exception(::sycl::errc::invalid, "no usable SYCL device");
+            }
+            return devices[static_cast<size_t>(usable.front())];
+        }
+        if (device_index >= static_cast<int>(usable.size())) {
+            throw ::sycl::exception(::sycl::errc::invalid,
+                                    "no SYCL device at the requested index");
+        }
+        return devices[static_cast<size_t>(usable[static_cast<size_t>(device_index)])];
+    }
 };
 
 inline ::sycl::queue& queue_of(void* ctx) {
-    return static_cast<Context*>(ctx)->queue;
+    return static_cast<Context*>(ctx)->current_queue();
+}
+
+// 句柄就是 context 拥有的那个 queue 对象的地址，生命周期与 context 一致。
+inline ::sycl::queue& queue_from_handle(void* handle) {
+    return *static_cast<::sycl::queue*>(handle);
 }
 
 // ---------------------------------------------------------------------------
-// Scalar vocabulary. sycl::half and oneAPI bfloat16 are storage types: every
-// arithmetic and reduction path widens them to float first.
+// 标量词汇表。sycl::half 与 oneAPI bfloat16 是存储类型：所有算术与归约路径都
+// 先把它们拓宽为 float。
 // ---------------------------------------------------------------------------
 
 template <class T>
@@ -57,8 +159,7 @@ using promoted_t = std::conditional_t<is_low_precision<T>::value, float, T>;
 template <class T>
 using unary_compute_t = std::conditional_t<std::is_integral_v<T>, double, promoted_t<T>>;
 
-// Narrow integers and 16-bit floats must not wrap or lose bits before the
-// result is written.
+// 窄整型与 16 位浮点在结果写出之前不得回绕或丢位。
 template <class T>
 using reduction_acc_t = std::conditional_t<
     std::is_integral_v<T>,
@@ -131,7 +232,7 @@ inline T inf_value() {
 }
 
 // ---------------------------------------------------------------------------
-// Numeric contract, mirrored from the CPU/CUDA backends.
+// 数值契约，镜像自 CPU/CUDA 后端。
 // ---------------------------------------------------------------------------
 
 namespace contract {
@@ -257,7 +358,7 @@ inline T div_contract(T x, T y) {
 }  // namespace contract
 
 // ---------------------------------------------------------------------------
-// dtype dispatch.
+// dtype 派发。
 // ---------------------------------------------------------------------------
 
 template <class T>
@@ -265,11 +366,12 @@ struct type_tag {
     using type = T;
 };
 
-// `f` returns an int status; the first matching arm wins. Every dtype is
-// instantiated, so a lambda with `if constexpr` inside remains cheap.
+// `f` 返回 int 状态码；第一个匹配的分支生效。所有 dtype 都会被实例化，因此内部
+// 带 `if constexpr` 的 lambda 依然廉价。
 template <class F>
 inline int dispatch_dtype(int dtype, F&& f) {
     switch (dtype) {
+        case tvv::sycl::kBool:     return f(type_tag<uint8_t>{});
         case tvv::sycl::kInt8:     return f(type_tag<int8_t>{});
         case tvv::sycl::kInt16:    return f(type_tag<int16_t>{});
         case tvv::sycl::kInt32:    return f(type_tag<int32_t>{});
@@ -282,8 +384,8 @@ inline int dispatch_dtype(int dtype, F&& f) {
     }
 }
 
-// Decode a flat output index against the broadcast shape, accumulating each
-// operand's element offset with its own (already broadcast) stride array.
+// 按广播形状解码扁平输出下标，用各自（已完成广播的）步长数组累加每个操作数的
+// 元素 offset。
 inline int64_t bcast_offset(int64_t idx, const tvv::sycl::Bcast& p,
                             const int64_t* strides) {
     int64_t off = 0;
@@ -296,8 +398,8 @@ inline int64_t bcast_offset(int64_t idx, const tvv::sycl::Bcast& p,
     return off;
 }
 
-// 64-bit hash used by Random. Self-contained: no oneDPL or <random> in the
-// device units, and no per-element generator state to allocate.
+// Random 使用的 64 位哈希。自包含：设备单元中不用 oneDPL 或 <random>，也无需
+// 为每元素生成器状态分配内存。
 inline uint64_t splitmix64(uint64_t x) {
     x += 0x9E3779B97F4A7C15ull;
     x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ull;
@@ -305,7 +407,7 @@ inline uint64_t splitmix64(uint64_t x) {
     return x ^ (x >> 31);
 }
 
-// Uniform [0, 1), 53 bits of mantissa.
+// 均匀分布在 [0, 1)，尾数 53 位。
 inline double uniform01(uint64_t seed, int64_t index) {
     const uint64_t bits = splitmix64(seed ^ (static_cast<uint64_t>(index) *
                                              0x9E3779B97F4A7C15ull));
@@ -313,8 +415,8 @@ inline double uniform01(uint64_t seed, int64_t index) {
 }
 
 // ---------------------------------------------------------------------------
-// Kernel submission helpers. The queue is in-order, so successive submissions
-// from one host thread never need explicit dependencies.
+// 内核提交辅助。队列是 in-order 的，因此同一宿主线程的连续提交永远不需要显式
+// 依赖。
 // ---------------------------------------------------------------------------
 
 inline ::sycl::range<1> range_of(int64_t n) {

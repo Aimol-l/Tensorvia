@@ -2,7 +2,7 @@
 
 include(CMakeFindDependencyMacro)
 
-# The backends actually compiled into the installed library.
+# 实际编译进已安装库的后端。
 set(TENSORVIA_WITH_VULKAN @BACKEND_VULKAN@)
 set(TENSORVIA_WITH_CUDA   @BACKEND_CUDA@)
 set(TENSORVIA_WITH_CPU    @BACKEND_CPU@)
@@ -13,8 +13,8 @@ endif()
 if(TENSORVIA_WITH_VULKAN)
     find_dependency(Vulkan)
 endif()
-# CUDA is linked privately as a shared runtime, so consumers do not need the
-# toolkit to include or link the installed library.
+# CUDA 以共享运行时方式私有链接，因此使用方无需安装 CUDA 工具包即可包含或链接
+# 已安装的库。
 
 include("${CMAKE_CURRENT_LIST_DIR}/TensorviaTargets.cmake")
 

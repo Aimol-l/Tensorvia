@@ -3,11 +3,6 @@
 #include <cstddef>
 #include <memory>
 
-// CUDA-free interface: the device index, stream and driver calls live in the
-// pimpl defined by src/backend/cuda/device/runtime.cu. The generated header of
-// this partition is included by the CUDA translation units, so keeping it clear
-// of <cuda_runtime.h> means the same declaration is also compilable by a plain
-// host compiler (and by CMake, where only the header form is built).
 #include "tensorvia/types.hpp"
 #include "tensorvia/context.hpp"
 
@@ -17,27 +12,41 @@ private:
     Impl* m_impl = nullptr;
 
 public:
-    // Picks the device with the largest global memory.
+    struct CUDAStream {
+        void* handle = nullptr;   // cudaStream_t
+        int   device = -1;
+    };
+
     CUDAContext();
     explicit CUDAContext(int device_index);
     ~CUDAContext() override;
+
+    static int device_count();
+    static int preferred_device_index();
 
     CUDAContext(const CUDAContext&) = delete;
     CUDAContext& operator=(const CUDAContext&) = delete;
     CUDAContext(CUDAContext&&) = delete;
     CUDAContext& operator=(CUDAContext&&) = delete;
 
-    // Opaque stream handle; the pimpl owns the stream.
     void* ctx_raw_ptr() override;
-    // Same handle, for launches. Callers in .cu files cast it to cudaStream_t.
     void* stream() const;
-    int   device_id() const;
+    int   device_index() const;
 
-    // CUDA's current device is per-thread; every entry point that allocates or
-    // launches calls this first.
     void activate() const;
 
-    // The host drivers are synchronous: every launch is followed by wait(), so
-    // callers never observe a half-computed tensor.
-    void wait() const;
+    // ---------------------------------------------------------------------
+    // Stream。每条（线程, 设备）只有一条流，首次使用时惰性创建；没有换流的入口，
+    // 也没有池。跨线程使用张量前必须由原线程 synchronize()。
+    // ---------------------------------------------------------------------
+
+    // 调用线程在本设备上的流；首次调用时创建。
+    CUDAStream current_stream() const;
+
+    void synchronize_all() const;
+    void synchronize_current_stream() const;
+
+    void empty_cache() noexcept;
+    void* allocate(size_t bytes, CUDAStream stream);
+    void  deallocate(void* ptr, CUDAStream stream) noexcept;
 };

@@ -15,8 +15,7 @@
 
 namespace ops {
 
-// Logical comparison through the ufunc broadcast driver: dtype promotion,
-// NumPy broadcasting and output INT8.
+// 经 ufunc 广播驱动的逻辑比较：dtype 提升、NumPy 广播，输出 INT8。
 Tensor EqualImpl<Device::VULKAN>::execute(const Tensor& a, const Tensor& b) {
     return vk_ufunc::logical_impl(OpType::Equal, a, b);
 }
@@ -36,7 +35,7 @@ Tensor LessEqualImpl<Device::VULKAN>::execute(const Tensor& a, const Tensor& b) 
     return vk_ufunc::logical_impl(OpType::LessEqual, a, b);
 }
 
-// Scalar comparison: the right operand is a one-element FLOAT32 broadcast.
+// 标量比较：右操作数是单元素 FLOAT32 广播。
 Tensor EqualImpl<Device::VULKAN>::execute(const Tensor& a, float val) {
     return vk_ufunc::logical_scalar(OpType::Equal, a, val);
 }
@@ -57,9 +56,8 @@ Tensor LessEqualImpl<Device::VULKAN>::execute(const Tensor& a, float val) {
 }
 
 namespace {
-// NonZero workgroup cap. Each workgroup grid-strides over an arbitrarily long
-// interval, so the result array size is decoupled from numel and is always
-// <= kMaxGroups.
+// NonZero 的工作组上限。每个工作组在任意长的区间上网格跨步，所以结果数组大小与
+// numel 解耦，且始终 <= kMaxGroups。
 constexpr uint32_t kMaxGroups = 1024;
 constexpr uint32_t kThreads   = 256;
 }  // namespace
@@ -75,7 +73,7 @@ size_t NonZeroImpl<Device::VULKAN>::execute(const Tensor& a) {
     const uint32_t groups =
         static_cast<uint32_t>(std::clamp<uint64_t>(need, 1, kMaxGroups));
 
-    // Sized by the real group count; the shader never writes past that index.
+    // 按实际组数定大小；着色器绝不会写过该下标。
     Tensor res = Tensor::Fill({static_cast<int64_t>(groups)}, 0.0f, DataType::INT32,
                               Device::VULKAN);
     auto res_impl = std::dynamic_pointer_cast<VKTensor>(res.get_impl());

@@ -1,4 +1,4 @@
-// float16.hpp - Software-emulated IEEE 754 binary16 (no native _Float16 required)
+// float16.hpp - 软件模拟的 IEEE 754 binary16（不依赖原生 _Float16）
 #pragma once
 
 #include <bit>
@@ -16,7 +16,7 @@ private:
     struct from_bits_t {};
     constexpr float16_t(uint16_t b, from_bits_t) : bits_(b) {}
 
-    // Convert float32 -> float16 (with round-to-nearest-even)
+    // float32 -> float16 转换（就近舍入到偶数）
     static constexpr uint16_t float_to_f16_bits(float f) {
         uint32_t f32_bits = std::bit_cast<uint32_t>(f);
         uint32_t sign = (f32_bits >> 31) & 0x1;
@@ -27,11 +27,11 @@ private:
         if (exp_adj >= 31) {
             return static_cast<uint16_t>((sign << 15) | 0x7C00);  // +∞ / -∞
         } else if (exp_adj <= 0) {
-            // Subnormal or zero
+            // 次正规数或零
             uint32_t mant_with_hidden = (exp != 0) ? (mant | 0x800000) : mant;
             int32_t shift = 1 - exp_adj;
             if (shift > 24) {
-                return static_cast<uint16_t>(sign << 15);  // underflow to zero
+                return static_cast<uint16_t>(sign << 15);  // 下溢为零
             }
             uint32_t mant_shifted = mant_with_hidden >> (shift + 13);
             uint32_t round_bit    = (mant_with_hidden >> (shift + 12)) & 1;
@@ -39,7 +39,7 @@ private:
             uint32_t round        = (round_bit && (sticky || (mant_shifted & 1))) ? 1 : 0;
             return static_cast<uint16_t>((sign << 15) | static_cast<uint16_t>(mant_shifted + round));
         } else {
-            // Normal
+            // 正规数
             uint32_t mant_trunc = mant >> 13;
             uint32_t round_bit  = (mant >> 12) & 1;
             uint32_t sticky      = mant & 0xFFF;
@@ -54,7 +54,7 @@ private:
         }
     }
 
-    // Convert float16 -> float32
+    // float16 -> float32 转换
     static constexpr float f16_bits_to_float(uint16_t bits) {
         uint32_t sign = (bits >> 15) & 0x1;
         uint32_t exp  = (bits >> 10) & 0x1F;
@@ -63,9 +63,9 @@ private:
         uint32_t f32_bits;
         if (exp == 0) {
             if (mant == 0) {
-                f32_bits = sign << 31;  // zero
+                f32_bits = sign << 31;  // 零
             } else {
-                // subnormal: normalize using portable leading-zero count
+                // 次正规数：用可移植的前导零计数做规格化
                 int shift = std::countl_zero(mant) - 21;
                 mant <<= shift;
                 exp = 1 - shift;

@@ -3,10 +3,6 @@
 #include <cstddef>
 #include <memory>
 
-// Declarations only: the buffer management and copy paths are defined by
-// src/backend/cuda/device/runtime.cu. data() returns a real device pointer
-// (unlike Vulkan, where it returns a buffer handle), but it must still not be
-// dereferenced on the host: use copy_to_host / Tensor::to_host.
 #include "tensorvia/types.hpp"
 #include "tensorvia/tensor.hpp"
 #include "tensorvia/context.hpp"
@@ -17,6 +13,7 @@ private:
     void*                         m_data = nullptr;
     size_t                        m_numel = 0;
     DataType                      m_dtype = DataType::FLOAT32;
+    CUDAContext::CUDAStream       m_stream;
     std::shared_ptr<CUDAContext>  m_context;
 
     void init(void* ptr, size_t numel, DataType dtype,
@@ -41,8 +38,7 @@ public:
     std::shared_ptr<ContextImpl> context() const override;
     std::unique_ptr<TensorImpl> clone_as_contiguous(const Metadata& meta) const override;
 
-    // Not optional: the base implementation memcpy's, which would dereference a
-    // device pointer on the host.
+    // 不能沿用默认实现：基类实现用 memcpy，会在宿主上解引用设备指针。
     void copy_to_host(void* dst, DataType dtype) const override;
     void copy_from_host(const void* src, DataType dtype) override;
 };

@@ -17,6 +17,7 @@
 #include "tensorvia/types.hpp"
 #include "tensorvia/tensor.hpp"
 #include "tensorvia/ops.hpp"
+#include "tensorvia/tensor_iterator.hpp"
 
 namespace ops {
 
@@ -178,6 +179,15 @@ template <> struct GatherImpl<Device::CPU> {
     static Tensor execute(const Tensor& input, int dim, const Tensor& index);
 };
 
+template <Device D> struct SortImpl;
+template <Device D> struct TopkImpl;
+template <> struct SortImpl<Device::CPU> {
+    static SortResult execute(const Tensor& input, int dim, bool descending);
+};
+template <> struct TopkImpl<Device::CPU> {
+    static TopkResult execute(const Tensor& input, int64_t k, int dim, bool largest);
+};
+
 template <> struct ReluImpl<Device::CPU> {
     static void execute(Tensor& a);
     static Tensor execute(const Tensor& a);
@@ -292,6 +302,29 @@ template <> struct MatMulImpl<Device::CPU> {
     static Tensor execute(const Tensor& a, const Tensor& b);
 };
 
+// 卷积的公共几何描述：张量在进入实现单元之前已被规范化成 4-D NCHW 且连续，
+// `bias` 为空指针表示没有偏置。各后端实现只做"输出下标 -> 输入偏移"的算术。
+struct Conv2dShape {
+    int64_t batch    = 1;
+    int64_t in_ch    = 0;
+    int64_t in_h     = 0;
+    int64_t in_w     = 0;
+    int64_t out_ch   = 0;
+    int64_t kh       = 0;
+    int64_t kw       = 0;
+    int64_t stride   = 1;
+    int64_t padding  = 0;
+    int64_t out_h    = 0;
+    int64_t out_w    = 0;
+    int64_t numel() const { return batch * out_ch * out_h * out_w; }
+};
+
+template <Device D> struct Conv2dImpl;
+template <> struct Conv2dImpl<Device::CPU> {
+    static Tensor execute(const Tensor& input, const Tensor& weight, const Tensor* bias,
+                          const Conv2dShape& shape);
+};
+
 template <> struct EqualImpl<Device::CPU> {
     static Tensor execute(const Tensor& a, const Tensor& b);
     static Tensor execute(const Tensor& a, float val);
@@ -330,11 +363,6 @@ template <> struct ExportCsvImpl<Device::CPU> {
     static void execute(const Tensor& a, const std::string& path);
 };
 
-template <Device D> struct TempImpl;
-template <> struct TempImpl<Device::CPU> {
-    static void execute(Tensor& a);
-};
-
 // ================================================================
 // element-wise ufunc 框架：
 // 类型提升 / 非连续视图物化 / 输出分配 / dtype 分发统一在这里处理，
@@ -342,8 +370,8 @@ template <> struct TempImpl<Device::CPU> {
 // 这是 NumPy ufunc 分层的 CPU 版：框架 = 迭代器 + 类型解析，Op = inner loop。
 namespace ufunc {
 
-// 非连续视图先物化成连续拷贝（kernel 只支持线性遍历；
-// strided 内核接入前的正确性守卫）。storage 保活物化结果。
+// 始终物化（sort/gather 等索引空间算子：内核按连续 buffer 的下标语义读写，
+// 逐元素搬运的收益不可能高于一次拷贝）。元素级与归约算子改走 ops::iter 的策略。
 inline const Tensor& linearize(const Tensor& t, Tensor& storage) {
     if (t.is_contiguous()) return t;
     storage = t.contiguous();
@@ -358,145 +386,51 @@ inline void require_contiguous(const Tensor& t, const char* op) {
             "{}: non-contiguous view is not supported here; call to_contiguous() first", op));
 }
 
-// span 没有 operator==（C++20 设计如此），统一走这个助手
-inline bool same_shape(std::span<const int64_t> a, std::span<const int64_t> b) {
-    return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin());
-}
-
-// NumPy 广播规则：shape 右对齐逐维比较，相等或一方为 1 可广播
-inline bool broadcast_shapes(std::span<const int64_t> sa, std::span<const int64_t> sb,
-                             DimArray& out) {
-    const size_t na = sa.size(), nb = sb.size();
-    const size_t n = std::max(na, nb);
-    out.clear();
-    out.resize(n);
-    for (size_t i = 0; i < n; ++i) out[i] = 1;
-    for (size_t i = 0; i < n; ++i) {
-        const int64_t da = (i + na < n) ? 1 : sa[i - (n - na)];
-        const int64_t db = (i + nb < n) ? 1 : sb[i - (n - nb)];
-        if (da == db)      out[i] = da;
-        else if (da == 1)  out[i] = db;
-        else if (db == 1)  out[i] = da;
-        else return false;
-    }
-    return true;
-}
-
-// 对齐到输出 ndim 后的有效 strides：缺失维度或大小为 1 的维度 stride = 0（广播维）
-inline DimArray broadcast_strides(std::span<const int64_t> shape,
-                                  std::span<const int64_t> strides,
-                                  size_t out_ndim) {
-    DimArray eff;
-    eff.resize(out_ndim);
-    const size_t pad = out_ndim - shape.size();
-    for (size_t i = 0; i < shape.size(); ++i)
-        eff[pad + i] = (shape[i] == 1) ? 0 : strides[i];
-    return eff;
-}
-
-// 广播驱动器：odometer 外层 + 尾部连续段内层（段内直接调线性 kernel）。
-// 三个指针可以是不同类型（逻辑 op：两种输入 dtype + int8 输出）。
-// 尾维任一侧为广播维（stride 0）时段长退化为 1 —— 正确但每元素一次 kernel
-// 调用；矩阵+行向量这类常见形态走连续段快路径。
-template <class AP, class BP, class OP, class Kernel>
-void broadcast_drive(AP a, std::span<const int64_t> sa,
-                     BP b, std::span<const int64_t> sb,
-                     OP out, std::span<const int64_t> shape, Kernel&& k) {
-    const size_t ndim = shape.size();
-    size_t total = 1;
-    for (int64_t d : shape) total *= size_t(d);
-
-    // 尾部连续段：两侧有效 strides 与行主序一致的尾部维度
-    size_t inner = 1;
-    if (ndim > 0 && sa[ndim - 1] == 1 && sb[ndim - 1] == 1) {
-        inner = size_t(shape[ndim - 1]);
-        for (size_t d = ndim - 1; d-- > 0;) {
-            if (sa[d] == int64_t(inner) && sb[d] == int64_t(inner) && shape[d] != 1)
-                inner *= size_t(shape[d]);
-            else if (sa[d] == int64_t(inner) && sb[d] == int64_t(inner))
-                inner *= size_t(shape[d]);  // shape[d]==1 时并入无害
-            else break;
-        }
-    }
-
-    // 段外维度做 odometer，同时推进三个偏移
-    size_t seg_dims = 0, acc = 1;
-    for (size_t d = ndim; d-- > 0;) {
-        if (acc >= inner) break;  // inner 覆盖的尾部维度数
-        acc *= size_t(shape[d]);
-        ++seg_dims;
-    }
-    const size_t m = ndim - seg_dims;
-    DimArray rad, ca, cb, co;
-    rad.assign(shape.begin(), shape.begin() + m);
-    ca.assign(sa.begin(), sa.begin() + m);
-    cb.assign(sb.begin(), sb.begin() + m);
-    co.resize(m);
-    {
-        int64_t o = int64_t(inner);
-        for (size_t d = m; d-- > 0;) { co[d] = o; o *= shape[d]; }
-    }
-    DimArray coord;
-    coord.resize(m);
-    size_t off_a = 0, off_b = 0, off_o = 0;
-    const size_t outer = total / inner;
-    for (size_t it = 0; it < outer; ++it) {
-        k(a + off_a, b + off_b, out + off_o, inner);
-        for (size_t d = m; d-- > 0;) {
-            ++coord[d];
-            off_a += size_t(ca[d]); off_b += size_t(cb[d]); off_o += size_t(co[d]);
-            if (coord[d] < rad[d]) break;
-            coord[d] = 0;
-            off_a -= size_t(ca[d]) * size_t(rad[d]);
-            off_b -= size_t(cb[d]) * size_t(rad[d]);
-            off_o -= size_t(co[d]) * size_t(rad[d]);
-        }
-    }
-}
+// 广播规则与 strided 布局的唯一实现在 ops::iter（tensor_iterator.hpp）；这里
+// 保留别名，让 CPU 内核与各后端继续按 ufunc:: 的名字取用同一份。
+using ops::iter::broadcast_shapes;
+using ops::iter::broadcast_strides;
+using ops::iter::same_shape;
 
 // ===== 二元 element-wise：T,T -> T（支持 NumPy 广播）=====
 // Op 需提供: template <class T> static void kernel(const T* a, const T* b, T* out, size_t n);
 template <class Op>
 Tensor binary_op(const Tensor& a, const Tensor& b) {
     const DataType res_type = compute_type(a.dtype(), b.dtype());
-    Tensor promoted_a, promoted_b, lin_a, lin_b;
+    Tensor promoted_a, promoted_b;
     const Tensor* A = &a;
     const Tensor* B = &b;
     // 指针按需选择：三元表达式会因 lvalue/prvalue 混合隐式深拷贝已匹配的输入
     if (a.dtype() != res_type) { promoted_a = ops::Typecast(a, res_type); A = &promoted_a; }
     if (b.dtype() != res_type) { promoted_b = ops::Typecast(b, res_type); B = &promoted_b; }
-    A = &linearize(*A, lin_a);
-    B = &linearize(*B, lin_b);
 
-    if (same_shape(A->shape(), B->shape())) {
+    // 形状、两侧 stride 与"要不要物化"都由统一迭代层给出：视图不再无条件拷贝。
+    const iter::PreparedInputs in({A, B}, "binary op");
+    const iter::Layout& lay = in.layout();
+    const std::span<const int64_t> out_shape(lay.shape);
+    Tensor result(out_shape, res_type, Device::CPU);
+
+    if (iter::linearizable(lay)) {
         // 快路径：同形连续，单次线性 kernel
-        Tensor result(A->shape(), res_type, Device::CPU);
         dispatch_dtype(res_type, [&](auto type_id) {
             using T = typename decltype(type_id)::type;
             Op::template kernel<T>(
-                static_cast<const T*>(A->data()),
-                static_cast<const T*>(B->data()),
+                static_cast<const T*>(in[0].data()),
+                static_cast<const T*>(in[1].data()),
                 static_cast<T*>(result.data()),
-                A->numel());
+                lay.numel);
         });
         return result;
     }
 
-    DimArray out_shape;
-    if (!broadcast_shapes(A->shape(), B->shape(), out_shape))
-        throw std::runtime_error("binary op: shapes are not broadcastable");
-    Tensor result(std::span<const int64_t>(out_shape), res_type, Device::CPU);
-    const auto sa = broadcast_strides(A->shape(), A->strides(), out_shape.size());
-    const auto sb = broadcast_strides(B->shape(), B->strides(), out_shape.size());
     dispatch_dtype(res_type, [&](auto type_id) {
         using T = typename decltype(type_id)::type;
-        broadcast_drive(
-            static_cast<const T*>(A->data()), std::span<const int64_t>(sa),
-            static_cast<const T*>(B->data()), std::span<const int64_t>(sb),
-            static_cast<T*>(result.data()), std::span<const int64_t>(out_shape),
-            [](const T* x, const T* y, T* o, size_t n) {
-                Op::template kernel<T>(x, y, o, n);
-            });
+        const T* ap = static_cast<const T*>(in[0].data());
+        const T* bp = static_cast<const T*>(in[1].data());
+        T* op = static_cast<T*>(result.data());
+        iter::drive(lay, [&](std::span<const int64_t> off, int64_t oo, size_t n) {
+            Op::template kernel<T>(ap + off[0], bp + off[1], op + oo, n);
+        });
     });
     return result;
 }
@@ -505,86 +439,64 @@ Tensor binary_op(const Tensor& a, const Tensor& b) {
 template <class Op>
 void binary_op(const Tensor& a, const Tensor& b, Tensor& dst) {
     const DataType res_type = compute_type(a.dtype(), b.dtype());
-    if (dst.dtype() != res_type)
-        throw std::runtime_error("dst dtype must equal the promoted result dtype");
-    require_contiguous(dst, "dst");
-    Tensor promoted_a, promoted_b, lin_a, lin_b;
+    Tensor promoted_a, promoted_b;
     const Tensor* A = &a;
     const Tensor* B = &b;
     if (a.dtype() != res_type) { promoted_a = ops::Typecast(a, res_type); A = &promoted_a; }
     if (b.dtype() != res_type) { promoted_b = ops::Typecast(b, res_type); B = &promoted_b; }
-    A = &linearize(*A, lin_a);
-    B = &linearize(*B, lin_b);
 
-    if (same_shape(A->shape(), B->shape())) {
-        if (!same_shape(dst.shape(), A->shape()))
-            throw std::runtime_error("dst shape must equal the broadcast result shape");
+    const iter::PreparedInputs in({A, B}, "binary op");
+    const iter::Layout& lay = in.layout();
+    const std::span<const int64_t> out_shape(lay.shape);
+    iter::validate_dst(dst, out_shape, res_type);
+
+    if (iter::linearizable(lay)) {
         dispatch_dtype(res_type, [&](auto type_id) {
             using T = typename decltype(type_id)::type;
             Op::template kernel<T>(
-                static_cast<const T*>(A->data()),
-                static_cast<const T*>(B->data()),
+                static_cast<const T*>(in[0].data()),
+                static_cast<const T*>(in[1].data()),
                 static_cast<T*>(dst.data()),
-                A->numel());
+                lay.numel);
         });
         return;
     }
 
-    DimArray out_shape;
-    if (!broadcast_shapes(A->shape(), B->shape(), out_shape))
-        throw std::runtime_error("binary op: shapes are not broadcastable");
-    if (!same_shape(dst.shape(), out_shape))
-        throw std::runtime_error("dst shape must equal the broadcast result shape");
-    const auto sa = broadcast_strides(A->shape(), A->strides(), out_shape.size());
-    const auto sb = broadcast_strides(B->shape(), B->strides(), out_shape.size());
     dispatch_dtype(res_type, [&](auto type_id) {
         using T = typename decltype(type_id)::type;
-        broadcast_drive(
-            static_cast<const T*>(A->data()), std::span<const int64_t>(sa),
-            static_cast<const T*>(B->data()), std::span<const int64_t>(sb),
-            static_cast<T*>(dst.data()), std::span<const int64_t>(out_shape),
-            [](const T* x, const T* y, T* o, size_t n) {
-                Op::template kernel<T>(x, y, o, n);
-            });
+        const T* ap = static_cast<const T*>(in[0].data());
+        const T* bp = static_cast<const T*>(in[1].data());
+        T* op = static_cast<T*>(dst.data());
+        iter::drive(lay, [&](std::span<const int64_t> off, int64_t oo, size_t n) {
+            Op::template kernel<T>(ap + off[0], bp + off[1], op + oo, n);
+        });
     });
 }
 
-// ===== 逻辑比较：T,R -> INT8（支持 NumPy 广播）=====
+// ===== 逻辑比较：T,R -> BOOL（支持 NumPy 广播）=====
 // 输入类型不统一提升（kernel 内 PromotedType 比较，保留混合 dtype 零拷贝），
-// 结果固定 INT8 表示布尔。
-// Op 需提供: template <class T, class R> static void kernel(int8_t* out, const T* a, const R* b, size_t n);
+// 结果固定 BOOL 表示布尔（1-byte，规范化为 0/1）。
+// Op 需提供: template <class T, class R> static void kernel(uint8_t* out, const T* a, const R* b, size_t n);
 template <class Op>
 Tensor logical_op(const Tensor& a, const Tensor& b) {
-    Tensor lin_a, lin_b;
-    const Tensor* A = &linearize(a, lin_a);
-    const Tensor* B = &linearize(b, lin_b);
+    // 混合 dtype 零拷贝：两侧各自保留原 dtype，比较在 kernel 内的公共类型里做。
+    const iter::PreparedInputs in({&a, &b}, "logical op");
+    const iter::Layout& lay = in.layout();
+    Tensor result(std::span<const int64_t>(lay.shape), DataType::BOOL, Device::CPU);
+    uint8_t* out_ptr = static_cast<uint8_t*>(result.data());
 
-    DimArray out_shape;
-    if (same_shape(A->shape(), B->shape())) {
-        out_shape.assign(A->shape().begin(), A->shape().end());
-    } else if (!broadcast_shapes(A->shape(), B->shape(), out_shape)) {
-        throw std::runtime_error("logical op: shapes are not broadcastable");
-    }
-    Tensor result(std::span<const int64_t>(out_shape), DataType::INT8, Device::CPU);
-    int8_t* out_ptr = static_cast<int8_t*>(result.data());
-
-    auto va = data_as_const_variant(A->dtype(), A->data());
-    auto vb = data_as_const_variant(B->dtype(), B->data());
+    auto va = data_as_const_variant(in[0].dtype(), in[0].data());
+    auto vb = data_as_const_variant(in[1].dtype(), in[1].data());
     std::visit([&](auto pa, auto pb) {
         using TA = std::remove_cv_t<std::remove_pointer_t<decltype(pa)>>;
         using TB = std::remove_cv_t<std::remove_pointer_t<decltype(pb)>>;
-        if (same_shape(A->shape(), B->shape())) {
-            Op::template kernel<TA, TB>(out_ptr, pa, pb, A->numel());
-        } else {
-            const auto sa = broadcast_strides(A->shape(), A->strides(), out_shape.size());
-            const auto sb = broadcast_strides(B->shape(), B->strides(), out_shape.size());
-            broadcast_drive(pa, std::span<const int64_t>(sa), pb,
-                            std::span<const int64_t>(sb), out_ptr,
-                            std::span<const int64_t>(out_shape),
-                [](const TA* x, const TB* y, int8_t* o, size_t n) {
-                    Op::template kernel<TA, TB>(o, x, y, n);
-                });
+        if (iter::linearizable(lay)) {
+            Op::template kernel<TA, TB>(out_ptr, pa, pb, lay.numel);
+            return;
         }
+        iter::drive(lay, [&](std::span<const int64_t> off, int64_t oo, size_t n) {
+            Op::template kernel<TA, TB>(out_ptr + oo, pa + off[0], pb + off[1], n);
+        });
     }, va, vb);
     return result;
 }
@@ -593,14 +505,20 @@ Tensor logical_op(const Tensor& a, const Tensor& b) {
 // 省掉全形状临时张量的分配与填充；kernel 重复读同一地址（L1 命中）。
 template <class Op>
 Tensor logical_op_scalar(const Tensor& a, float val) {
-    Tensor storage;
-    const Tensor* A = &linearize(a, storage);
-    Tensor result(A->shape(), DataType::INT8, Device::CPU);
-    int8_t* out_ptr = static_cast<int8_t*>(result.data());
-    auto va = data_as_const_variant(A->dtype(), A->data());
+    const iter::PreparedInputs in({&a}, "logical op");
+    const iter::Layout& lay = in.layout();
+    Tensor result(std::span<const int64_t>(lay.shape), DataType::BOOL, Device::CPU);
+    uint8_t* out_ptr = static_cast<uint8_t*>(result.data());
+    auto va = data_as_const_variant(in[0].dtype(), in[0].data());
     std::visit([&](auto pa) {
         using TA = std::remove_cv_t<std::remove_pointer_t<decltype(pa)>>;
-        Op::template kernel_scalar<TA>(out_ptr, pa, val, A->numel());
+        if (iter::linearizable(lay)) {
+            Op::template kernel_scalar<TA>(out_ptr, pa, val, lay.numel);
+            return;
+        }
+        iter::drive(lay, [&](std::span<const int64_t> off, int64_t oo, size_t n) {
+            Op::template kernel_scalar<TA>(out_ptr + oo, pa + off[0], val, n);
+        });
     }, va);
     return result;
 }
@@ -630,29 +548,41 @@ Tensor scalar_out(const Tensor& a, float b) {
 //   static constexpr bool identity_result;                // true = result_type 恒等（无提升路径）
 template <class Op, class... Args>
 Tensor unary_op(const Tensor& a, Args... args) {
-    Tensor storage;
-    const Tensor* A = &linearize(a, storage);
-    const DataType rt = Op::result_type(A->dtype());
-    Tensor result(A->shape(), rt, Device::CPU);
-    if (rt == A->dtype()) {
+    const iter::PreparedInputs in({&a}, "unary op");
+    const iter::Layout& lay = in.layout();
+    const DataType rt = Op::result_type(in[0].dtype());
+    Tensor result(in[0].shape(), rt, Device::CPU);
+    const bool linear = iter::linearizable(lay);
+
+    if (rt == in[0].dtype()) {
         dispatch_dtype(rt, [&](auto type_id) {
             using T = typename decltype(type_id)::type;
-            Op::template kernel<T, T>(
-                static_cast<const T*>(A->data()),
-                static_cast<T*>(result.data()),
-                A->numel(), args...);
+            const T* src = static_cast<const T*>(in[0].data());
+            T* dst = static_cast<T*>(result.data());
+            if (linear) {
+                Op::template kernel<T, T>(src, dst, lay.numel, args...);
+                return;
+            }
+            iter::drive(lay, [&](std::span<const int64_t> off, int64_t oo, size_t n) {
+                Op::template kernel<T, T>(src + off[0], dst + oo, n, args...);
+            });
         });
     } else if constexpr (Op::identity_result) {
         // 恒等 Op 不存在类型提升路径，运行时不可达
         throw std::runtime_error("unary op: unreachable type promotion path");
     } else {
         // 唯一的提升路径：整型 -> FLOAT32（如 sin/int32）
-        dispatch_dtype(A->dtype(), [&](auto type_id) {
+        dispatch_dtype(in[0].dtype(), [&](auto type_id) {
             using T = typename decltype(type_id)::type;
-            Op::template kernel<T, float32>(
-                static_cast<const T*>(A->data()),
-                static_cast<float32*>(result.data()),
-                A->numel(), args...);
+            const T* src = static_cast<const T*>(in[0].data());
+            float32* dst = static_cast<float32*>(result.data());
+            if (linear) {
+                Op::template kernel<T, float32>(src, dst, lay.numel, args...);
+                return;
+            }
+            iter::drive(lay, [&](std::span<const int64_t> off, int64_t oo, size_t n) {
+                Op::template kernel<T, float32>(src + off[0], dst + oo, n, args...);
+            });
         });
     }
     return result;

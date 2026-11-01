@@ -1,5 +1,5 @@
-// Reductions: global and per-axis sum/min/max/mean, argmax/argmin, all/any and
-// the NonZero count.
+// 归约：全局与单轴的 sum/min/max/mean、argmax/argmin、all/any 以及 NonZero
+// 计数。
 #include "common.h"
 
 using namespace tvv::sycl_dev;
@@ -22,6 +22,11 @@ void reduce_all_kernel(sycl::queue& q, const T* in, Out* out, int64_t numel, int
                                for (int64_t i = static_cast<int64_t>(lid); i < numel;
                                     i += static_cast<int64_t>(n))
                                    acc += static_cast<Acc>(to_compute<Acc>(in[i]));
+                           } else if (op == tvv::sycl::kReduceProd) {
+                               acc = Acc(1);
+                               for (int64_t i = static_cast<int64_t>(lid); i < numel;
+                                    i += static_cast<int64_t>(n))
+                                   acc *= static_cast<Acc>(to_compute<Acc>(in[i]));
                            } else if (op == tvv::sycl::kReduceMin) {
                                acc = max_finite<Acc>();
                                for (int64_t i = static_cast<int64_t>(lid); i < numel;
@@ -42,6 +47,8 @@ void reduce_all_kernel(sycl::queue& q, const T* in, Out* out, int64_t numel, int
                                    const Acc b = sdata[lid + s];
                                    if (op == tvv::sycl::kReduceSum)
                                        sdata[lid] = static_cast<Acc>(a + b);
+                                   else if (op == tvv::sycl::kReduceProd)
+                                       sdata[lid] = static_cast<Acc>(a * b);
                                    else if (op == tvv::sycl::kReduceMin)
                                        sdata[lid] = contract::min_contract(a, b);
                                    else
@@ -70,6 +77,10 @@ void reduce_axis_kernel(sycl::queue& q, const T* in, Out* out,
             acc = Acc(0);
             for (int64_t k = 0; k < p.axis; ++k)
                 acc += static_cast<Acc>(to_compute<Acc>(in[base + k * p.inner]));
+        } else if (op == tvv::sycl::kReduceProd) {
+            acc = Acc(1);
+            for (int64_t k = 0; k < p.axis; ++k)
+                acc *= static_cast<Acc>(to_compute<Acc>(in[base + k * p.inner]));
         } else if (op == tvv::sycl::kReduceMin) {
             acc = to_compute<Acc>(in[base]);
             for (int64_t k = 1; k < p.axis; ++k)
@@ -112,9 +123,8 @@ void arg_reduce_kernel(sycl::queue& q, const T* in, int32_t* out,
     });
 }
 
-// The destination word is initialized by a one-work-item launch on the same
-// in-order queue, then each work-group folds its slice and combines with one
-// atomic. The host never has to zero device memory.
+// 目标字由同一 in-order 队列上一个单工作项的启动初始化，随后每个工作组折叠自己的
+// 片段并做一次原子合并。宿主永远不必清零设备内存。
 void init_uint_kernel(sycl::queue& q, unsigned int* out, unsigned int value) {
     q.parallel_for(sycl::range<1>(1), [=](sycl::id<1>) { out[0] = value; });
 }
@@ -199,8 +209,10 @@ int sycl_c_launch_reduce_all(void* ctx, const void* in, void* out, int64_t numel
                 return tvv::sycl::kSyclOk;
             });
         });
+    } catch (const std::exception& e) {
+        return record_failure(e);
     } catch (...) {
-        return tvv::sycl::kSyclFailure;
+        return record_failure();
     }
 }
 
@@ -220,8 +232,10 @@ int sycl_c_launch_reduce_axis(void* ctx, const void* in, void* out,
                 return tvv::sycl::kSyclOk;
             });
         });
+    } catch (const std::exception& e) {
+        return record_failure(e);
     } catch (...) {
-        return tvv::sycl::kSyclFailure;
+        return record_failure();
     }
 }
 
@@ -237,8 +251,10 @@ int sycl_c_launch_arg_reduce(void* ctx, const void* in, void* out, int dtype,
                                  static_cast<int32_t*>(out), *p, is_max);
             return tvv::sycl::kSyclOk;
         });
+    } catch (const std::exception& e) {
+        return record_failure(e);
     } catch (...) {
-        return tvv::sycl::kSyclFailure;
+        return record_failure();
     }
 }
 
@@ -256,8 +272,10 @@ int sycl_c_launch_all_any(void* ctx, const void* in, void* out, int64_t numel,
                               static_cast<unsigned int*>(out), numel, is_all, value);
             return tvv::sycl::kSyclOk;
         });
+    } catch (const std::exception& e) {
+        return record_failure(e);
     } catch (...) {
-        return tvv::sycl::kSyclFailure;
+        return record_failure();
     }
 }
 
@@ -274,8 +292,10 @@ int sycl_c_launch_nonzero(void* ctx, const void* in, void* out, int64_t numel,
                                     static_cast<unsigned int*>(out), numel);
             return tvv::sycl::kSyclOk;
         });
+    } catch (const std::exception& e) {
+        return record_failure(e);
     } catch (...) {
-        return tvv::sycl::kSyclFailure;
+        return record_failure();
     }
 }
 

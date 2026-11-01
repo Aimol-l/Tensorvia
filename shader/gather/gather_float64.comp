@@ -1,0 +1,65 @@
+#version 460
+
+// gather：按 PyTorch 语义沿 dim 取元素，index 与 input 同秩。
+
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform Params {
+    int numel;
+    int ndim;
+    int dim;
+    int idx_is_64;
+    int axis_dim;
+    int axis_stride;
+    int out_shape[8];
+    int in_strides[8];
+} p;
+
+layout(std430, binding = 0) readonly buffer Input { double data[]; } src;
+
+layout(std430, binding = 1) readonly buffer Index { int words[]; } idx;
+
+layout(std430, binding = 2) writeonly buffer Output { double data[]; } dst;
+
+layout(std430, binding = 3) buffer Flag { int data[]; } flag;
+
+// index 只有 INT32/INT64 两种（公开入口已经拒绝其它 dtype）。缓冲按 32 位字读，
+// `idx_is_64` 决定一个下标占一个字还是两个字；两种读法都落在缓冲边界内。
+int64_t load_index(int64_t i) {
+    if (p.idx_is_64 != 0) {
+        const uint lo = uint(idx.words[int(2 * i)]);
+        const uint hi = uint(idx.words[int(2 * i + 1)]);
+        return int64_t((uint64_t(hi) << 32) | uint64_t(lo));
+    }
+    return int64_t(idx.words[int(i)]);
+}
+
+// 越界下标截断到 0：宿主会读标志并抛 "index out of range"，但即使它没读，
+// 内核也不能越界读写。
+int64_t clamp_index(int64_t v, int64_t axis_len) {
+    if (v < 0 || v >= axis_len) {
+        flag.data[0] = 1;
+        return 0;
+    }
+    return v;
+}
+
+// 扁平输出下标 -> 坐标；非 dim 维的坐标按输入步长累加成 base，dim 那一维换成
+// index 给出的行号。index 与 input 同秩，所以两者共用同一套坐标。
+void main() {
+    const int64_t i = int64_t(gl_GlobalInvocationID.x);
+    if (i >= int64_t(p.numel)) return;
+    int64_t base = 0;
+    int64_t rem  = i;
+    for (int d = p.ndim - 1; d >= 0; --d) {
+        const int64_t dim = int64_t(p.out_shape[d]);
+        if (dim <= 0) continue;
+        const int64_t coord = rem % dim;
+        rem /= dim;
+        if (d != p.dim) base += coord * int64_t(p.in_strides[d]);
+    }
+    const int64_t r = clamp_index(load_index(i), int64_t(p.axis_dim));
+    dst.data[int(i)] = src.data[int(base + r * int64_t(p.axis_stride))];
+}

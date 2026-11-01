@@ -1,4 +1,4 @@
-// Start/stop slice of a strided input into a contiguous output.
+// 跨步输入的起止切片，输出连续。
 #include "common.h"
 
 using namespace tvv::sycl_dev;
@@ -37,8 +37,10 @@ int sycl_c_launch_slice(void* ctx, const void* in, void* out, int dtype,
             slice_kernel<T>(q, static_cast<const T*>(in), static_cast<T*>(out), *p);
             return tvv::sycl::kSyclOk;
         });
+    } catch (const std::exception& e) {
+        return record_failure(e);
     } catch (...) {
-        return tvv::sycl::kSyclFailure;
+        return record_failure();
     }
 }
 

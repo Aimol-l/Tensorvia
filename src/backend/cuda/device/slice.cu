@@ -1,5 +1,4 @@
-// Start/stop slice of a strided input into a contiguous output. Every
-// dimension carries a start offset (zero for dimensions that are not sliced).
+// 跨步输入的起止切片，输出连续。每一维都携带起始偏移（未切片的维为 0）。
 #include "common.cuh"
 
 #include <cstdint>
@@ -56,7 +55,7 @@ cudaError_t launch_slice(cudaStream_t stream, const void* in, void* out,
 }  // namespace tvv::cuda
 
 // ---------------------------------------------------------------------------
-// Host driver.
+// 宿主驱动。
 // ---------------------------------------------------------------------------
 
 namespace ops {
@@ -79,7 +78,7 @@ Tensor SliceImpl<Device::CUDA>::execute(
 
     tvv::cuda::Slice p{};
     p.numel = static_cast<int64_t>(out.numel());
-    // t.data() already points at the view origin; the kernel's offset stays 0.
+    // t.data() 已指向视图起点；内核的 offset 保持为 0。
     p.offset = 0;
     p.ndim = ndim;
     for (int d = 0; d < ndim; ++d) {
@@ -94,7 +93,6 @@ Tensor SliceImpl<Device::CUDA>::execute(
         tvv::cuda::launch_slice(static_cast<cudaStream_t>(ctx->stream()), t.data(),
                                 out.data(), t.dtype(), p),
         "Slice launch");
-    ctx->wait();
     return out;
 }
 

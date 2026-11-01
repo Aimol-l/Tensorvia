@@ -5,14 +5,12 @@
 #include <utility>
 #include <vector>
 
-// Declarations only: this partition includes no SYCL header and is compiled
-// even in CPU-only builds. Definitions live in src/backend/sycl/host/*.cpp,
-// which are part of the build only when BACKEND_SYCL is defined.
+// 只有声明：这个分区不包含任何 SYCL 头，纯 CPU 构建里也会编译。实现体在
+// src/backend/sycl/host/*.cpp，只有定义 BACKEND_SYCL 时才加入构建。
 //
-// Only operations whose device kernels exist are declared. An undeclared
-// specialization makes execute_on's `has_sycl_impl` concept false, which turns
-// into the "not implemented on the SYCL backend" runtime error instead of a
-// link failure.
+// 只声明设备内核已存在的算子。未声明的特化会让 execute_on 的 `has_sycl_impl`
+// 概念为假，从而得到 "not implemented on the SYCL backend" 运行期错误，
+// 而不是链接失败。
 #include "tensorvia/types.hpp"
 #include "tensorvia/tensor.hpp"
 #include "tensorvia/cpu_ops.hpp"
@@ -34,7 +32,7 @@ template <> struct RandomImpl<Device::SYCL> {
 };
 
 // ---------------------------------------------------------------------------
-// Arithmetic.
+// 算术。
 // ---------------------------------------------------------------------------
 template <> struct AddImpl<Device::SYCL> {
     static void execute(Tensor& a, float b);
@@ -81,6 +79,9 @@ template <> struct ExpImpl<Device::SYCL> {
     static void execute(Tensor& a);
     static Tensor execute(const Tensor& a);
 };
+template <> struct ErfImpl<Device::SYCL> {
+    static Tensor execute(const Tensor& a);
+};
 template <> struct SqrtImpl<Device::SYCL> {
     static void execute(Tensor& a);
     static Tensor execute(const Tensor& a);
@@ -99,7 +100,7 @@ template <> struct ClampImpl<Device::SYCL> {
 };
 
 // ---------------------------------------------------------------------------
-// Activations.
+// 激活。
 // ---------------------------------------------------------------------------
 template <> struct ReluImpl<Device::SYCL> {
     static void execute(Tensor& a);
@@ -122,7 +123,7 @@ template <> struct SoftmaxImpl<Device::SYCL> {
 };
 
 // ---------------------------------------------------------------------------
-// Reductions.
+// 归约。
 // ---------------------------------------------------------------------------
 template <> struct SumImpl<Device::SYCL> {
     static float execute(const Tensor& a);
@@ -138,6 +139,9 @@ template <> struct MaxImpl<Device::SYCL> {
 };
 template <> struct MeanImpl<Device::SYCL> {
     static float execute(const Tensor& a);
+    static Tensor execute(const Tensor& a, int axis);
+};
+template <> struct ProdImpl<Device::SYCL> {
     static Tensor execute(const Tensor& a, int axis);
 };
 template <> struct ArgMaxImpl<Device::SYCL> {
@@ -157,7 +161,17 @@ template <> struct NonZeroImpl<Device::SYCL> {
 };
 
 // ---------------------------------------------------------------------------
-// Dtype conversion.
+// sort / topk。轴长上限 1024（超过显式抛错，见 host/sort.cpp 的注释）。
+// ---------------------------------------------------------------------------
+template <> struct SortImpl<Device::SYCL> {
+    static SortResult execute(const Tensor& input, int dim, bool descending);
+};
+template <> struct TopkImpl<Device::SYCL> {
+    static TopkResult execute(const Tensor& input, int64_t k, int dim, bool largest);
+};
+
+// ---------------------------------------------------------------------------
+// dtype 转换。
 // ---------------------------------------------------------------------------
 template <> struct TypecastImpl<Device::SYCL> {
     static void execute(Tensor& a, DataType dst_type);
@@ -165,7 +179,7 @@ template <> struct TypecastImpl<Device::SYCL> {
 };
 
 // ---------------------------------------------------------------------------
-// Comparison and logical.
+// 比较与逻辑。
 // ---------------------------------------------------------------------------
 template <> struct EqualImpl<Device::SYCL> {
     static Tensor execute(const Tensor& a, const Tensor& b);
@@ -193,7 +207,7 @@ template <> struct LessEqualImpl<Device::SYCL> {
 };
 
 // ---------------------------------------------------------------------------
-// Shape and data movement.
+// 形状与数据搬移。
 // ---------------------------------------------------------------------------
 template <> struct ConcatImpl<Device::SYCL> {
     static Tensor execute(const std::vector<Tensor>& tensors, int dim);
@@ -209,10 +223,32 @@ template <> struct TransposeImpl<Device::SYCL> {
 };
 
 // ---------------------------------------------------------------------------
-// Matrix multiplication.
+// 矩阵乘。
 // ---------------------------------------------------------------------------
 template <> struct MatMulImpl<Device::SYCL> {
     static Tensor execute(const Tensor& a, const Tensor& b);
+};
+template <> struct Conv2dImpl<Device::SYCL> {
+    static Tensor execute(const Tensor& input, const Tensor& weight, const Tensor* bias,
+                          const Conv2dShape& shape);
+};
+
+// ---------------------------------------------------------------------------
+// 条件选择、索引与累积和。
+// ---------------------------------------------------------------------------
+template <> struct WhereImpl<Device::SYCL> {
+    static Tensor execute(const Tensor& cond, const Tensor& a, const Tensor& b);
+    static Tensor execute(const Tensor& cond, const Tensor& a, float b);
+    static Tensor execute(const Tensor& cond, float a, const Tensor& b);
+};
+template <> struct IndexSelectImpl<Device::SYCL> {
+    static Tensor execute(const Tensor& input, int dim, const Tensor& index);
+};
+template <> struct GatherImpl<Device::SYCL> {
+    static Tensor execute(const Tensor& input, int dim, const Tensor& index);
+};
+template <> struct CumsumImpl<Device::SYCL> {
+    static Tensor execute(const Tensor& a, int axis);
 };
 
 }  // namespace ops

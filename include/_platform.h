@@ -1,6 +1,5 @@
-// Tiny helper header included in the global module fragment of every .cpp.
-// Macros do not leak across module imports, so each implementation unit must
-// #include this directly to pick up compiler-agnostic keywords.
+// 极小的辅助头，被每个 .cpp 的全局模块片段包含。宏不会跨模块 import 传播，
+// 所以每个实现单元都要直接 #include 它，才能拿到与编译器无关的关键字宏。
 #pragma once
 
 #ifndef TENSORVIA_PLATFORM_H

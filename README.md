@@ -35,15 +35,38 @@
 | **SYCL** | Clang（host）+ DPC++（设备） | C++23 host + SYCL 设备单元 | SYCL（USM，自动选择设备） | ✅ 可选启用 |
 
 设备枚举为 `Device::CPU`、`Device::VULKAN`、`Device::CUDA` 和 `Device::SYCL`。CPU 后端实现完整的
-`ops` API；Vulkan、CUDA 与 SYCL 覆盖同一组算子：
+`ops` API；Vulkan、CUDA 与 SYCL 覆盖下面这组算子（少数算子仍为 CPU-only，设备上调用会显式报错，
+完整覆盖矩阵见 [docs/coverage.md](docs/coverage.md)：
 
-- 创建：`Zeros`、`Ones`、`Fill`、`Random`
-- 算术：`Add`、`Sub`、`Mul`（逐元素）、`Div`、`MatMul`（矩阵乘）
+- 创建：`Zeros`、`Ones`、`Fill`、`Random`；生成器 `Arange`、`Linspace`、`Eye`、`Randn` 的
+  `TensorOptions` 重载在宿主生成后一次性搬到目标设备（同一 seed 各后端取值相同）
+- 算术：`Add`、`Sub`、`Mul`、`Div`、`MatMul`（N-D batched + batch 广播）、`Bmm`、`Addmm`、`Linear`、
+  `Conv2d`（NCHW 的 2-D 卷积，stride/padding + 可选 bias，接受 `[N,C,H,W]` 与 `[C,H,W]`）
 - 一元：`Abs`、`Sin`、`Cos`、`Tan`、`Exp`、`Sqrt`、`Log`、`Pow`、`Clamp`
-- 激活：`Relu`、`Silu`、`Tanh`、`Sigmoid`、`Softmax`
-- 归约：`Sum`、`Min`、`Max`、`Mean`、`Argmax`、`Argmin`
-- 比较/逻辑：`Equal`、`NotEqual`、`Greater`、`Less`、`GreaterEqual`、`LessEqual`、`All`、`Any`、`Nonzero`
-- 形状/类型：`Concat`、`Transpose`、`Slice`、`Typecast`
+- 激活：`Relu`、`Silu`、`Tanh`、`Sigmoid`、`Softmax`、`LogSoftmax`
+- 归一化/统计：`LayerNorm`、`RmsNorm`、`Var`、`Std`、`Norm`（设备端由上面的逐元素与归约算子组合实现，
+  全程留在设备上，无隐式回拷）
+- 归约：`Sum`、`Min`、`Max`、`Mean`、`Argmax`、`Argmin`（`Var/Std/Norm` 见上）
+- 比较/逻辑：`Equal`、`NotEqual`、`Greater`、`Less`、`GreaterEqual`、`LessEqual`、`All`、`Any`、`Nonzero`、`CountNonzero`
+- 条件/索引/扫描：`Where`（三路广播）、`IndexSelect`、`Gather`（embedding 取行与逐元素取址）、`Cumsum`
+- 形状/搬移/类型：`Concat`、`Transpose`、`Slice`、`Split`、`Chunk`、`Stack`、`Pad`、`Repeat`、`Flip`、`Roll`、`Typecast`
+
+以上分组是便于阅读的摘要。权威的覆盖矩阵在 [docs/coverage.md](docs/coverage.md)：算子 × 后端逐格标注
+native / emulated（组合实现）/ unsupported（显式拒绝），由 `tools/coverage_matrix.py` 从源码与
+`tools/coverage_overrides.toml` 生成，CI 守漂移——那份矩阵取代了这里的手写清单。
+
+设备端未覆盖的算子（在设备张量上调用会带算子名抛错，不会静默回退 CPU）不在这里手写清单：
+以 [docs/coverage.md](docs/coverage.md) 的矩阵为准，其中 `unsupported` 的每一格都注明拒绝位置
+（`require_cpu` 或 `execute_on` 的“后端未实现”路径）。算子提交的同步语义（哪些调用会让宿主
+等待设备）见 [docs/async-semantics.md](docs/async-semantics.md)。
+`examples/inference.cpp` 按真实推理引擎的分段跑一次前向：text → tokens → embedding →
+prefill（整段 prompt 一次算完，K/V 写进 cache）→ decode（一次一个 token，复用 cache）→ logits。
+模型是随机权重的两层 decoder-only Transformer：词表与位置查表走 `IndexSelect`，多头注意力的
+因果掩码走 `Where`。`inference [cpu|cuda|vulkan|sycl] [prompt]` 指定后端与提示词。
+
+`examples/cnn_inference.cpp` 跑一个两层卷积网络：conv → relu → maxpool → conv → relu → maxpool
+→ 全连接 → softmax。卷积直接调 `Conv2d`，权重随机；程序会在宿主上按卷积的定义重算几个输出位置
+与算子结果比对。`cnn_inference [cpu|cuda|vulkan|sycl]` 指定后端。
 
 ## 📦 依赖
 
@@ -102,7 +125,7 @@ int main() {
 
     auto v = Tensor::Random({1024}, 1.0f, 10.0f, DataType::FLOAT32);
 
-    std::println("{}", ops::Sum(ops::Softmax(v, 0)));
+    std::println("{}", ops::Sum(ops::Softmax(v, 0)).item<float>());  // 归约结果取回标量：item<T>()
 
     return 0;
 }
@@ -163,7 +186,7 @@ int main() {
 
     auto v = Tensor::Random({1024}, 1.0f, 10.0f, DataType::FLOAT32);
 
-    std::println("{}", ops::Sum(ops::Softmax(v, 0)));
+    std::println("{}", ops::Sum(ops::Softmax(v, 0)).item<float>());  // 归约结果取回标量：item<T>()
 
     return 0;
 }
@@ -290,11 +313,48 @@ int main() {
 
     auto v = Tensor::Random({1024}, 1.0f, 10.0f, DataType::FLOAT32);
 
-    std::println("{}", ops::Sum(ops::Softmax(v, 0)));
+    std::println("{}", ops::Sum(ops::Softmax(v, 0)).item<float>());  // 归约结果取回标量：item<T>()
 
     return 0;
 }
 ```
+
+## 🎛 多设备（多卡）
+
+`Device` 只选后端种类；同一个后端下的第几张卡由运行期序号决定，两者合成
+`DeviceId { Device kind; int index; }`。CPU 恒为 `{CPU, 0}`。
+
+```cpp
+// 每张卡一个实例：设备数、当前设备、切换（线程私有，torch 风格）
+const int n = ops::device_count(Device::CUDA);
+ops::set_device(Device::CUDA, 1);                 // 越界/负数直接抛
+{
+    ops::DeviceGuard guard(Device::CUDA, 0);      // 作用域结束恢复上一个
+    Tensor a = Tensor::Ones({4, 4}, DataType::FLOAT32, Device::CUDA); // 落在 0 号卡
+}                                                  // 回到 1 号卡
+
+Tensor t(values, {3});                             // 先按 {CPU, 0} 构造
+t.to_device(DeviceId{Device::CUDA, 1});            // 跨设备拷贝经 host 中转
+std::println("{}", device_id_to_string(t.device_id()));   // CUDA:1
+```
+
+几条约定：
+
+- 算子的输出跟随输入所在实例；同一后端的不同序号也算跨设备，作为操作数混用会被拒绝，
+  不会拿 A 卡的 context 去读 B 卡的指针。
+- `to_device(Device)` 的目标序号是当前线程的当前设备；`to_device(DeviceId)` 精确指定。
+- `ops::synchronize()` / `ops::empty_cache()` 覆盖所有已经起起来的实例。
+- 序号空间由各后端自己定义：CUDA 按 `cudaGetDeviceCount` 顺序（默认是显存最大的那张），
+  Vulkan 按"过滤 + 类型优先序"后的列表，SYCL 按 `sycl::device::get_devices()` 的位置，
+  默认值都是该后端原本会选中的设备——不调用 `set_device` 的程序行为不变。
+
+完整示例见 `examples/multi_device.cpp`：在只有一张卡的机器上它照常跑完，跨卡那一段
+打印一条提示后跳过。
+
+> **迁移提示**：旧的 `to_device(uint32_t id = 0)` 已删除。它把传进来的参数整个忽略，只按
+> 编译期开了哪些后端挑目标（同时编入多个后端时静默选 Vulkan），在多设备下没法表达
+> "第几张卡"。改用 `to_device(Device)`（目标后端当前线程的当前卡）或
+> `to_device(DeviceId{kind, index})` / `to_device(kind, index)`（精确指定）。
 
 ## 🧪 测试
 
@@ -311,7 +371,11 @@ cmake -B build -DBACKEND_CPU=ON -DCMAKE_BUILD_TYPE=Release -DBUILD_TEST=ON && cm
 # cmake -B build -DBACKEND_SYCL=ON -DCMAKE_BUILD_TYPE=Release -DBUILD_TEST=ON && cmake --build build --parallel
 ```
 
-`tests/` 是头文件范式（`#include "tensorvia.hpp"`），mcpp 与 CMake 两条路径编译同一份文件、产出同样的两个二进制：`tests/test.cpp`（公共 API 的全量行为测试，不区分后端，CPU 上运行）与 `benchmark/bench.cpp`（基准，自带 main；`mcpp.toml` 的 `[test] discover` 与 `-DBUILD_BENCH=ON` 都会构建它）。上面的 lane 命令验证的是**该 lane 完整构建 + 公共测试通过**；各设备后端编入后的算子行为由消费方冒烟覆盖。测试通过 `[dev-dependencies]` 拿 GoogleTest——它只进测试二进制，不进 `libtensorvia.so`。模块导出面（`import tensorvia;` 的符号清单）由 `tools/gen_facade.py --check` 在每次 `mcpp build` 时守卫。
+`tests/` 是头文件范式（`#include "tensorvia.hpp"`），mcpp 与 CMake 两条路径编译同一批文件。每个 `tests/*.cpp` 各自是一个独立的测试二进制：`device`（后端生命周期、多设备寻址、CUDA context/stream）、`view`（视图/offset/引用语义）、`ops`（算子与数值覆盖）、`contract`（FR-1/FR-2/FR-3 契约）、`p0`（P0 语义契约 FR-3..FR-7）、`p1`（FR-9..FR-12：N-D matmul、推理关键算子的跨后端一致性、搬运算子、不支持组合的显式报错）、`dim`、`async_contract`（隐式同步断言：提交阶段零等待，显式点各计一次）；共享夹具与助手在 `tests/test_support.hpp`。另有 `benchmark/bench.cpp`（基准，自带 main；`mcpp.toml` 的 `[test] discover` 与 `-DBUILD_BENCH=ON` 都会构建它；`bench [cpu\|cuda\|vulkan\|sycl]` 选后端，不传参时测本构建编译进来的后端）。上面的 lane 命令验证的是**该 lane 完整构建 + 公共测试通过**；各设备后端编入后的算子行为由消费方冒烟覆盖。测试通过 `[dev-dependencies]` 拿 GoogleTest——它只进测试二进制，不进 `libtensorvia.so`。模块导出面（`import tensorvia;` 的符号清单）由 `tools/gen_facade.py --check` 在每次 `mcpp build` 时守卫。
+
+## 📊 性能基线
+
+`benchmark/bench.cpp` 把每次调用拆成 submit（调用返回）/ sync（`synchronize()` 耗时）/ total 三段，冷启动（JIT / 流水线创建）单独一列；吞吐按 total 计算。同机基线表（含硬件 / 驱动 / 编译器 / profile 与逐用例三段耗时）在 [`benchmark/baseline/`](benchmark/baseline/)；分类性能下限（FR-4.3 的校准百分比、不达标项与根因）在 [`docs/performance.md`](docs/performance.md)。性能结论以那两份文档与同机比值为准，本文不手写数字。
 
 > **SYCL lane 的 llvm 构建需要 mcpp ≥ 2026.10.26.1**：该版本起 mcpp 把
 > libsycl 带来的 libstdc++ 识别为 C++ ABI island 并做链接后验证，`.so` 内

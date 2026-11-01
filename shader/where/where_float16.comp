@@ -1,0 +1,58 @@
+#version 460
+
+// where：cond 判真后从 a 或 b 取元素。
+
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_shader_16bit_storage : require
+#extension GL_EXT_shader_explicit_arithmetic_types : require
+#extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+// where：cond 在宿主上已转成 FLOAT64，这里只判非零（NaN 为真，与 CPU 的
+// `cond[i] != C(0)` 一致）。cond 的 dtype 因此不进参数；三套广播步长与视图偏移
+// 全部在 binding 0 的 SSBO 里（push constant 装不下）。
+#define MAX_DIMS 8
+
+struct WhereParams {
+    int64_t numel;
+    int64_t ndim;
+    int64_t shape[MAX_DIMS];
+    int64_t sc[MAX_DIMS];
+    int64_t sa[MAX_DIMS];
+    int64_t sb[MAX_DIMS];
+    int64_t off_c;
+    int64_t off_a;
+    int64_t off_b;
+    int64_t off_o;
+};
+
+layout(std430, binding = 0) readonly buffer Params { WhereParams p; };
+
+layout(std430, binding = 1) readonly buffer Cond { double data[]; } cond;
+
+layout(std430, binding = 2) readonly buffer InputA { float16_t data[]; } a;
+
+layout(std430, binding = 3) readonly buffer InputB { float16_t data[]; } b;
+
+layout(std430, binding = 4) writeonly buffer Output { float16_t data[]; } res;
+
+// 扁平下标 -> 一侧的元素偏移。广播维的步长为 0，偏移自带视图起点。
+int64_t bcast_offset(int64_t idx, const int64_t strides[MAX_DIMS]) {
+    int64_t off = 0;
+    for (int d = int(p.ndim) - 1; d >= 0; --d) {
+        const int64_t dim = p.shape[d];
+        if (dim <= 0) continue;
+        off += (idx % dim) * strides[d];
+        idx /= dim;
+    }
+    return off;
+}
+
+void main() {
+    const int64_t i = int64_t(gl_GlobalInvocationID.x);
+    if (i >= p.numel) return;
+    const bool pick_a = cond.data[int(p.off_c + bcast_offset(i, p.sc))] != 0.0;
+    res.data[int(p.off_o + i)] = pick_a ? a.data[int(p.off_a + bcast_offset(i, p.sa))]
+                                        : b.data[int(p.off_b + bcast_offset(i, p.sb))];
+}

@@ -22,7 +22,7 @@ Tensor SliceImpl<Device::VULKAN>::execute(
 
     if (slice_dims > ndim) throw std::runtime_error("Slice: invalid ranges");
 
-    // ---------- output shape ----------
+    // ---------- 输出形状 ----------
     std::vector<int64_t> out_shape;
     out_shape.reserve(ndim);
     for (int i = 0; i < slice_dims; ++i)
@@ -37,7 +37,7 @@ Tensor SliceImpl<Device::VULKAN>::execute(
     auto ctx = std::dynamic_pointer_cast<VulkanContext>(res_impl->context());
     if (!ctx) throw std::runtime_error("vulkan Slice: missing VulkanContext");
 
-    // ---------- fill params ----------
+    // ---------- 填充参数 ----------
     SliceParams p{};
     p.ndim       = static_cast<uint32_t>(ndim);
     p.slice_dims = static_cast<uint32_t>(slice_dims);
@@ -46,8 +46,7 @@ Tensor SliceImpl<Device::VULKAN>::execute(
     auto out_shape2 = res.shape();
     auto in_strides = t.strides();
 
-    // Source view origin: without it, slicing a view reads from the buffer
-    // base instead of the view start.
+    // 源视图起点：没有它，对视图切片会从 buffer 基址而不是视图起点读取。
     if (t.offset() > INT32_MAX)
         throw std::runtime_error(
             "slice (Vulkan): view offset exceeds the int32 range of the kernel");

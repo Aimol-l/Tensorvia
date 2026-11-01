@@ -24,7 +24,7 @@ Tensor MatMulImpl<Device::VULKAN>::execute(const Tensor& a, const Tensor& b) {
     const int common    = batched ? static_cast<int>(a.shape(2)) : static_cast<int>(a.shape(1));
     const int cols      = batched ? static_cast<int>(b.shape(2)) : static_cast<int>(b.shape(1));
 
-    // 2D input must produce 2D output, matching the other backends.
+    // 二维输入必须产生二维输出，与其它后端一致。
     std::vector<int64_t> newshape =
         batched ? std::vector<int64_t>{batch, rows, cols}
                 : std::vector<int64_t>{rows, cols};

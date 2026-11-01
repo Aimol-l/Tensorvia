@@ -34,22 +34,25 @@ sycl    = { defines = ["BACKEND_SYCL"] }
 vulkan  = { defines = ["BACKEND_VULKAN"] }
 
 [build]
-sources = [
-    "src/interface/tensorvia.ixx",
-    { glob = "src/backend/cuda/device/**/*.cu", accel = "cuda" },
-    { glob = "src/backend/sycl/device/**/*.sycl", accel = "sycl" },
-    # 计算 shader 不是 C++：引擎不会把它们交给 C++ 编译器，受 accel 约束的
-    # glob 就是路由到构建程序（mcpp.rules.spirv）的那道开关。accel 串要和
-    # 构建时 `--accel vulkan1.4` 里的一节一致，否则这里匹配不到。
-    { glob = "shader/**/*.comp", accel = "vulkan1.4" },
+include_dirs        = ["include"]
+default-profile     = "release"
+module_extensions   = [".ixx"]
+defines             = ['TENSORVIA_VERSION="0.3.0"']
+
+flags = [
+    { glob = "src/**/*.cpp",   cxxflags = ["-fopenmp"] },
+    { glob = "src/*.cpp",      cxxflags = ["-fopenmp"] },
+    # bench 的带宽上限参照要与被测内核同并行度（OpenMP）；CMake 路径的
+    # BUILD_BENCH 已经为 CPU 链 OpenMP::OpenMP_CXX，这里补上 mcpp 侧。
+    { glob = "benchmark/**/*.cpp", cxxflags = ["-fopenmp"] },
 ]
 
-include_dirs    = ["include"]
-default-profile = "release"
-module_extensions = [".ixx"]
-build_program_timeout = 1800
-defines = ['TENSORVIA_VERSION="0.3.0"']
-compile_commands = "./target/compile_commands.json"
+sources = [
+    "src/interface/tensorvia.ixx",
+    { glob = "shader/**/*.comp", accel = "vulkan1.4" },
+    { glob = "src/backend/cuda/device/**/*.cu",   accel = "cuda" },
+    { glob = "src/backend/sycl/device/**/*.sycl", accel = "sycl" }
+]
 
 [profile.release]
 opt = 3
@@ -105,6 +108,7 @@ gcc.libstdcxx = "16.1.0.1"
 
 [target.'cfg(accelerator = "vulkan")'.dependencies]
 compat.vulkan-runtime  = "2026.09.11"
+compat.vulkan-memory-allocator = "3.4.0"
 compat.vulkan-headers =  { version = "1.4.357.0", visibility = "private" }
 
 [target.'cfg(accelerator = "vulkan")'.xlings.workspace]
@@ -118,8 +122,8 @@ compat.openmp = "22.1.8"
 
 [target.'cfg(compiler = "llvm")'.build]
 ldflags  = ["-fopenmp"]
-cxxflags = ["-march=x86-64-v3", "-fopenmp"]
+cxxflags = ["-march=x86-64-v3"]
 
 [target.'cfg(compiler = "gcc")'.build]
 ldflags  = ["-fopenmp"]
-cxxflags = ["-march=x86-64-v3", "-fopenmp"]
+cxxflags = ["-march=x86-64-v3"]

@@ -1,4 +1,4 @@
-// Element-wise dtype conversion, plus the host driver for TypecastImpl.
+// 逐元素 dtype 转换，外加 TypecastImpl 的宿主驱动。
 #include "common.cuh"
 
 #include <cstdint>
@@ -23,7 +23,15 @@ __global__ void cast_kernel(const T* in, R* out, int64_t numel) {
     const int64_t stride = static_cast<int64_t>(gridDim.x) * blockDim.x;
     for (int64_t i = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
          i < numel; i += stride) {
-        out[i] = store_as<R>(to_compute<C>(in[i]));
+        if constexpr (std::is_same_v<R, uint8_t>) {
+            // 数值 -> BOOL：任何非零值都为真，写为 1。
+            out[i] = to_compute<C>(in[i]) != C(0) ? uint8_t{1} : uint8_t{0};
+        } else if constexpr (std::is_same_v<T, uint8_t>) {
+            // BOOL -> 数值：真为 1，假为 0（绝不用原始字节）。
+            out[i] = store_as<R>(C(in[i] != 0 ? 1 : 0));
+        } else {
+            out[i] = store_as<R>(to_compute<C>(in[i]));
+        }
     }
 }
 
@@ -48,7 +56,7 @@ cudaError_t launch_cast(cudaStream_t stream, const void* in, void* out,
 }  // namespace tvv::cuda
 
 // ---------------------------------------------------------------------------
-// Host driver.
+// 宿主驱动。
 // ---------------------------------------------------------------------------
 
 namespace ops {
@@ -56,7 +64,7 @@ namespace ops {
 namespace {
 
 Tensor cast_tensor(const Tensor& a, DataType dst_type) {
-    // The kernel reads a flat buffer; materialize any strided view.
+    // 内核读取扁平 buffer；任何跨步视图都要先物化。
     const Tensor src = a.is_contiguous() ? a : a.clone();
     Tensor out(src.shape(), dst_type, Device::CUDA);
 
@@ -69,11 +77,10 @@ Tensor cast_tensor(const Tensor& a, DataType dst_type) {
 
     ctx->activate();
     tvv::cuda::check_cuda(
-        tvv::cuda::launch_cast(static_cast<cudaStream_t>(ctx->stream()), src_impl->data(),
-                               out_impl->data(), static_cast<int64_t>(src.numel()),
+        tvv::cuda::launch_cast(static_cast<cudaStream_t>(ctx->stream()), src.data(),
+                               out.data(), static_cast<int64_t>(src.numel()),
                                src.dtype(), dst_type),
         "Typecast launch");
-    ctx->wait();
     return out;
 }
 

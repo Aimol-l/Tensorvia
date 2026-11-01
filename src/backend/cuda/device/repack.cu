@@ -1,5 +1,5 @@
-// Strided-view repack: materialize an arbitrary (offset, strides) view into a
-// contiguous buffer. Used by Tensor::clone / contiguous / to_host.
+// 跨步视图重排：把任意 (offset, strides) 视图物化为连续 buffer。供
+// Tensor::clone / contiguous / to_host 使用。
 #include "common.cuh"
 #include "cuda_launch.hpp"
 

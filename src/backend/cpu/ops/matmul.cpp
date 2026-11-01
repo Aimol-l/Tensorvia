@@ -288,7 +288,7 @@ using float16_t = uint16_t;
 // 加载8个float16 -> 转换为8个float32 (__m256)
 static inline __m256 load_f16x8_as_f32(const float16_t* ptr) {
     __m128i f16x8 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(ptr));
-    return _mm256_cvtph_ps(f16x8);  // F16C: half -> float
+    return _mm256_cvtph_ps(f16x8);  // F16C：half -> float
 }
 
 // 存储8个float32 (__m256) -> 转换为8个float16
@@ -307,8 +307,8 @@ static inline __m256 broadcast_f16_as_f32(float16_t val) {
 // ========== 主算子 ==========
 void linear(
     float16_t* __restrict__ out,
-    const float16_t* __restrict__ x,      // [rows, common], row-major
-    const float16_t* __restrict__ w,      // [common, cols], row-major
+    const float16_t* __restrict__ x,      // [rows, common]，行主序
+    const float16_t* __restrict__ w,      // [common, cols]，行主序
     int64_t rows,
     int64_t common,
     int64_t cols,
@@ -368,7 +368,7 @@ void linear(
 
             for (int64_t r = 0; r < mr; ++r) {
                 const int64_t i = i0 + r;
-                // acc + bias
+                // acc + bias（累加器加上偏置）
                 __m256 result = _mm256_add_ps(acc[r][0], bias_vec);
                 // float32 -> float16 并存储
                 float16_t out_tile[8];

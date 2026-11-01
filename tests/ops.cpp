@@ -1,200 +1,6 @@
-#include <gtest/gtest.h>
+#include "test_support.hpp"
 
-#include <algorithm>
-#include <array>
-#include <cmath>
-#include <cstddef>
-#include <cstdint>
-#include <exception>
-#include <print>
-#include <string_view>
-#include <vector>
-
-#include "tensorvia.hpp"
-
-namespace {
-
-constexpr float kEps = 1e-5f;
-
-constexpr std::array<Device, 4> kAllDevices{Device::CPU, Device::CUDA,
-                                            Device::SYCL, Device::VULKAN};
-
-// 本次编译启用的后端就是被测后端，优先级与 Tensor::to_device(uint32_t) 一致：
-// Vulkan > CUDA > SYCL > CPU。设备相关的用例全部跑在它上面。
-constexpr Device kTestDevice =
-#if defined(BACKEND_VULKAN)
-    Device::VULKAN;
-#elif defined(BACKEND_CUDA)
-    Device::CUDA;
-#elif defined(BACKEND_SYCL)
-    Device::SYCL;
-#else
-    Device::CPU;
-#endif
-
-// Recreate the [[1,2,3],[4,5,6],[7,8,9]] fixture shared by several view tests.
-Tensor matrix_3x3() {
-    static std::vector<float> values{1, 2, 3, 4, 5, 6, 7, 8, 9};
-    return Tensor(values, {3, 3});
-}
-
-// 探测一个后端能否真的用：既要有编译进来的实现（否则 execute_on 抛
-// "no implementation compiled for device"），又要 context 能建起来（驱动/
-// 运行时缺失时 Vulkan/SYCL 的构造函数会抛）。两种失败都归为"不可用"。
-bool backend_available(Device device) {
-    try {
-        auto probe = Tensor::Zeros({1}, DataType::FLOAT32, device);
-        return probe.numel() == 1;
-    } catch (...) {
-        return false;
-    }
-}
-
-// 把张量搬回 host，按连续内存取出元素。
-template <typename T>
-std::vector<T> host_values(Tensor tensor) {
-    tensor.to_host();
-    const T* begin = static_cast<const T*>(tensor.data());
-    return {begin, begin + tensor.numel()};
-}
-
-// 拷贝一份放到目标设备；入参按值传递，调用方的 host 张量不受影响。
-Tensor moved_to(Tensor tensor, Device device) {
-    if (device != Device::CPU) tensor.to_device(device);
-    return tensor;
-}
-
-template <typename T>
-void expect_close(const std::vector<T>& got, const std::vector<T>& want,
-                  std::string_view what) {
-    ASSERT_EQ(got.size(), want.size()) << what;
-    for (std::size_t i = 0; i < got.size(); ++i) {
-        EXPECT_NEAR(got[i], want[i], kEps) << what << " at index " << i;
-    }
-}
-
-}  // namespace
-
-// ---------- 0. 被测后端 ----------
-// 先报告这次构建选中的后端在这台机器上能不能跑，避免把 CPU 的结果误当成
-// 加速器路径的结果。
-TEST(Backend, AvailableDevices) {
-    std::size_t available = 0;
-    std::println("[tensorvia] compiled backend under test: {}", device_to_string(kTestDevice));
-    for (Device device : kAllDevices) {
-        const bool ok = backend_available(device);
-        available += ok ? 1 : 0;
-        std::println("[tensorvia]   {:<7}{}", device_to_string(device),ok ? "✅" : "❌");
-    }
-    EXPECT_GE(available, 1u) << "no tensor backend is usable in this build";
-}
-
-// ---------- 0b. 设备相关用例：跑在本次编译启用的后端上 ----------
-// CPU 参考值由同一份代码在 host 算一遍，再逐值对比；后端不可用时整组 SKIP。
-class DeviceOps : public ::testing::Test {
-protected:
-    void SetUp() override {
-        if (!backend_available(kTestDevice)) {
-            GTEST_SKIP() << device_to_string(kTestDevice) << " is unavailable in this build";
-        }
-    }
-    static constexpr Device dev = kTestDevice;
-};
-
-TEST_F(DeviceOps, ElementwiseAndMatMul) {
-    std::vector<float> av{1, 2, 3, 4, 5, 6};  // 2x3
-    std::vector<float> bv{6, 5, 4, 3, 2, 1};  // 2x3
-    std::vector<float> cv{1, 0, 2, 1, 0, 1};  // 3x2，matmul 的右操作数
-
-    const Tensor a_cpu(av, {2, 3}), b_cpu(bv, {2, 3}), c_cpu(cv, {3, 2});
-    const auto add_ref = host_values<float>(a_cpu + b_cpu);
-    const auto sub_ref = host_values<float>(a_cpu - b_cpu);
-    const auto mul_ref = host_values<float>(a_cpu * b_cpu);
-    const auto div_ref = host_values<float>(a_cpu / b_cpu);
-    const auto sca_ref = host_values<float>(a_cpu * 2.0f);
-    const auto mm_ref  = host_values<float>(ops::MatMul(a_cpu, c_cpu));
-
-    const Tensor a = moved_to(a_cpu, dev);
-    const Tensor b = moved_to(b_cpu, dev);
-    const Tensor c = moved_to(c_cpu, dev);
-
-    const auto sum = a + b;
-    EXPECT_TRUE(sum.device() == dev) << "result must stay on " << device_to_string(dev);
-    expect_close(host_values<float>(sum), add_ref, "add");
-    expect_close(host_values<float>(a - b), sub_ref, "sub");
-    expect_close(host_values<float>(a * b), mul_ref, "mul");
-    expect_close(host_values<float>(a / b), div_ref, "div");
-    expect_close(host_values<float>(a * 2.0f), sca_ref, "mul-scalar");
-    expect_close(host_values<float>(ops::MatMul(a, c)), mm_ref, "matmul");
-}
-
-TEST_F(DeviceOps, UnaryMath) {
-    std::vector<float> av{0.5f, 1.0f, 1.5f, 2.0f, 2.5f, 3.0f};  // log/sqrt 需要正数
-    const Tensor a_cpu(av, {2, 3});
-
-    const auto exp_ref  = host_values<float>(ops::Exp(a_cpu));
-    const auto sqrt_ref = host_values<float>(ops::Sqrt(a_cpu));
-    const auto log_ref  = host_values<float>(ops::Log(a_cpu, 2.0f));
-    const auto abs_ref  = host_values<float>(ops::Abs(a_cpu));
-    const auto relu_ref = host_values<float>(ops::Relu(a_cpu));
-
-    const Tensor a = moved_to(a_cpu, dev);
-    expect_close(host_values<float>(ops::Exp(a)), exp_ref, "exp");
-    expect_close(host_values<float>(ops::Sqrt(a)), sqrt_ref, "sqrt");
-    expect_close(host_values<float>(ops::Log(a, 2.0f)), log_ref, "log");
-    expect_close(host_values<float>(ops::Abs(a)), abs_ref, "abs");
-    expect_close(host_values<float>(ops::Relu(a)), relu_ref, "relu");
-}
-
-TEST_F(DeviceOps, ReductionAndSoftmax) {
-    std::vector<float> av{1, 2, 3, 4, 5, 6};
-    const Tensor a_cpu(av, {2, 3});
-    const float sum_ref  = ops::Sum(a_cpu);
-    const float mean_ref = ops::Mean(a_cpu);
-    const float min_ref  = ops::Min(a_cpu);
-    const float max_ref  = ops::Max(a_cpu);
-    const auto axis_ref  = host_values<float>(ops::Sum(a_cpu, 1));
-    const auto sm_ref    = host_values<float>(ops::Softmax(a_cpu, 1));
-
-    const Tensor a = moved_to(a_cpu, dev);
-    EXPECT_NEAR(ops::Sum(a), sum_ref, kEps) << "sum on " << device_to_string(dev);
-    EXPECT_NEAR(ops::Mean(a), mean_ref, kEps) << "mean on " << device_to_string(dev);
-    EXPECT_NEAR(ops::Min(a), min_ref, kEps) << "min on " << device_to_string(dev);
-    EXPECT_NEAR(ops::Max(a), max_ref, kEps) << "max on " << device_to_string(dev);
-    expect_close(host_values<float>(ops::Sum(a, 1)), axis_ref, "sum-axis");
-    expect_close(host_values<float>(ops::Softmax(a, 1)), sm_ref, "softmax");
-}
-
-TEST_F(DeviceOps, ComparisonTypecastConcat) {
-    std::vector<float> av{1, 2, 3, 4, 5, 6};
-    std::vector<float> bv{6, 5, 4, 3, 2, 1};
-    const Tensor a_cpu(av, {2, 3}), b_cpu(bv, {2, 3});
-
-    const auto gt_ref   = host_values<std::int8_t>(ops::Greater(a_cpu, b_cpu));
-    const auto gt0_ref  = host_values<std::int8_t>(ops::Greater(a_cpu, 3.0f));
-    const auto cast_ref = host_values<double>(ops::Typecast(a_cpu, DataType::FLOAT64));
-    const auto cat_ref  = host_values<float>(ops::Concat({a_cpu, b_cpu}, 0));
-
-    const Tensor a = moved_to(a_cpu, dev);
-    const Tensor b = moved_to(b_cpu, dev);
-    expect_close(host_values<std::int8_t>(ops::Greater(a, b)), gt_ref, "greater");
-    expect_close(host_values<std::int8_t>(ops::Greater(a, 3.0f)), gt0_ref, "greater-scalar");
-    expect_close(host_values<double>(ops::Typecast(a, DataType::FLOAT64)), cast_ref, "typecast");
-    expect_close(host_values<float>(ops::Concat({a, b}, 0)), cat_ref, "concat");
-}
-
-TEST_F(DeviceOps, SliceAndTranspose) {
-    std::vector<float> av{1, 2, 3, 4, 5, 6};
-    const Tensor a_cpu(av, {2, 3});
-
-    const auto slice_ref  = host_values<float>(ops::Slice(a_cpu, {{0, 1}, {1, 3}}));
-    const auto transp_ref = host_values<float>(ops::Transpose(a_cpu, {1, 0}));
-
-    const Tensor a = moved_to(a_cpu, dev);
-    expect_close(host_values<float>(ops::Slice(a, {{0, 1}, {1, 3}})), slice_ref, "slice");
-    expect_close(host_values<float>(ops::Transpose(a, {1, 0})), transp_ref, "transpose");
-}
-
+// 算子与数值覆盖：matmul、归约、广播、创建、近似、损失与 dtype 提升。
 // ---------- 原有冒烟 ----------
 TEST(Tensorvia, BasicArithmetic) {
     auto sa = Tensor::Ones({2, 3}, DataType::FLOAT32);
@@ -206,153 +12,6 @@ TEST(Tensorvia, BasicArithmetic) {
     EXPECT_EQ(sd.shape(1), 3);
 }
 
-// ---------- 1~3. 带 offset 的连续切片：读 / out-of-place / in-place ----------
-TEST(View, SliceReadAndInPlaceArithmetic) {
-    Tensor a = matrix_3x3();
-    auto v = a.slice({{1, 3}, {0, 3}});  // [[4,5,6],[7,8,9]] offset=3
-    EXPECT_EQ(v.shape(0), 2);
-    EXPECT_EQ(v.shape(1), 3);
-    EXPECT_FLOAT_EQ(v.at<float>({0, 0}), 4.0f);
-    EXPECT_FLOAT_EQ(v.at<float>({0, 2}), 6.0f);
-    EXPECT_FLOAT_EQ(v.at<float>({1, 0}), 7.0f);
-    EXPECT_FLOAT_EQ(v.at<float>({1, 2}), 9.0f);
-
-    // 视图上的 out-of-place 算术（不污染原张量）
-    auto ones23 = Tensor::Ones({2, 3}, DataType::FLOAT32);
-    auto r = v + ones23;  // [[5,6,7],[8,9,10]]
-    EXPECT_FLOAT_EQ(r.at<float>({0, 0}), 5.0f);
-    EXPECT_FLOAT_EQ(r.at<float>({1, 2}), 10.0f);
-    EXPECT_FLOAT_EQ(a.at<float>({0, 0}), 1.0f);
-    EXPECT_FLOAT_EQ(a.at<float>({2, 2}), 9.0f);
-
-    // in-place 标量算子在连续 offset 视图上：写穿到原张量
-    ops::Add(v, 1.0f);  // v -> [[5,6,7],[8,9,10]]，同时写穿 a 的后两行
-    EXPECT_FLOAT_EQ(v.at<float>({0, 0}), 5.0f);
-    EXPECT_FLOAT_EQ(a.at<float>({0, 0}), 1.0f);  // 视图外的行不动
-    EXPECT_FLOAT_EQ(a.at<float>({1, 0}), 5.0f);
-    EXPECT_FLOAT_EQ(a.at<float>({2, 2}), 10.0f);
-}
-
-// ---------- 4~6. 非连续视图（转置）：读 / 算术 / reduction / softmax ----------
-TEST(View, TransposedView) {
-    Tensor x = matrix_3x3();
-    auto xt = x.t();  // [[1,4,7],[2,5,8],[3,6,9]]，strides={1,3} 非连续
-    EXPECT_FLOAT_EQ(xt.at<float>({0, 1}), 4.0f);
-    EXPECT_FLOAT_EQ(xt.at<float>({2, 0}), 3.0f);
-
-    auto ones33 = Tensor::Ones({3, 3}, DataType::FLOAT32);
-    auto tr = xt + ones33;  // [[2,5,8],[3,6,9],[4,7,10]]
-    EXPECT_FLOAT_EQ(tr.at<float>({0, 0}), 2.0f);
-    EXPECT_FLOAT_EQ(tr.at<float>({0, 1}), 5.0f);
-    EXPECT_FLOAT_EQ(tr.at<float>({2, 2}), 10.0f);
-    EXPECT_FLOAT_EQ(x.at<float>({0, 0}), 1.0f);  // 原张量不受影响
-
-    // 非连续视图上的 reduction
-    EXPECT_NEAR(ops::Sum(xt), 45.0f, kEps);
-    EXPECT_NEAR(ops::Max(xt), 9.0f, kEps);
-    EXPECT_NEAR(ops::Mean(xt), 5.0f, kEps);
-
-    // 非连续视图上的 softmax：每行和为 1
-    auto sm = ops::Softmax(xt, -1);
-    for (int i = 0; i < 3; ++i) {
-        float s = 0.0f;
-        for (int j = 0; j < 3; ++j) s += sm.at<float>({i, j});
-        EXPECT_NEAR(s, 1.0f, kEps) << "row " << i;
-    }
-    // 第一行 = softmax([1,4,7])，逐值核对
-    float e1 = std::exp(1.0f), e4 = std::exp(4.0f), e7 = std::exp(7.0f);
-    float denom = e1 + e4 + e7;
-    EXPECT_NEAR(sm.at<float>({0, 0}), e1 / denom, kEps);
-    EXPECT_NEAR(sm.at<float>({0, 2}), e7 / denom, kEps);
-}
-
-// ---------- 7. 引用语义：拷贝共享数据（对齐 NumPy/PyTorch） ----------
-TEST(Tensor, ReferenceSemantics) {
-    std::vector<float> ref_v{1, 2, 3};
-    Tensor rt(ref_v, {3});
-    Tensor rc = rt;  // O(1) 共享句柄
-    EXPECT_FLOAT_EQ(rc.at<float>({0}), 1.0f);
-    ops::Add(rc, 10.0f);  // 写穿共享 buffer
-    EXPECT_FLOAT_EQ(rc.at<float>({0}), 11.0f);
-    EXPECT_FLOAT_EQ(rt.at<float>({0}), 11.0f);  // 原句柄同步可见
-
-    auto rd = rt.clone();  // clone = 显式深拷贝
-    ops::Add(rd, 100.0f);
-    EXPECT_FLOAT_EQ(rd.at<float>({0}), 111.0f);
-    EXPECT_FLOAT_EQ(rt.at<float>({0}), 11.0f);  // clone 不影响原
-
-    Tensor rm = rt;  // meta 各自独立
-    rm.reshape({1, 3});
-    EXPECT_EQ(rm.shape().size(), 2u);
-    EXPECT_EQ(rt.shape().size(), 1u);
-
-    Tensor a = matrix_3x3();
-    auto v = a.slice({{1, 3}, {0, 3}});
-    Tensor cv = v;  // 视图的拷贝同样共享
-    EXPECT_FLOAT_EQ(cv.at<float>({0, 0}), v.at<float>({0, 0}));
-}
-
-// ---------- 8. 视图的 clone 与 typecast ----------
-TEST(View, CloneAndTypecast) {
-    Tensor a = matrix_3x3();
-    auto v = a.slice({{1, 3}, {0, 3}});
-    ops::Add(v, 1.0f);  // v -> [[5,6,7],[8,9,10]]
-
-    auto vc = v.clone();
-    EXPECT_FLOAT_EQ(vc.at<float>({0, 0}), 5.0f);
-    EXPECT_TRUE(vc.is_contiguous());
-
-    const Tensor& v_const = v;  // 非 const 左值会重载到 in-place 版本
-    auto v64 = ops::Typecast(v_const, DataType::FLOAT64);
-    EXPECT_EQ(v64.dtype(), DataType::FLOAT64);
-    EXPECT_DOUBLE_EQ(v64.at<double>({0, 0}), 5.0);
-    EXPECT_DOUBLE_EQ(v64.at<double>({1, 2}), 10.0);
-}
-
-// ---------- 9. permute（3D 非连续视图）算术 ----------
-TEST(View, Permute3D) {
-    std::vector<float> bv;
-    for (int i = 0; i < 24; ++i) bv.push_back(static_cast<float>(i));
-    Tensor b3(bv, {2, 3, 4});  // b3[0,1,2] = 6
-
-    auto bp = b3.permute({2, 0, 1});  // shape {4,2,3}
-    EXPECT_EQ(bp.shape(0), 4);
-    EXPECT_EQ(bp.shape(1), 2);
-    EXPECT_EQ(bp.shape(2), 3);
-    EXPECT_FLOAT_EQ(bp.at<float>({2, 0, 1}), 6.0f);  // bp[i,j,k] = b3[j,k,i]
-
-    auto bp2 = bp * 2.0f;
-    EXPECT_FLOAT_EQ(bp2.at<float>({2, 0, 1}), 12.0f);
-    EXPECT_NEAR(ops::Sum(bp), ops::Sum(b3), kEps);
-}
-
-// ---------- 10. in-place 写入非连续视图：必须拒绝 ----------
-TEST(View, InPlaceRejectsNonContiguous) {
-    Tensor x = matrix_3x3();
-    auto xt = x.t();
-
-    EXPECT_THROW(ops::Add(xt, 1.0f), std::exception);
-    EXPECT_THROW(ops::Relu(xt), std::exception);
-    EXPECT_THROW(ops::Fill(xt, 5.0f), std::exception);
-    EXPECT_THROW(ops::Transpose(xt), std::exception);
-
-    // 连续 offset 视图允许 in-place，普通张量不受影响
-    Tensor ok_t = matrix_3x3();
-    ops::Relu(ok_t);
-    EXPECT_FLOAT_EQ(ok_t.at<float>({0, 0}), 1.0f);
-}
-
-// ---------- 11. dst 版本二元算子在视图上 ----------
-TEST(View, DstBinaryOnTransposedView) {
-    Tensor x = matrix_3x3();
-    auto xt = x.t();
-    auto ones33 = Tensor::Ones({3, 3}, DataType::FLOAT32);
-
-    Tensor dst({3, 3}, DataType::FLOAT32);
-    ops::Add(xt, ones33, dst);
-    EXPECT_FLOAT_EQ(dst.at<float>({0, 1}), 5.0f);
-    EXPECT_FLOAT_EQ(dst.at<float>({2, 2}), 10.0f);
-}
 
 // ---------- 12. 混合 dtype 慢路径 ----------
 TEST(DType, MixedPromotion) {
@@ -375,7 +34,7 @@ TEST(DType, MixedPromotion) {
 
     std::vector<std::int32_t> mi_v{1, 2, 3, 4};
     Tensor mi(mi_v, {4});  // INT32
-    auto ir = mi + mf;     // INT32 + F32 -> F32 = [2, 4, 6, 8]
+    auto ir = mi + mf;  // INT32 + F32 -> F32 = [2, 4, 6, 8]
     EXPECT_EQ(ir.dtype(), DataType::FLOAT32);
     EXPECT_FLOAT_EQ(ir.at<float>({0}), 2.0f);
     EXPECT_FLOAT_EQ(ir.at<float>({3}), 8.0f);
@@ -398,6 +57,7 @@ TEST(DType, MixedPromotion) {
     EXPECT_FLOAT_EQ(hr.at<float>({0, 1}), 10.0f);
     EXPECT_FLOAT_EQ(hr.at<float>({1, 1}), 22.0f);
 }
+
 
 // ---------- 13. matmul micro-kernel：naive 三重循环对照 ----------
 TEST(MatMul, MatchesNaiveGemm) {
@@ -452,7 +112,8 @@ TEST(MatMul, MatchesNaiveGemm) {
                  "3D batch");
 }
 
-// ---------- 14. argmax/argmin 返回 INT32 索引 ----------
+
+// ---------- 14. argmax/argmin 返回 INT64 索引 ----------
 TEST(Reduce, ArgmaxArgminIndexType) {
     std::vector<float> am_v{3, 1, 2,
                             9, 7, 8,
@@ -460,50 +121,52 @@ TEST(Reduce, ArgmaxArgminIndexType) {
     Tensor am(am_v, {3, 3});
 
     auto amax1 = ops::Argmax(am, 1);
-    EXPECT_EQ(amax1.dtype(), DataType::INT32);
-    EXPECT_EQ(amax1.at<std::int32_t>({0}), 0);  // 行 [3,1,2] 最大在 0
-    EXPECT_EQ(amax1.at<std::int32_t>({1}), 0);  // 行 [9,7,8] 最大在 0
-    EXPECT_EQ(amax1.at<std::int32_t>({2}), 1);  // 行 [4,6,5] 最大在 1
+    EXPECT_EQ(amax1.dtype(), DataType::INT64);
+    EXPECT_EQ(amax1.at<std::int64_t>({0}), 0);  // 行 [3,1,2] 最大在 0
+    EXPECT_EQ(amax1.at<std::int64_t>({1}), 0);  // 行 [9,7,8] 最大在 0
+    EXPECT_EQ(amax1.at<std::int64_t>({2}), 1);  // 行 [4,6,5] 最大在 1
 
     auto amin1 = ops::Argmin(am, 1);
-    EXPECT_EQ(amin1.dtype(), DataType::INT32);
-    EXPECT_EQ(amin1.at<std::int32_t>({0}), 1);
-    EXPECT_EQ(amin1.at<std::int32_t>({1}), 1);
-    EXPECT_EQ(amin1.at<std::int32_t>({2}), 0);
+    EXPECT_EQ(amin1.dtype(), DataType::INT64);
+    EXPECT_EQ(amin1.at<std::int64_t>({0}), 1);
+    EXPECT_EQ(amin1.at<std::int64_t>({1}), 1);
+    EXPECT_EQ(amin1.at<std::int64_t>({2}), 0);
 
     auto amax0 = ops::Argmax(am, 0);
-    EXPECT_EQ(amax0.at<std::int32_t>({0}), 1);  // 列 [3,9,4] 最大在 1
-    EXPECT_EQ(amax0.at<std::int32_t>({1}), 1);  // 列 [1,7,6] 最大在 1
-    EXPECT_EQ(amax0.at<std::int32_t>({2}), 1);  // 列 [2,8,5] 最大在 1
+    EXPECT_EQ(amax0.at<std::int64_t>({0}), 1);  // 列 [3,9,4] 最大在 1
+    EXPECT_EQ(amax0.at<std::int64_t>({1}), 1);  // 列 [1,7,6] 最大在 1
+    EXPECT_EQ(amax0.at<std::int64_t>({2}), 1);  // 列 [2,8,5] 最大在 1
 
     // int8 溢出回归：索引 150 超出 int8 范围
     std::vector<std::int8_t> big_v(200, std::int8_t{-1});
     big_v[150] = 0;
     Tensor big(big_v, {200});
     auto bimax = ops::Argmax(big, 0);
-    EXPECT_EQ(bimax.dtype(), DataType::INT32);
-    EXPECT_EQ(bimax.shape(0), 1);
-    EXPECT_EQ(bimax.at<std::int32_t>({0}), 150);
+    EXPECT_EQ(bimax.dtype(), DataType::INT64);
+    EXPECT_EQ(bimax.dims(), 0u);  // 归约掉唯一一维 -> 0-dim
+    EXPECT_EQ(bimax.at<std::int64_t>({}), 150);
 }
+
 
 // ---------- 15. 1D 带轴 reduce 全家族 ----------
 TEST(Reduce, OneDimAxis) {
     std::vector<float> r1d_v{1, 2, 3, 4};
     Tensor r1d(r1d_v, {4});
-    EXPECT_NEAR(ops::Sum(r1d, 0).at<float>({0}), 10.0f, kEps);
-    EXPECT_NEAR(ops::Mean(r1d, 0).at<float>({0}), 2.5f, kEps);
-    EXPECT_NEAR(ops::Min(r1d, 0).at<float>({0}), 1.0f, kEps);
-    EXPECT_NEAR(ops::Max(r1d, 0).at<float>({0}), 4.0f, kEps);
-    EXPECT_EQ(ops::Argmax(r1d, 0).at<std::int32_t>({0}), 3);
-    EXPECT_EQ(ops::Argmin(r1d, 0).at<std::int32_t>({0}), 0);
+    EXPECT_NEAR(ops::Sum(r1d, 0).item<float>(), 10.0f, kEps);
+    EXPECT_NEAR(ops::Mean(r1d, 0).item<float>(), 2.5f, kEps);
+    EXPECT_NEAR(ops::Min(r1d, 0).item<float>(), 1.0f, kEps);
+    EXPECT_NEAR(ops::Max(r1d, 0).item<float>(), 4.0f, kEps);
+    EXPECT_EQ(ops::Argmax(r1d, 0).item<std::int64_t>(), 3);
+    EXPECT_EQ(ops::Argmin(r1d, 0).item<std::int64_t>(), 0);
 
     // 视图组合：转置视图上的 argmax（am.t() = [[3,9,4],[1,7,6],[2,8,5]]）
     std::vector<float> am_v{3, 1, 2, 9, 7, 8, 4, 6, 5};
     Tensor am(am_v, {3, 3});
     auto tamax = ops::Argmax(am.t(), 0);
-    EXPECT_EQ(tamax.at<std::int32_t>({0}), 0);  // 列 [3,1,2] 最大在 0
-    EXPECT_EQ(tamax.at<std::int32_t>({1}), 0);  // 列 [9,7,8] 最大在 0
+    EXPECT_EQ(tamax.at<std::int64_t>({0}), 0);  // 列 [3,1,2] 最大在 0
+    EXPECT_EQ(tamax.at<std::int64_t>({1}), 0);  // 列 [9,7,8] 最大在 0
 }
+
 
 // ---------- 16. 广播（NumPy 规则） ----------
 TEST(Broadcast, Arithmetic) {
@@ -526,7 +189,7 @@ TEST(Broadcast, Arithmetic) {
     std::vector<float> mat_v;
     for (int i = 0; i < 12; ++i) mat_v.push_back(float(i));
     Tensor bmat(mat_v, {3, 4});
-    auto mab = brow + bmat;  // out[i][j] = row[j] + mat[i][j]
+    auto mab = brow + bmat;  // out[i][j] = row[j] + mat[i][j]（行广播）
     EXPECT_EQ(mab.shape(0), 3);
     EXPECT_EQ(mab.shape(1), 4);
     EXPECT_FLOAT_EQ(mab.at<float>({0, 0}), 1.0f);
@@ -535,7 +198,7 @@ TEST(Broadcast, Arithmetic) {
 
     // (3,1) + (3,4)：列向量广播
     Tensor col(ca_v, {3, 1});
-    auto mcol = col + bmat;  // out[i][j] = col[i] + mat[i][j]
+    auto mcol = col + bmat;  // out[i][j] = col[i] + mat[i][j]（列广播）
     EXPECT_FLOAT_EQ(mcol.at<float>({0, 0}), 1.0f);
     EXPECT_FLOAT_EQ(mcol.at<float>({0, 3}), 4.0f);
     EXPECT_FLOAT_EQ(mcol.at<float>({2, 0}), 11.0f);
@@ -579,6 +242,7 @@ TEST(Broadcast, Arithmetic) {
     EXPECT_FLOAT_EQ(bmat.at<float>({0, 0}), 0.0f);
 }
 
+
 // ---------- 17. 逻辑 op 广播 ----------
 TEST(Broadcast, Comparison) {
     std::vector<float> mat_v;
@@ -588,14 +252,14 @@ TEST(Broadcast, Comparison) {
     std::vector<float> lrow_v{5, 5, 5, 5};
     Tensor lrow(lrow_v, {4});
     auto lt = lrow < bmat;
-    EXPECT_EQ(lt.dtype(), DataType::INT8);
+    EXPECT_EQ(lt.dtype(), DataType::BOOL);
     EXPECT_EQ(lt.shape(0), 3);
     EXPECT_EQ(lt.shape(1), 4);
-    EXPECT_EQ(lt.at<std::int8_t>({0, 0}), 0);  // 5 < 0 false
-    EXPECT_EQ(lt.at<std::int8_t>({1, 0}), 0);  // 5 < 4 false
-    EXPECT_EQ(lt.at<std::int8_t>({2, 0}), 1);  // 5 < 8 true
-    EXPECT_EQ(lt.at<std::int8_t>({0, 3}), 0);  // 5 < 3 false
-    EXPECT_EQ(lt.at<std::int8_t>({1, 1}), 0);  // 5 < 5 false（严格小于）
+    EXPECT_EQ(lt.at<bool>({0, 0}), 0);  // 5 < 0 为假
+    EXPECT_EQ(lt.at<bool>({1, 0}), 0);  // 5 < 4 为假
+    EXPECT_EQ(lt.at<bool>({2, 0}), 1);  // 5 < 8 为真
+    EXPECT_EQ(lt.at<bool>({0, 3}), 0);  // 5 < 3 为假
+    EXPECT_EQ(lt.at<bool>({1, 1}), 0);  // 5 < 5 为假（严格小于）
 
     // 列向量相等比较：(3,1) == (3,4)，混合 dtype（f32 列 vs f64 矩阵）
     Tensor leq_col = Tensor::Fill({3, 1}, 5.0f, DataType::FLOAT32);
@@ -603,8 +267,8 @@ TEST(Broadcast, Comparison) {
     auto leq = leq_col == leq_mat;
     EXPECT_EQ(leq.shape(0), 3);
     EXPECT_EQ(leq.shape(1), 4);
-    EXPECT_EQ(leq.at<std::int8_t>({0, 0}), 1);
-    EXPECT_EQ(leq.at<std::int8_t>({2, 3}), 1);
+    EXPECT_EQ(leq.at<bool>({0, 0}), 1);
+    EXPECT_EQ(leq.at<bool>({2, 3}), 1);
 
     // 双向广播：(2,1) vs (1,3) Greater
     Tensor g2a = Tensor::Fill({2, 1}, 1.0f, DataType::FLOAT32);
@@ -612,8 +276,9 @@ TEST(Broadcast, Comparison) {
     auto gt = g2a > g2b;
     EXPECT_EQ(gt.shape(0), 2);
     EXPECT_EQ(gt.shape(1), 3);
-    EXPECT_EQ(gt.at<std::int8_t>({1, 2}), 1);
+    EXPECT_EQ(gt.at<bool>({1, 2}), 1);
 }
+
 
 // ---------- 18. 标量比较（零临时张量路径） ----------
 TEST(Broadcast, ScalarComparison) {
@@ -621,52 +286,36 @@ TEST(Broadcast, ScalarComparison) {
     Tensor sct(sc_v, {4});
 
     auto seq = sct == 5.0f;  // 容差内相等
-    EXPECT_EQ(seq.dtype(), DataType::INT8);
-    EXPECT_EQ(seq.at<std::int8_t>({0}), 0);
-    EXPECT_EQ(seq.at<std::int8_t>({1}), 1);
-    EXPECT_EQ(seq.at<std::int8_t>({3}), 1);
+    EXPECT_EQ(seq.dtype(), DataType::BOOL);
+    EXPECT_EQ(seq.at<bool>({0}), 0);
+    EXPECT_EQ(seq.at<bool>({1}), 1);
+    EXPECT_EQ(seq.at<bool>({3}), 1);
 
     auto slt = sct < 4.0f;
-    EXPECT_EQ(slt.at<std::int8_t>({0}), 1);  // 1 < 4
-    EXPECT_EQ(slt.at<std::int8_t>({1}), 0);
+    EXPECT_EQ(slt.at<bool>({0}), 1);  // 1 < 4
+    EXPECT_EQ(slt.at<bool>({1}), 0);
 
     auto sge = sct >= 3.0f;
-    EXPECT_EQ(sge.at<std::int8_t>({2}), 1);
-    EXPECT_EQ(sge.at<std::int8_t>({0}), 0);  // 1 >= 3 false
+    EXPECT_EQ(sge.at<bool>({2}), 1);
+    EXPECT_EQ(sge.at<bool>({0}), 0);  // 1 >= 3 为假
 
     auto sne = sct != 5.0f;
-    EXPECT_EQ(sne.at<std::int8_t>({1}), 0);
-    EXPECT_EQ(sne.at<std::int8_t>({2}), 1);
+    EXPECT_EQ(sne.at<bool>({1}), 0);
+    EXPECT_EQ(sne.at<bool>({2}), 1);
 
     // int 张量 vs float 标量（混合 dtype，PromotedType 比较）
     std::vector<std::int32_t> si_v{2, 4, 6};
     Tensor sit(si_v, {3});
     auto sgt = sit > 3.5f;
-    EXPECT_EQ(sgt.at<std::int8_t>({0}), 0);  // 2 > 3.5
-    EXPECT_EQ(sgt.at<std::int8_t>({1}), 1);
-    EXPECT_EQ(sgt.at<std::int8_t>({2}), 1);
+    EXPECT_EQ(sgt.at<bool>({0}), 0);  // 2 > 3.5
+    EXPECT_EQ(sgt.at<bool>({1}), 1);
+    EXPECT_EQ(sgt.at<bool>({2}), 1);
 
     // 视图上的标量比较
     auto sv = sct.slice({{1, 3}});
-    EXPECT_EQ((sv == 5.0f).at<std::int8_t>({0}), 1);
+    EXPECT_EQ((sv == 5.0f).at<bool>({0}), 1);
 }
 
-// ---------- 19. 元数据布局（DimArray） ----------
-TEST(Metadata, DimArray) {
-    // unsqueeze 后 strides 正确重算
-    Tensor uq = Tensor::Ones({2, 3}, DataType::FLOAT32);
-    uq.unsqueeze(0);
-    EXPECT_EQ(uq.shape().size(), 3u);
-    EXPECT_FLOAT_EQ(uq.at<float>({0, 1, 2}), 1.0f);
-
-    // 维度数超过 8 拒绝
-    EXPECT_THROW((Tensor({1, 1, 1, 1, 1, 1, 1, 1, 1}, DataType::FLOAT32)), std::exception);
-
-    // span 返回 + range-for
-    std::int64_t prod = 1;
-    for (std::int64_t d : uq.shape()) prod *= d;
-    EXPECT_EQ(prod, 6);
-}
 
 // ---------- 20. 超越函数 SIMD 精度回归 ----------
 TEST(Numeric, Transcendentals) {
@@ -698,6 +347,7 @@ TEST(Numeric, Transcendentals) {
                     axs[i] / (1.0f + std::exp(-axs[i])), kEps) << "i=" << i;
 }
 
+
 // ---------- 21. 整型 softmax：结果提升为 FLOAT32 ----------
 TEST(Numeric, IntegerSoftmax) {
     std::vector<std::int32_t> ism_v{1, 2, 3, 4};
@@ -714,29 +364,31 @@ TEST(Numeric, IntegerSoftmax) {
     }
 }
 
+
 // ---------- 22. argmax/argmin 并列值 tie-break：取首个极值 ----------
 TEST(Reduce, ArgmaxTieBreak) {
     std::vector<float> tmax{0.f, 0.f, 0.f, 9.f, 0.f, 0.f, 0.f, 0.f, 0.f, 9.f};
     Tensor ttmax(tmax, {10});
-    EXPECT_EQ(ops::Argmax(ttmax, 0).at<std::int32_t>({0}), 3);  // 9 出现在 3 与 9，取 3
+    EXPECT_EQ(ops::Argmax(ttmax, 0).item<std::int64_t>(), 3);  // 9 出现在 3 与 9，取 3
 
     std::vector<float> tmin{9.f, 9.f, 9.f, 1.f, 9.f, 9.f, 9.f, 9.f, 9.f, 1.f};
     Tensor ttmin(tmin, {10});
-    EXPECT_EQ(ops::Argmin(ttmin, 0).at<std::int32_t>({0}), 3);
+    EXPECT_EQ(ops::Argmin(ttmin, 0).item<std::int64_t>(), 3);
 
     // 跨越两个完整向量块（n_axis >= 16），并列极值仍取首个
     std::vector<float> tmax16(16, 0.f);
     tmax16[2] = 5.f;
     tmax16[13] = 5.f;
     Tensor ttmax16(tmax16, {16});
-    EXPECT_EQ(ops::Argmax(ttmax16, 0).at<std::int32_t>({0}), 2);
+    EXPECT_EQ(ops::Argmax(ttmax16, 0).item<std::int64_t>(), 2);
 
     std::vector<float> tmin16(16, 9.f);
     tmin16[2] = 1.f;
     tmin16[13] = 1.f;
     Tensor ttmin16(tmin16, {16});
-    EXPECT_EQ(ops::Argmin(ttmin16, 0).at<std::int32_t>({0}), 2);
+    EXPECT_EQ(ops::Argmin(ttmin16, 0).item<std::int64_t>(), 2);
 }
+
 
 // ---------- 23. 创建：arange / linspace / eye ----------
 TEST(Create, ArangeLinspaceEye) {
@@ -787,7 +439,8 @@ TEST(Create, ArangeLinspaceEye) {
     EXPECT_FLOAT_EQ(e2.at<float>({0, 2}), 0.0f);
 }
 
-// ---------- 24. where / index_select / gather ----------
+
+// ---------- 24. where / index_select / gather（条件选择与索引） ----------
 TEST(Indexing, WhereIndexSelectGather) {
     std::vector<float> wv{1, 5, 3, 5};
     Tensor wt(wv, {4});
@@ -891,17 +544,18 @@ TEST(Indexing, WhereIndexSelectGather) {
     EXPECT_THROW(ops::IndexSelect(emb, 0, idx_bad), std::exception);  // 越界（axis_len=4）
 }
 
+
 // ---------- 25. 数值覆盖：prod / var / std / norm / cumsum / log_softmax / erf ----------
 TEST(Numeric, ReductionsAndSpecialFunctions) {
     std::vector<float> nv{1, 2, 3, 4, 5};
     Tensor n1(nv, {5});
-    EXPECT_NEAR(ops::Prod(n1), 120.0f, kEps);
+    EXPECT_NEAR(ops::Prod(n1).item<float>(), 120.0f, kEps);
     // var / std（总体 ddof=0）：mean=3, var=2, std=sqrt(2)
-    EXPECT_NEAR(ops::Var(n1), 2.0f, kEps);
-    EXPECT_NEAR(ops::Std(n1), std::sqrt(2.0f), kEps);
+    EXPECT_NEAR(ops::Var(n1).item<float>(), 2.0f, kEps);
+    EXPECT_NEAR(ops::Std(n1).item<float>(), std::sqrt(2.0f), kEps);
     // norm：L1 = 15，L2 = sqrt(55)
-    EXPECT_NEAR(ops::Norm(n1, 1.0f), 15.0f, kEps);
-    EXPECT_NEAR(ops::Norm(n1, 2.0f), std::sqrt(55.0f), kEps);
+    EXPECT_NEAR(ops::Norm(n1, 1.0f).item<float>(), 15.0f, kEps);
+    EXPECT_NEAR(ops::Norm(n1, 2.0f).item<float>(), std::sqrt(55.0f), kEps);
 
     auto cs1 = ops::Cumsum(n1, 0);
     EXPECT_NEAR(cs1.at<float>({0}), 1.0f, kEps);
@@ -962,7 +616,8 @@ TEST(Numeric, ReductionsAndSpecialFunctions) {
         EXPECT_NEAR(er.at<float>({i}), std::erf(ev[i]), kEps) << "i=" << i;
 }
 
-// ---------- 26. layer_norm / rms_norm / randn / mse / nll / cross_entropy ----------
+
+// ---------- 26. layer_norm / rms_norm / randn / mse / nll / cross_entropy（层归一化、随机与损失） ----------
 TEST(Numeric, NormsAndLosses) {
     // layer_norm：[[1,2,3],[4,5,6]]，axis=1 对每行减均值除标准差（weight=1, bias=0）
     std::vector<float> lnv{1, 2, 3, 4, 5, 6};
@@ -989,8 +644,8 @@ TEST(Numeric, NormsAndLosses) {
 
     // randn：统计校验 mean≈0, std≈1（大样本，不 flaky）
     auto rn = ops::Randn({100000}, DataType::FLOAT32, 0.0f, 1.0f);
-    float rn_mean = ops::Mean(rn);
-    float rn_std = ops::Std(rn);
+    float rn_mean = ops::Mean(rn).item<float>();
+    float rn_std = ops::Std(rn).item<float>();
     EXPECT_GT(rn_mean, -0.05f);
     EXPECT_LT(rn_mean, 0.05f);
     EXPECT_GT(rn_std, 0.95f);
@@ -1001,7 +656,10 @@ TEST(Numeric, NormsAndLosses) {
     Tensor p(pv, {3});
     std::vector<float> qv{1, 3, 5};
     Tensor q(qv, {3});
-    EXPECT_NEAR(ops::MseLoss(p, q), (0.0f + 1.0f + 4.0f) / 3.0f, kEps);
+    const Tensor mse = ops::MseLoss(p, q);
+    EXPECT_EQ(mse.dims(), 0);  // 与归约一致：标量结果就是 0 维张量
+    EXPECT_EQ(mse.dtype(), DataType::FLOAT32);
+    EXPECT_NEAR(mse.item<float>(), (0.0f + 1.0f + 4.0f) / 3.0f, kEps);
 
     // nll_loss：-mean(log_prob[n, target[n]])
     std::vector<float> lpv{std::log(0.5f), std::log(0.3f), std::log(0.2f),
@@ -1009,11 +667,16 @@ TEST(Numeric, NormsAndLosses) {
     Tensor logp(lpv, {2, 3});
     std::vector<std::int64_t> tv{0, 1};
     Tensor tgt(tv, {2});
-    EXPECT_NEAR(ops::NllLoss(logp, tgt), -(std::log(0.5f) + std::log(0.7f)) / 2.0f, kEps);
+    const Tensor nll = ops::NllLoss(logp, tgt);
+    EXPECT_EQ(nll.dims(), 0);
+    EXPECT_NEAR(nll.item<float>(), -(std::log(0.5f) + std::log(0.7f)) / 2.0f, kEps);
 
     // cross_entropy = nll(log_softmax(logits))
     std::vector<float> lgv{1, 2, 3, 0, 1, 2};
     Tensor logits(lgv, {2, 3});
-    EXPECT_NEAR(ops::CrossEntropyLoss(logits, tgt),
-                ops::NllLoss(ops::LogSoftmax(logits, 1), tgt), kEps);
+    const Tensor ce = ops::CrossEntropyLoss(logits, tgt);
+    EXPECT_EQ(ce.dims(), 0);
+    EXPECT_NEAR(ce.item<float>(),
+                ops::NllLoss(ops::LogSoftmax(logits, 1), tgt).item<float>(), kEps);
 }
+

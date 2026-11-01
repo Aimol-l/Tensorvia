@@ -6,9 +6,6 @@
 #include <utility>
 #include <vector>
 
-// Declarations only: this partition deliberately includes no Vulkan headers so
-// it can be part of a CPU-only build. The definitions live in
-// src/backend/vulkan/*.cpp, which is compiled only when BACKEND_VULKAN is on.
 #include "tensorvia/types.hpp"
 #include "tensorvia/tensor.hpp"
 #include "tensorvia/cpu_ops.hpp"
@@ -74,6 +71,9 @@ template <> struct ExpImpl<Device::VULKAN> {
     static void execute(Tensor& a);
     static Tensor execute(const Tensor& a);
 };
+template <> struct ErfImpl<Device::VULKAN> {
+    static Tensor execute(const Tensor& a);
+};
 template <> struct SqrtImpl<Device::VULKAN> {
     static void execute(Tensor& a);
     static Tensor execute(const Tensor& a);
@@ -127,6 +127,15 @@ template <> struct MeanImpl<Device::VULKAN> {
     static float execute(const Tensor& a);
     static Tensor execute(const Tensor& a, int axis);
 };
+template <> struct ProdImpl<Device::VULKAN> {
+    static Tensor execute(const Tensor& a, int axis);
+};
+template <> struct SortImpl<Device::VULKAN> {
+    static SortResult execute(const Tensor& input, int dim, bool descending);
+};
+template <> struct TopkImpl<Device::VULKAN> {
+    static TopkResult execute(const Tensor& input, int64_t k, int dim, bool largest);
+};
 template <> struct ArgMaxImpl<Device::VULKAN> {
     static Tensor execute(const Tensor& a, int axis);
 };
@@ -171,6 +180,10 @@ template <> struct NonZeroImpl<Device::VULKAN> {
 template <> struct MatMulImpl<Device::VULKAN> {
     static Tensor execute(const Tensor& a, const Tensor& b);
 };
+template <> struct Conv2dImpl<Device::VULKAN> {
+    static Tensor execute(const Tensor& input, const Tensor& weight, const Tensor* bias,
+                          const Conv2dShape& shape);
+};
 
 template <> struct TypecastImpl<Device::VULKAN> {
     static void execute(Tensor& a, DataType dst_type);
@@ -189,6 +202,21 @@ template <> struct TransposeImpl<Device::VULKAN> {
 
 template <> struct SliceImpl<Device::VULKAN> {
     static Tensor execute(const Tensor& t, const std::vector<std::pair<int64_t, int64_t>>& ranges);
+};
+
+template <> struct WhereImpl<Device::VULKAN> {
+    static Tensor execute(const Tensor& cond, const Tensor& a, const Tensor& b);
+    static Tensor execute(const Tensor& cond, const Tensor& a, float b);
+    static Tensor execute(const Tensor& cond, float a, const Tensor& b);
+};
+template <> struct IndexSelectImpl<Device::VULKAN> {
+    static Tensor execute(const Tensor& input, int dim, const Tensor& index);
+};
+template <> struct GatherImpl<Device::VULKAN> {
+    static Tensor execute(const Tensor& input, int dim, const Tensor& index);
+};
+template <> struct CumsumImpl<Device::VULKAN> {
+    static Tensor execute(const Tensor& a, int axis);
 };
 
 }  // namespace ops

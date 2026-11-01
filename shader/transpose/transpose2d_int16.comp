@@ -20,34 +20,34 @@ layout(std430, binding = 1) buffer Output {
     int16_t data[];
 } dst; // [cols][rows]
 
-// Shared memory tile with padding to avoid bank conflicts
+// 带填充的共享内存分块，用于避免 bank 冲突
 shared int16_t Tile[TILE][TILE + 1];
 
 void main() {
-    uint wg_x = gl_WorkGroupID.x; // block column index in src
-    uint wg_y = gl_WorkGroupID.y; // block row index in src
+    uint wg_x = gl_WorkGroupID.x; // 源中的块列索引
+    uint wg_y = gl_WorkGroupID.y; // 源中的块行索引
 
-    uint tx = gl_LocalInvocationID.x; // thread col in block
-    uint ty = gl_LocalInvocationID.y; // thread row in block
+    uint tx = gl_LocalInvocationID.x; // 块内线程列
+    uint ty = gl_LocalInvocationID.y; // 块内线程行
 
-    // Global src indices
+    // 全局源下标
     uint global_src_row = wg_y * TILE + ty;
     uint global_src_col = wg_x * TILE + tx;
 
-    // Load from src[row][col] into shared memory Tile[ty][tx]
+    // 从 src[row][col] 载入共享内存 Tile[ty][tx]
     if (global_src_row < params.rows && global_src_col < params.cols) {
         uint src_idx = global_src_row * params.cols + global_src_col;
         Tile[ty][tx] = src.data[src_idx];
     } else {
-        Tile[ty][tx] = int16_t(0); // padding
+        Tile[ty][tx] = int16_t(0); // 填充
     }
 
-    // Synchronize: ensure all threads finish loading
+    // 同步：确保所有线程完成载入
     barrier();
 
-    // Transposed write: thread (tx, ty) writes Tile[tx][ty] to dst[col][row]
-    uint global_dst_row = wg_x * TILE + ty; // = original col
-    uint global_dst_col = wg_y * TILE + tx; // = original row
+    // 转置写出：线程 (tx, ty) 把 Tile[tx][ty] 写到 dst[col][row]
+    uint global_dst_row = wg_x * TILE + ty; // = 原始列
+    uint global_dst_col = wg_y * TILE + tx; // = 原始行
 
     if (global_dst_row < params.cols && global_dst_col < params.rows) {
         uint dst_idx = global_dst_row * params.rows + global_dst_col;

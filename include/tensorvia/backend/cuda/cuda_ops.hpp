@@ -5,14 +5,12 @@
 #include <utility>
 #include <vector>
 
-// Declarations only: this partition includes no CUDA header and is compiled
-// even in CPU-only builds. Definitions live in src/backend/cuda/*.cpp, which
-// are part of the build only when BACKEND_CUDA is defined.
+// 只有声明：这个分区不包含任何 CUDA 头，纯 CPU 构建里也会编译。实现体在
+// src/backend/cuda/*.cpp，只有定义 BACKEND_CUDA 时才加入构建。
 //
-// Only operations whose island kernels exist are declared. An undeclared
-// specialization makes execute_on's `has_cuda_impl` concept false, which turns
-// into the "not implemented on the CUDA backend" runtime error instead of a
-// link failure.
+// 只声明 island 内核已存在的算子。未声明的特化会让 execute_on 的 `has_cuda_impl`
+// 概念为假，从而得到 "not implemented on the CUDA backend" 运行期错误，
+// 而不是链接失败。
 #include "tensorvia/types.hpp"
 #include "tensorvia/tensor.hpp"
 #include "tensorvia/cpu_ops.hpp"
@@ -34,7 +32,7 @@ template <> struct RandomImpl<Device::CUDA> {
 };
 
 // ---------------------------------------------------------------------------
-// Arithmetic.
+// 算术。
 // ---------------------------------------------------------------------------
 template <> struct AddImpl<Device::CUDA> {
     static void execute(Tensor& a, float b);
@@ -81,6 +79,9 @@ template <> struct ExpImpl<Device::CUDA> {
     static void execute(Tensor& a);
     static Tensor execute(const Tensor& a);
 };
+template <> struct ErfImpl<Device::CUDA> {
+    static Tensor execute(const Tensor& a);
+};
 template <> struct SqrtImpl<Device::CUDA> {
     static void execute(Tensor& a);
     static Tensor execute(const Tensor& a);
@@ -99,7 +100,7 @@ template <> struct ClampImpl<Device::CUDA> {
 };
 
 // ---------------------------------------------------------------------------
-// Activations.
+// 激活。
 // ---------------------------------------------------------------------------
 template <> struct ReluImpl<Device::CUDA> {
     static void execute(Tensor& a);
@@ -122,7 +123,7 @@ template <> struct SoftmaxImpl<Device::CUDA> {
 };
 
 // ---------------------------------------------------------------------------
-// Reductions.
+// 归约。
 // ---------------------------------------------------------------------------
 template <> struct SumImpl<Device::CUDA> {
     static float execute(const Tensor& a);
@@ -138,6 +139,9 @@ template <> struct MaxImpl<Device::CUDA> {
 };
 template <> struct MeanImpl<Device::CUDA> {
     static float execute(const Tensor& a);
+    static Tensor execute(const Tensor& a, int axis);
+};
+template <> struct ProdImpl<Device::CUDA> {
     static Tensor execute(const Tensor& a, int axis);
 };
 template <> struct ArgMaxImpl<Device::CUDA> {
@@ -157,7 +161,17 @@ template <> struct NonZeroImpl<Device::CUDA> {
 };
 
 // ---------------------------------------------------------------------------
-// Dtype conversion.
+// sort / topk。轴长上限 1024（超过显式抛错，见 sort.cu 的注释）。
+// ---------------------------------------------------------------------------
+template <> struct SortImpl<Device::CUDA> {
+    static SortResult execute(const Tensor& input, int dim, bool descending);
+};
+template <> struct TopkImpl<Device::CUDA> {
+    static TopkResult execute(const Tensor& input, int64_t k, int dim, bool largest);
+};
+
+// ---------------------------------------------------------------------------
+// dtype 转换。
 // ---------------------------------------------------------------------------
 template <> struct TypecastImpl<Device::CUDA> {
     static void execute(Tensor& a, DataType dst_type);
@@ -165,7 +179,7 @@ template <> struct TypecastImpl<Device::CUDA> {
 };
 
 // ---------------------------------------------------------------------------
-// Comparison and logical.
+// 比较与逻辑。
 // ---------------------------------------------------------------------------
 template <> struct EqualImpl<Device::CUDA> {
     static Tensor execute(const Tensor& a, const Tensor& b);
@@ -193,7 +207,7 @@ template <> struct LessEqualImpl<Device::CUDA> {
 };
 
 // ---------------------------------------------------------------------------
-// Shape and data movement.
+// 形状与数据搬移。
 // ---------------------------------------------------------------------------
 template <> struct ConcatImpl<Device::CUDA> {
     static Tensor execute(const std::vector<Tensor>& tensors, int dim);
@@ -209,10 +223,32 @@ template <> struct TransposeImpl<Device::CUDA> {
 };
 
 // ---------------------------------------------------------------------------
-// Matrix multiplication.
+// 矩阵乘。
 // ---------------------------------------------------------------------------
 template <> struct MatMulImpl<Device::CUDA> {
     static Tensor execute(const Tensor& a, const Tensor& b);
+};
+template <> struct Conv2dImpl<Device::CUDA> {
+    static Tensor execute(const Tensor& input, const Tensor& weight, const Tensor* bias,
+                          const Conv2dShape& shape);
+};
+
+// ---------------------------------------------------------------------------
+// 条件选择、索引与累积和。
+// ---------------------------------------------------------------------------
+template <> struct WhereImpl<Device::CUDA> {
+    static Tensor execute(const Tensor& cond, const Tensor& a, const Tensor& b);
+    static Tensor execute(const Tensor& cond, const Tensor& a, float b);
+    static Tensor execute(const Tensor& cond, float a, const Tensor& b);
+};
+template <> struct IndexSelectImpl<Device::CUDA> {
+    static Tensor execute(const Tensor& input, int dim, const Tensor& index);
+};
+template <> struct GatherImpl<Device::CUDA> {
+    static Tensor execute(const Tensor& input, int dim, const Tensor& index);
+};
+template <> struct CumsumImpl<Device::CUDA> {
+    static Tensor execute(const Tensor& a, int axis);
 };
 
 }  // namespace ops

@@ -6,9 +6,9 @@ layout(local_size_x = TILE, local_size_y = TILE, local_size_z = 1) in;
 
 layout(push_constant) uniform Params {
     uint batch;
-    uint N; // cols
-    uint K; // reduction dim
-    uint M; // rows
+    uint N; // 列数
+    uint K; // 归约维
+    uint M; // 行数
 } params;
 
 layout(std430, binding = 0) buffer InputA {
@@ -23,17 +23,17 @@ layout(std430, binding = 2) buffer Output {
     double data[];
 } C; // [batch, M, N]
 
-// Shared memory tiles
-shared double tileA[TILE][TILE + 1]; // +1 to avoid bank conflicts
+// 共享内存分块
+shared double tileA[TILE][TILE + 1]; // +1 避免 bank 冲突
 shared double tileB[TILE][TILE + 1];
 
 void main() {
-    uint wg_batch = gl_WorkGroupID.z;        // batch index
-    uint wg_m = gl_WorkGroupID.y;            // block row in output
-    uint wg_n = gl_WorkGroupID.x;            // block col in output
+    uint wg_batch = gl_WorkGroupID.z;        // batch 索引
+    uint wg_m = gl_WorkGroupID.y;            // 输出中的块行
+    uint wg_n = gl_WorkGroupID.x;            // 输出中的块列
 
-    uint local_m = gl_LocalInvocationID.y;   // thread row in block
-    uint local_n = gl_LocalInvocationID.x;   // thread col in block
+    uint local_m = gl_LocalInvocationID.y;   // 块内线程行
+    uint local_n = gl_LocalInvocationID.x;   // 块内线程列
 
     // 输出位置
     uint global_m = wg_m * TILE + local_m;

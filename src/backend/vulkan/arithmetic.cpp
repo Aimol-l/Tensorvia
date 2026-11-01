@@ -16,7 +16,7 @@
 namespace ops {
 
 // ---------------------------------------------------------------------------
-// Scalar, in-place.
+// 标量，原地。
 // ---------------------------------------------------------------------------
 void AddImpl<Device::VULKAN>::execute(Tensor& a, float b) {
     auto src_impl = std::dynamic_pointer_cast<VKTensor>(a.get_impl());
@@ -59,7 +59,7 @@ void DivImpl<Device::VULKAN>::execute(Tensor& a, float b) {
 }
 
 // ---------------------------------------------------------------------------
-// Scalar, out-of-place.
+// 标量，非原地。
 // ---------------------------------------------------------------------------
 Tensor AddImpl<Device::VULKAN>::execute(const Tensor& a, float b) {
     Tensor t = a.clone();
@@ -86,7 +86,7 @@ Tensor DivImpl<Device::VULKAN>::execute(const Tensor& a, float b) {
 }
 
 // ---------------------------------------------------------------------------
-// Tensor-Tensor: ufunc broadcast driver (dtype promotion + NumPy broadcasting).
+// 张量-张量：ufunc 广播驱动（dtype 提升 + NumPy 广播）。
 // ---------------------------------------------------------------------------
 Tensor AddImpl<Device::VULKAN>::execute(const Tensor& a, const Tensor& b) {
     return vk_ufunc::binary_arith(OpType::AddVec, a, b, nullptr);
@@ -115,7 +115,7 @@ void DivImpl<Device::VULKAN>::execute(const Tensor& a, const Tensor& b, Tensor& 
 }
 
 // ---------------------------------------------------------------------------
-// Unary elementwise.
+// 一元逐元素运算。
 // ---------------------------------------------------------------------------
 void AbsImpl<Device::VULKAN>::execute(Tensor& a) {
     auto src_impl = std::dynamic_pointer_cast<VKTensor>(a.get_impl());
@@ -123,7 +123,7 @@ void AbsImpl<Device::VULKAN>::execute(Tensor& a) {
     auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
     if (!ctx_impl) throw std::runtime_error("vulkan Abs: missing VulkanContext");
     int64_t numel = a.numel();
-    // abs has two bindings (read/write); in-place means both are the same buffer.
+    // abs 有两个绑定（读/写）；原地意味着二者是同一个 buffer。
     ctx_impl->submitCompute(OpType::Abs, a.dtype(),
                             {src_impl->buffer(), src_impl->buffer()},
                             (a.numel() + 255) / 256, 1, 1, &numel, sizeof(int64_t));
@@ -144,9 +144,9 @@ void unary_inplace(Tensor& a, OpType op, const char* what) {
 
 template <class Impl>
 Tensor unary_out_of_place(const Tensor& a, OpType op, const char* what) {
-    // int8/16/32 -> float32; int64 -> float64; floats keep their dtype.
+    // int8/16/32 -> float32；int64 -> float64；浮点保持自身 dtype。
     DataType rt = a.dtype();
-    if (rt <= DataType::INT32) rt = DataType::FLOAT32;
+    if (is_integral_dtype(rt)) rt = DataType::FLOAT32;
     else if (rt == DataType::INT64) rt = DataType::FLOAT64;
     Tensor result = rt == a.dtype() ? a.clone() : a.to_type(rt);
     auto dst_impl = std::dynamic_pointer_cast<VKTensor>(result.get_impl());
@@ -176,7 +176,7 @@ void value_inplace(Tensor& a, OpType op, float val, const char* what) {
 template <class Impl>
 Tensor value_out_of_place(const Tensor& a, OpType op, float val, const char* what) {
     DataType rt = a.dtype();
-    if (rt <= DataType::INT32) rt = DataType::FLOAT32;
+    if (is_integral_dtype(rt)) rt = DataType::FLOAT32;
     else if (rt == DataType::INT64) rt = DataType::FLOAT64;
     Tensor result = rt == a.dtype() ? a.clone() : a.to_type(rt);
     auto dst_impl = std::dynamic_pointer_cast<VKTensor>(result.get_impl());
@@ -252,6 +252,10 @@ Tensor TanImpl<Device::VULKAN>::execute(const Tensor& a) {
 }
 Tensor ExpImpl<Device::VULKAN>::execute(const Tensor& a) {
     return unary_out_of_place<ExpImpl<Device::VULKAN>>(a, OpType::Exp, "Exp");
+}
+
+Tensor ErfImpl<Device::VULKAN>::execute(const Tensor& a) {
+    return unary_out_of_place<ErfImpl<Device::VULKAN>>(a, OpType::Erf, "Erf");
 }
 Tensor SqrtImpl<Device::VULKAN>::execute(const Tensor& a) {
     return unary_out_of_place<SqrtImpl<Device::VULKAN>>(a, OpType::Sqrt, "Sqrt");

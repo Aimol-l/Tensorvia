@@ -1,13 +1,4 @@
-#include <algorithm>
-#include <chrono>
-#include <cmath>
-#include <cstdint>
-#include <exception>
-#include <format>
-#include <print>
-#include <string>
-#include <string_view>
-#include <vector>
+import std;
 import tensorvia;
 
 int main() {
@@ -26,9 +17,9 @@ int main() {
     ops::println("matmul(a(3x2), b(2x3)) =");
     ops::println(d);
 
-    // 4. 归约
-    ops::println("sum(c) = {}", ops::Sum(c));
-    ops::println("mean(c) = {}", ops::Mean(c));
+    // 4. 归约：返回 0-dim 张量，item<T>() 才把值取回 host
+    ops::println("sum(c) = {}", ops::Sum(c).item<float>());
+    ops::println("mean(c) = {}", ops::Mean(c).item<float>());
 
     // 5. 激活函数
     auto sm = ops::Softmax(r, 0);

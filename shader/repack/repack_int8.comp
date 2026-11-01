@@ -29,7 +29,7 @@ void main() {
     if (gid >= p.numel)
         return;
 
-    // linear -> coord
+    // 线性下标 -> 坐标
     uint coord[MAX_DIMS];
     uint tmp = gid;
     for (int i = int(p.ndim) - 1; i >= 0; --i) {
@@ -38,7 +38,7 @@ void main() {
         tmp /= max(s, 1u);
     }
 
-    // coord -> src linear
+    // 坐标 -> 源线性下标
     uint src_linear = 0;
     for (uint i = 0; i < p.ndim; ++i)
         src_linear += coord[i] * p.strides[i];
@@ -47,7 +47,7 @@ void main() {
     uint src_byte = (src_linear + p.offset) * p.dtype_size;
     uint dst_byte = gid * p.dtype_size;
 
-    // byte copy
+    // 字节拷贝
     for (uint b = 0; b < p.dtype_size; ++b)
         dst.data[dst_byte + b] = src.data[src_byte + b];
 }

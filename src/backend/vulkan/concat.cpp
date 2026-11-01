@@ -23,7 +23,7 @@ Tensor ConcatImpl<Device::VULKAN>::execute(const std::vector<Tensor>& tensors, i
     if (dim < 0 || dim >= ndim) throw std::runtime_error("Concat: invalid axis");
     const DataType dtype = tensors[0].dtype();
 
-    // ---------- output shape ----------
+    // ---------- 输出形状 ----------
     DimArray out_shape;
     out_shape.assign(tensors[0].shape().begin(), tensors[0].shape().end());
     out_shape[dim] = 0;
@@ -35,7 +35,7 @@ Tensor ConcatImpl<Device::VULKAN>::execute(const std::vector<Tensor>& tensors, i
     auto ctx = std::dynamic_pointer_cast<VulkanContext>(res_impl->context());
     if (!ctx) throw std::runtime_error("vulkan Concat: missing VulkanContext");
 
-    // ---------- fill params ----------
+    // ---------- 填充参数 ----------
     ConcatParams p{};
     p.num = static_cast<uint32_t>(tensors.size());
     p.axis = static_cast<uint32_t>(dim);
@@ -59,18 +59,17 @@ Tensor ConcatImpl<Device::VULKAN>::execute(const std::vector<Tensor>& tensors, i
         }
     }
 
-    // The guard owns the parameter buffer and its device memory; it outlives
-    // submitCompute, which waits on its fence before returning.
+    // 守卫持有参数 buffer 及其设备内存；它的生命周期长于 submitCompute，后者
+    // 返回前会等待其 fence。
     auto params_buf = ctx->createBuffer<ConcatParams>(p);
 
-    // ---------- collect input buffers ----------
+    // ---------- 收集输入 buffer ----------
     std::vector<vk::Buffer> buffers;
     buffers.reserve(10);
     buffers.push_back(params_buf.buffer());
     buffers.push_back(res_impl->buffer());
     for (int i = 0; i < 8; ++i) {
-        // Unused slots repeat input 0: the shader never reads them, but every
-        // descriptor must be bound.
+        // 未用槽位重复输入 0：着色器不会读它们，但每个描述符都必须绑定。
         const size_t idx = static_cast<size_t>(i) < tensors.size() ? static_cast<size_t>(i) : 0;
         auto impl = std::dynamic_pointer_cast<VKTensor>(tensors[idx].get_impl());
         if (!impl) throw std::runtime_error("vulkan Concat: expected VKTensors");

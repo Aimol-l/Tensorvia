@@ -1,5 +1,5 @@
-// Strided-view repack: materialize an arbitrary (offset, strides) view into a
-// contiguous buffer. Used by clone_as_contiguous / to_host.
+// 跨步视图重排：把任意 (offset, strides) 视图物化为连续 buffer。供
+// clone_as_contiguous / to_host 使用。
 #include "common.h"
 
 using namespace tvv::sycl_dev;
@@ -47,8 +47,10 @@ int sycl_c_launch_repack(void* ctx, const void* in, void* out, int64_t numel,
                       static_cast<char*>(out), numel, offset, ndim, dtype_size,
                       shape, strides);
         return tvv::sycl::kSyclOk;
+    } catch (const std::exception& e) {
+        return record_failure(e);
     } catch (...) {
-        return tvv::sycl::kSyclFailure;
+        return record_failure();
     }
 }
 

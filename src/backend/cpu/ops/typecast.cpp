@@ -56,7 +56,15 @@ template <typename T, typename R>
 void cast_kernel(const T* src, R* dst, size_t size) {
     #pragma omp parallel for if (size > 4096)  // 4096 是一个经验值
     for (size_t i = 0; i < size; i++) {
-        dst[i] = static_cast<R>(src[i]);
+        if constexpr (std::is_same_v<R, uint8_t>) {
+            // 数值 -> BOOL：任何非零值都为真，写为 1。
+            dst[i] = src[i] != T(0) ? uint8_t{1} : uint8_t{0};
+        } else if constexpr (std::is_same_v<T, uint8_t>) {
+            // BOOL -> 数值：真为 1，假为 0（绝不用原始字节）。
+            dst[i] = static_cast<R>(src[i] != 0 ? 1 : 0);
+        } else {
+            dst[i] = static_cast<R>(src[i]);
+        }
     }
 }
 
@@ -65,11 +73,13 @@ void cast_kernel(const T* src, R* dst, size_t size) {
 void TypecastImpl<Device::CPU>::execute(Tensor& a, DataType dst_type) {
     auto src_ptr = data_as_const_variant(a.dtype(), a.data());
 
-    auto cpu_impl = create_tensor_impl(a.numel(), dst_type, Device::CPU);
+    auto cpu_impl = create_tensor_impl(a.numel(), dst_type, DeviceId{Device::CPU, 0});
     std::visit([&](auto* src_typed_ptr) {
-        using SrcType = std::remove_pointer_t<decltype(src_typed_ptr)>;
+        // const 变体给的是 const T*：先去指针再剥 const，否则 BOOL 分支的
+        // is_same_v<T, uint8_t> 永远不成立，0/1 规范化会被跳过。
+        using SrcType = std::remove_cv_t<std::remove_pointer_t<decltype(src_typed_ptr)>>;
         auto dispatch_dst = [&](auto* dst_typed_ptr) {
-            using DstType = std::remove_pointer_t<decltype(dst_typed_ptr)>;
+            using DstType = std::remove_cv_t<std::remove_pointer_t<decltype(dst_typed_ptr)>>;
             cast_kernel<SrcType, DstType>(
                 src_typed_ptr,
                 dst_typed_ptr,
@@ -88,9 +98,11 @@ Tensor TypecastImpl<Device::CPU>::execute(const Tensor& a, DataType dst_type) {
     auto src_ptr = data_as_const_variant(a.dtype(), a.data());
     Tensor result(a.shape(), dst_type, Device::CPU);
     std::visit([&](auto* src_typed_ptr) {
-        using SrcType = std::remove_pointer_t<decltype(src_typed_ptr)>;
+        // const 变体给的是 const T*：先去指针再剥 const，否则 BOOL 分支的
+        // is_same_v<T, uint8_t> 永远不成立，0/1 规范化会被跳过。
+        using SrcType = std::remove_cv_t<std::remove_pointer_t<decltype(src_typed_ptr)>>;
         auto dispatch_dst = [&](auto* dst_typed_ptr) {
-            using DstType = std::remove_pointer_t<decltype(dst_typed_ptr)>;
+            using DstType = std::remove_cv_t<std::remove_pointer_t<decltype(dst_typed_ptr)>>;
             cast_kernel<SrcType, DstType>(
                 src_typed_ptr,
                 dst_typed_ptr,

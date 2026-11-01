@@ -1,0 +1,224 @@
+// 条件选择、索引与累积和：where / index_select / gather / cumsum 的设备实现。
+//
+// cond 与 index 的标量类型不参与内核模板实例化：它们在核心里按 dtype 序号查表
+// 读取。否则 where 会是 9×9、index_select/gather 会是 9×2 个实例，光编译时间就
+// 抵得上整个后端——而分支的条件在 work-group 内一致，代价只是一次跳转。
+#include "common.h"
+
+using namespace tvv::sycl_dev;
+namespace contract = tvv::sycl_dev::contract;
+
+namespace {
+
+// 扁平输出下标 -> 三侧元素偏移。广播维的步长为 0，偏移自带视图起点。
+inline int64_t bcast_offset3(int64_t idx, const tvv::sycl::Select& p,
+                             const int64_t* strides) {
+    int64_t off = 0;
+    for (int d = p.ndim - 1; d >= 0; --d) {
+        const int64_t dim = p.shape[d];
+        if (dim <= 0) continue;
+        off += (idx % dim) * strides[d];
+        idx /= dim;
+    }
+    return off;
+}
+
+// 非零即真，与 CPU 的 `cond[i] != C(0)` 一致（NaN 因此为真）。
+inline bool cond_truth(const void* p, int64_t i, int dtype) {
+    switch (dtype) {
+        case tvv::sycl::kBool:
+            return static_cast<const uint8_t*>(p)[i] != 0;
+        case tvv::sycl::kInt8:
+            return static_cast<const int8_t*>(p)[i] != 0;
+        case tvv::sycl::kInt16:
+            return static_cast<const int16_t*>(p)[i] != 0;
+        case tvv::sycl::kInt32:
+            return static_cast<const int32_t*>(p)[i] != 0;
+        case tvv::sycl::kInt64:
+            return static_cast<const int64_t*>(p)[i] != 0;
+        case tvv::sycl::kBfloat16:
+            return load_as_float(static_cast<const ::sycl::ext::oneapi::bfloat16*>(p)[i]) != 0.0f;
+        case tvv::sycl::kFloat16:
+            return load_as_float(static_cast<const ::sycl::half*>(p)[i]) != 0.0f;
+        case tvv::sycl::kFloat32:
+            return static_cast<const float*>(p)[i] != 0.0f;
+        case tvv::sycl::kFloat64:
+            return static_cast<const double*>(p)[i] != 0.0;
+        default:
+            return false;
+    }
+}
+
+// 索引只有 INT32/INT64 两种（公开入口已经拒绝其它 dtype）。
+inline int64_t load_index(const void* p, int64_t i, int dtype) {
+    if (dtype == tvv::sycl::kInt64) return static_cast<const int64_t*>(p)[i];
+    return static_cast<const int32_t*>(p)[i];
+}
+
+// 越界索引截断到 0：调用方会读标志并抛异常，但即使没读，内核也不能越界读写。
+inline int64_t clamp_index(int64_t v, int64_t axis_len, int32_t* flag) {
+    if (v < 0 || v >= axis_len) {
+        if (flag != nullptr) *flag = 1;
+        return 0;
+    }
+    return v;
+}
+
+// 写出时把 BOOL 规范化为 0/1：源的字节可能是 2 之类的非规范值。
+template <class T>
+inline T normalize_store(T v) {
+    if constexpr (std::is_same_v<T, uint8_t>) return v != 0 ? uint8_t{1} : uint8_t{0};
+    else return v;
+}
+
+template <class T>
+void select_kernel(::sycl::queue& q, const void* cond, const T* a, const T* b, T* out,
+                   const tvv::sycl::Select& p) {
+    q.parallel_for(range_of(p.numel), [=](::sycl::id<1> idx) {
+        const int64_t i = static_cast<int64_t>(idx[0]);
+        const bool pick_a = cond_truth(cond, p.off_c + bcast_offset3(i, p, p.sc),
+                                       p.cond_dtype);
+        const int64_t ia = p.off_a + bcast_offset3(i, p, p.sa);
+        const int64_t ib = p.off_b + bcast_offset3(i, p, p.sb);
+        out[p.off_o + i] = normalize_store(pick_a ? a[ia] : b[ib]);
+    });
+}
+
+// 输出元素 (o, k, inn) = 输入 (o, idx[k], inn)；按输出扁平下标一元素一项。
+template <class T>
+void index_select_kernel(::sycl::queue& q, const T* in, const void* idx, T* out,
+                         const tvv::sycl::IndexAxis& p, int idx_dtype, int32_t* flag) {
+    const int64_t total = p.outer * p.idx_len * p.inner;
+    q.parallel_for(range_of(total), [=](::sycl::id<1> id) {
+        const int64_t i = static_cast<int64_t>(id[0]);
+        const int64_t inn = i % p.inner;
+        const int64_t t   = i / p.inner;
+        const int64_t k   = t % p.idx_len;
+        const int64_t o   = t / p.idx_len;
+        const int64_t r   = clamp_index(load_index(idx, k, idx_dtype), p.axis_len, flag);
+        out[i] = in[(o * p.axis_len + r) * p.inner + inn];
+    });
+}
+
+template <class T>
+void gather_kernel(::sycl::queue& q, const T* in, const void* idx, T* out,
+                   const tvv::sycl::Gather& p, int32_t* flag) {
+    q.parallel_for(range_of(p.numel), [=](::sycl::id<1> id) {
+        const int64_t i = static_cast<int64_t>(id[0]);
+        // 扁平下标 -> 坐标；非 dim 维的坐标按输入步长累加成 base。
+        int64_t base = 0;
+        int64_t rem  = i;
+        for (int d = p.ndim - 1; d >= 0; --d) {
+            const int64_t dim = p.out_shape[d];
+            if (dim <= 0) continue;
+            const int64_t coord = rem % dim;
+            rem /= dim;
+            if (d != p.dim) base += coord * p.in_strides[d];
+        }
+        const int64_t r = clamp_index(load_index(idx, i, p.idx_dtype), p.axis_dim, flag);
+        out[i] = in[base + r * p.axis_stride];
+    });
+}
+
+// 一项负责一条 (outer, inner) 柱；累积顺序与 CPU 内核完全一致。
+template <class T>
+void cumsum_kernel(::sycl::queue& q, const T* in, T* out,
+                   const tvv::sycl::IndexAxis& p) {
+    const int64_t total = p.outer * p.inner;
+    q.parallel_for(range_of(total), [=](::sycl::id<1> id) {
+        const int64_t task = static_cast<int64_t>(id[0]);
+        const int64_t o    = task / p.inner;
+        const int64_t inn  = task % p.inner;
+        const T* src = in + o * p.axis_len * p.inner + inn;
+        T* dst       = out + o * p.axis_len * p.inner + inn;
+        T acc = store_from_double<T>(0.0);
+        for (int64_t k = 0; k < p.axis_len; ++k) {
+            acc += src[k * p.inner];
+            dst[k * p.inner] = acc;
+        }
+    });
+}
+
+}  // namespace
+
+extern "C" {
+
+int sycl_c_launch_select(void* ctx, const void* cond, const void* a, const void* b,
+                         void* out, int out_dtype, const tvv::sycl::Select* p) {
+    if (ctx == nullptr || cond == nullptr || a == nullptr || b == nullptr ||
+        out == nullptr || p == nullptr)
+        return tvv::sycl::kSyclInvalid;
+    try {
+        auto& q = queue_of(ctx);
+        return dispatch_dtype(out_dtype, [&](auto tag) -> int {
+            using T = typename decltype(tag)::type;
+            select_kernel<T>(q, cond, static_cast<const T*>(a), static_cast<const T*>(b),
+                             static_cast<T*>(out), *p);
+            return tvv::sycl::kSyclOk;
+        });
+    } catch (const std::exception& e) {
+        return record_failure(e);
+    } catch (...) {
+        return record_failure();
+    }
+}
+
+int sycl_c_launch_index_select(void* ctx, const void* in, const void* idx, void* out,
+                               int out_dtype, int idx_dtype, const tvv::sycl::IndexAxis* p,
+                               int32_t* flag) {
+    if (ctx == nullptr || in == nullptr || idx == nullptr || out == nullptr || p == nullptr)
+        return tvv::sycl::kSyclInvalid;
+    try {
+        auto& q = queue_of(ctx);
+        return dispatch_dtype(out_dtype, [&](auto tag) -> int {
+            using T = typename decltype(tag)::type;
+            index_select_kernel<T>(q, static_cast<const T*>(in), idx,
+                                   static_cast<T*>(out), *p, idx_dtype, flag);
+            return tvv::sycl::kSyclOk;
+        });
+    } catch (const std::exception& e) {
+        return record_failure(e);
+    } catch (...) {
+        return record_failure();
+    }
+}
+
+int sycl_c_launch_gather(void* ctx, const void* in, const void* idx, void* out,
+                         int out_dtype, int idx_dtype, const tvv::sycl::Gather* p,
+                         int32_t* flag) {
+    if (ctx == nullptr || in == nullptr || idx == nullptr || out == nullptr || p == nullptr)
+        return tvv::sycl::kSyclInvalid;
+    try {
+        auto& q = queue_of(ctx);
+        return dispatch_dtype(out_dtype, [&](auto tag) -> int {
+            using T = typename decltype(tag)::type;
+            gather_kernel<T>(q, static_cast<const T*>(in), idx, static_cast<T*>(out), *p,
+                             flag);
+            return tvv::sycl::kSyclOk;
+        });
+    } catch (const std::exception& e) {
+        return record_failure(e);
+    } catch (...) {
+        return record_failure();
+    }
+}
+
+int sycl_c_launch_cumsum(void* ctx, const void* in, void* out, int dtype,
+                         const tvv::sycl::IndexAxis* p) {
+    if (ctx == nullptr || in == nullptr || out == nullptr || p == nullptr)
+        return tvv::sycl::kSyclInvalid;
+    try {
+        auto& q = queue_of(ctx);
+        return dispatch_dtype(dtype, [&](auto tag) -> int {
+            using T = typename decltype(tag)::type;
+            cumsum_kernel<T>(q, static_cast<const T*>(in), static_cast<T*>(out), *p);
+            return tvv::sycl::kSyclOk;
+        });
+    } catch (const std::exception& e) {
+        return record_failure(e);
+    } catch (...) {
+        return record_failure();
+    }
+}
+
+}  // extern "C"

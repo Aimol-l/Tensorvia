@@ -1,8 +1,7 @@
-// Fill / random initialization for Device::SYCL.
+// Device::SYCL 的填充 / 随机初始化。
 //
-// Random uses a counter-based hash in the device unit (splitmix64 keyed by the
-// element index), so no generator state has to be allocated or synchronized.
-// The seed always comes from the host.
+// Random 在设备单元中使用基于计数器的哈希（以元素下标作键的 splitmix64），因此
+// 无需分配或同步任何生成器状态。种子始终来自宿主。
 #include <cstdint>
 #include <memory>
 #include <random>
@@ -36,15 +35,14 @@ std::shared_ptr<SYCLContext> context_of(const Tensor& t, const char* what) {
 void fill_tensor(const Tensor& t, double value, const char* what) {
     auto ctx = context_of(t, what);
     ctx->activate();
-    // const_cast: filling is the one host-side write; Tensor::data() is the
-    // offset-aware pointer, unlike TensorImpl::data().
+    // const_cast：填充是唯一的宿主侧写入；这里用 Tensor::data()（感知 offset）
+    // 而不是 TensorImpl::data()。
     sycl_ufunc::check(::sycl_c_launch_fill(
                           sycl_ufunc::handle_of(*ctx),
                           const_cast<void*>(t.data()),
                           static_cast<int64_t>(t.numel()),
                           static_cast<int>(t.dtype()), value),
                       what);
-    ctx->wait();
 }
 
 uint64_t make_seed() {
@@ -87,7 +85,6 @@ Tensor RandomImpl<Device::SYCL>::execute(const std::vector<int64_t>& shape, Data
                           static_cast<int64_t>(temp.numel()),
                           static_cast<int>(dtype), min, max, make_seed()),
                       "Random");
-    ctx->wait();
     return temp;
 }
 

@@ -1,8 +1,7 @@
-// Concatenation along one axis for Device::SYCL.
+// Device::SYCL 沿单轴拼接。
 //
-// The host entry point launches one kernel per input instead of staging a
-// device-side pointer array, so no managed memory or temporary allocation is
-// involved.
+// 宿主入口为每个输入启动一个内核，而不在设备侧暂存指针数组，因此不涉及托管内存
+// 或临时分配。
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
@@ -45,8 +44,8 @@ Tensor ConcatImpl<Device::SYCL>::execute(const std::vector<Tensor>& tensors, int
     std::vector<int64_t> in_strides(n * static_cast<size_t>(ndim));
     int64_t prefix = 0;
     for (size_t i = 0; i < n; ++i) {
-        // tensor.data() includes the view offset, so a contiguous slice of a
-        // larger buffer concatenates its own elements.
+        // tensor.data() 含视图 offset，因此更大 buffer 上的连续切片会拼接自己
+        // 那些元素。
         inputs[i] = tensors[i].data();
         offsets[i] = prefix;
         prefix += tensors[i].shape(dim);
@@ -64,7 +63,6 @@ Tensor ConcatImpl<Device::SYCL>::execute(const std::vector<Tensor>& tensors, int
                           static_cast<int>(dtype), out_strides.data(),
                           in_shapes.data(), in_strides.data(), ndim, dim),
                       "Concat launch");
-    ctx->wait();
     return out;
 }
 

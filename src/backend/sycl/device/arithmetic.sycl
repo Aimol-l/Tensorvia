@@ -1,7 +1,7 @@
-// Element-wise arithmetic: broadcast binary, in-place scalar and unary.
+// 逐元素算术：广播二元、原地标量与一元运算。
 //
-// The host always promotes both operands (and the output) to a common dtype
-// before calling in, so each launch dispatches a single scalar type.
+// 宿主总会在调用前把两个操作数（以及输出）提升到公共 dtype，所以每次启动只派发
+// 一种标量类型。
 #include "common.h"
 
 using namespace tvv::sycl_dev;
@@ -40,6 +40,7 @@ inline C unary_value(int op, C x, C p0, C p1) {
         case tvv::sycl::kUnarySilu:    return x / (C(1) + sycl::exp(-x));
         case tvv::sycl::kUnaryTanh:    return sycl::tanh(x);
         case tvv::sycl::kUnarySigmoid: return C(1) / (C(1) + sycl::exp(-x));
+        case tvv::sycl::kUnaryErf:     return sycl::erf(x);
         case tvv::sycl::kUnaryClamp:   return contract::clamp_contract(x, p0, p1);
         default:                       return x;
     }
@@ -49,6 +50,16 @@ template <class T>
 void binary_kernel(sycl::queue& q, const T* a, const T* b, T* out,
                    const tvv::sycl::Bcast& p, int op) {
     using C = promoted_t<T>;
+    // 连续快路径（FR-4.2）：宿主对 linearizable 布局把 ndim 置 0，两侧 stride
+    // 恒为 1，下标即元素偏移——跳过每元素每操作数的 div/mod 解码。
+    if (p.ndim == 0) {
+        q.parallel_for(range_of(p.numel), [=](sycl::id<1> idx) {
+            const int64_t i = static_cast<int64_t>(idx[0]);
+            out[p.off_o + i] = store_as<T>(binary_value(op, to_compute<C>(a[p.off_a + i]),
+                                                        to_compute<C>(b[p.off_b + i])));
+        });
+        return;
+    }
     q.parallel_for(range_of(p.numel), [=](sycl::id<1> idx) {
         const int64_t i = static_cast<int64_t>(idx[0]);
         const int64_t ia = p.off_a + bcast_offset(i, p, p.sa);
@@ -97,8 +108,10 @@ int sycl_c_launch_binary(void* ctx, const void* a, const void* b, void* out,
                              static_cast<T*>(out), *p, op);
             return tvv::sycl::kSyclOk;
         });
+    } catch (const std::exception& e) {
+        return record_failure(e);
     } catch (...) {
-        return tvv::sycl::kSyclFailure;
+        return record_failure();
     }
 }
 
@@ -112,8 +125,10 @@ int sycl_c_launch_scalar(void* ctx, void* buf, int64_t numel, int dtype,
             scalar_kernel<T>(q, static_cast<T*>(buf), numel, op, scalar);
             return tvv::sycl::kSyclOk;
         });
+    } catch (const std::exception& e) {
+        return record_failure(e);
     } catch (...) {
-        return tvv::sycl::kSyclFailure;
+        return record_failure();
     }
 }
 
@@ -121,8 +136,7 @@ int sycl_c_launch_unary(void* ctx, const void* in, void* out, int64_t numel,
                         int in_dtype, int out_dtype, int op, double p0, double p1) {
     if (ctx == nullptr || in == nullptr || out == nullptr)
         return tvv::sycl::kSyclInvalid;
-    // The only promotion the other backends apply is integer -> FLOAT32 and a
-    // same-type in-place update.
+    // 其它后端施加的唯一提升是整型 -> FLOAT32，以及同类型原地更新。
     const bool same = in_dtype == out_dtype;
     const bool to_float = out_dtype == tvv::sycl::kFloat32;
     if (!same && !to_float) return tvv::sycl::kSyclUnsupported;
@@ -139,8 +153,10 @@ int sycl_c_launch_unary(void* ctx, const void* in, void* out, int64_t numel,
             }
             return tvv::sycl::kSyclOk;
         });
+    } catch (const std::exception& e) {
+        return record_failure(e);
     } catch (...) {
-        return tvv::sycl::kSyclFailure;
+        return record_failure();
     }
 }
 
