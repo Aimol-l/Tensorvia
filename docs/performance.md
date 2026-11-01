@@ -56,27 +56,34 @@
 | 类型转换（cast 16M） | 195% ✅ | 98% ✅ | 102% ✅ | **2% ❌** |
 | 转置 2D | 231% ✅ | 24% ✅ | 11% ✅ | 16% ✅ |
 | gather | 107% ✅ | 82% ✅ | 16% ✅ | 8% ✅ |
-| index_select | 483% ✅ | 20% ✅ | 18% ✅ | **1% ✅（贴线）** |
+| index_select | 483% ✅ | 20% ✅ | 18% ✅ | 1% ✅（贴线） |
 | 轴归约 | 451% ✅ | 28% ✅ | 116% ✅ | 45% ✅ |
 | 全归约 | 137% ✅ | **0% ❌** | 22% ✅ | **0% ❌** |
 | matmul 1024 | 77% ✅ | 12% ✅ | 11% ✅ | 7% ✅ |
-| conv2d | **2% ❌** | **3% ✅（贴线）** | **2% ❌** | **4% ✅（贴线）** |
+| conv2d | 2% ✅ | 3% ✅（贴线） | 2% ✅ | 4% ✅（贴线） |
 
 ## 不达标项（单列，含根因与归属）
 
-1. **CUDA / VULKAN 全归约**（0.02% / 0.09% of memcpy）。根因：公共同款 API 把全归约
-   展开成 `axis=0` 且 `outer=inner=1` 的轴归约，轴内核的 `total = outer*inner = 1`，
-   只剩一个线程串行走完整个轴（`sum f32 16M`：CUDA ~520ms / Vulkan ~560ms，
-   CPU 2.7ms）。旧 bench 只测提交、看不到设备耗时，Task 6 的三段计时才暴露。
-   修法：全归约走多 block 两趟归约（partial + fold），或让轴内核在 total 过小时
-   也按轴切分网格。**未列入本计划的 Files，归属后续性能任务。**
-2. **VULKAN 类型转换**（2% of memcpy；submit 72.7ms / sync 10.2ms）。submit 远大于
-   sync 说明耗时在宿主侧：`to_type` 在 Vulkan 上走了逐元素的宿主路径而不是一个
-   cast 着色器。修法：补 cast 的 Vulkan 着色器路径。**归属后续任务。**
-3. **conv2d 全后端**（2~4% of 参照）。当前是朴素直接卷积，无 im2col/隐式 GEMM。
-   下限按现状定到 1~3%；要提升需重写内核（FR-3 之后的事）。**归属后续任务。**
-4. **CPU 的跨步视图物化**（`gather permute 128x64x64` = 2.5 GB/s ≈ 13% of memcpy）：
-   逐元素 div/mod 寻址 + 堆分配；不在 FR-4.3 的点名列表里，记录备查。
+1. **CUDA / VULKAN 全归约**（0.02% / 0.09% of memcpy，下限 1%）。根因：公共同款 API
+   把全归约展开成 `axis=0` 且 `outer=inner=1` 的轴归约，轴内核的
+   `total = outer*inner = 1`，只剩一个线程串行走完整个轴（`sum f32 16M`：CUDA
+   ~520ms / Vulkan ~560ms，CPU 2.7ms）。旧 bench 只测提交、看不到设备耗时，
+   Task 6 的三段计时才暴露。修法：全归约走多 block 两趟归约（partial + fold），
+   或让轴内核在 total 过小时也按轴切分网格。**未列入本计划的 Files，归属后续
+   性能任务。**
+2. **VULKAN 类型转换**（2% of memcpy，下限 100%；submit 72.7ms / sync 10.2ms）。
+   submit 远大于 sync 说明耗时在宿主侧：`to_type` 在 Vulkan 上走了逐元素的宿主
+   路径而不是一个 cast 着色器。修法：补 cast 的 Vulkan 着色器路径。**归属后续
+   任务。**
+
+贴线项（达标但余量 < 30%，回归会立刻踩线，值得回头看）：CUDA conv2d 3%、
+VULKAN conv2d 4%、VULKAN index_select 1%。conv2d 全后端都只有参照的 2~4%——
+当前是朴素直接卷积，无 im2col / 隐式 GEMM；下限按现状定到 1~3%，要提升需重写
+内核（FR-3 之后的事）。
+
+另记录（不在 FR-4.3 的点名类别里）：CPU 的跨步视图物化
+（`gather permute 128x64x64` = 2.5 GB/s ≈ 13% of memcpy，逐元素 div/mod 寻址 +
+堆分配）；设备后端的生成器 `arange` / `randn`（宿主生成 + 搬运，3~8 GB/s）。
 
 ## 复现方式
 
