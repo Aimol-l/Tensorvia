@@ -55,7 +55,7 @@ SortGeometry sort_geometry(const Tensor& in, int dim, int64_t keep, bool descend
     if (keep < 0) keep = g.params.n;  // 全排序
     if (keep > g.params.n)
         throw std::runtime_error(std::format(
-            "topk: k ({}) must be between 0 and the axis length ({})", keep, g.params.n));
+            "topk: k ({}) must be between 1 and the axis length ({})", keep, g.params.n));
     g.params.keep       = static_cast<int32_t>(keep);
     g.params.descending = descending ? 1 : 0;
     if (g.params.n > 1024)

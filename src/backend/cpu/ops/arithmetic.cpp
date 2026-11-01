@@ -108,9 +108,12 @@ void div_kernel(const T* RESTRICT a, const T* RESTRICT b, T* RESTRICT out, size_
 template <typename T>
 void div_kernel(T* a, float b, size_t size) {
     const T b_cast = T(b); // 注意类型转换
+    // 注意：零分母到不了这里——核心层对"标量除零"显式抛错（ops.cpp 的
+    // Div(Tensor&, float) / Div(const Tensor&, float)），张量/张量路径的零分母
+    // 才走 div_kernel(a, b, out) 的 NaN 契约。这里保持纯 IEEE。
     #pragma omp parallel for if (size > 4096)
     for (size_t i = 0; i < size; ++i) {
-        a[i] /=b_cast;  // 注意类型转换
+        a[i] /= b_cast;  // 注意类型转换
     }
 }
 

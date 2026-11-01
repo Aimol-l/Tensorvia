@@ -128,7 +128,6 @@ template <> struct MeanImpl<Device::VULKAN> {
     static Tensor execute(const Tensor& a, int axis);
 };
 template <> struct ProdImpl<Device::VULKAN> {
-    static float execute(const Tensor& a);
     static Tensor execute(const Tensor& a, int axis);
 };
 template <> struct SortImpl<Device::VULKAN> {

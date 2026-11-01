@@ -19,7 +19,8 @@ layout(std430, binding = 1) buffer InputB {
 
 // erf 在 GLSL 里没有内置函数。本实现分三段，全程在 double 里计算——连分式的
 // 累加误差在 float 里会超过 2 ulp，而 double 对 f16/bf16/f32 的输出都是先算准
-// 再舍入（与 std::erf 对照：double 最大相对误差 2.6e-15，float32 舍入后逐位一致）：
+// 再舍入（与 std::erf 对照：double 最大相对误差 2.6e-15；模拟器里 float32
+// 舍入后与 std::erf 逐位一致，测试按 2 ulp 容差锁定）：
 //   |x| >= 6.5  erfc 在 double 里已低于 1e-16，直接给 ±1（也兜住 ±Inf：
 //               +Inf -> +1、-Inf -> -1，与 std::erf 一致）
 //   |x| <  1.5  Maclaurin 级数 erf(x) = 2/sqrt(pi) * sum (-1)^n x^(2n+1)/(n!(2n+1))

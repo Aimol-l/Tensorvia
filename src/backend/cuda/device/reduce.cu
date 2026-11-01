@@ -417,10 +417,6 @@ float MeanImpl<Device::CUDA>::execute(const Tensor& a) {
     return static_cast<float>(sum / static_cast<double>(a.numel()));
 }
 
-float ProdImpl<Device::CUDA>::execute(const Tensor& a) {
-    return static_cast<float>(reduce_all_value(a, tvv::cuda::kReduceProd, "Prod"));
-}
-
 Tensor ProdImpl<Device::CUDA>::execute(const Tensor& a, int axis) {
     // Prod 与 Sum 同族：窄整型与 16 位浮点拓宽到 reduction_type 再累加。
     return axis_reduce(a, axis, reduction_type(a.dtype()), tvv::cuda::kReduceProd, "Prod");

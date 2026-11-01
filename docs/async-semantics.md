@@ -19,6 +19,11 @@
 | `synchronize()` | `ops::synchronize` → `DeviceControl::synchronize` | 调用方显式要求"到此为止的工作都完成" |
 | 跨设备拷贝 | `Tensor::to_device`（非 CPU → 非 CPU 经宿主中转） | 正确性要求：中转 buffer 在返回后即被释放 |
 
+一个后端差异（调用方可见，故明示）：`to_device` 的 H2D 上传在 CUDA / SYCL 上是
+**同步**的（拷贝完成后才返回，宿主暂存随即释放），在 Vulkan 上**只入队**（暂存
+buffer 的销毁排到提交完成之后）。这是暂存生命周期的差异，不是契约差异——三种
+情况下调用方都不需要额外同步就能使用目标张量。
+
 ## 各后端的同步点清单
 
 ### CUDA

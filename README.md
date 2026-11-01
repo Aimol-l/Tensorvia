@@ -36,7 +36,7 @@
 
 设备枚举为 `Device::CPU`、`Device::VULKAN`、`Device::CUDA` 和 `Device::SYCL`。CPU 后端实现完整的
 `ops` API；Vulkan、CUDA 与 SYCL 覆盖下面这组算子（少数算子仍为 CPU-only，设备上调用会显式报错，
-完整覆盖矩阵见 [docs/coverage.md](docs/coverage.md)）：
+完整覆盖矩阵见 [docs/coverage.md](docs/coverage.md)：
 
 - 创建：`Zeros`、`Ones`、`Fill`、`Random`；生成器 `Arange`、`Linspace`、`Eye`、`Randn` 的
   `TensorOptions` 重载在宿主生成后一次性搬到目标设备（同一 seed 各后端取值相同）
@@ -59,7 +59,6 @@ native / emulated（组合实现）/ unsupported（显式拒绝），由 `tools/
 以 [docs/coverage.md](docs/coverage.md) 的矩阵为准，其中 `unsupported` 的每一格都注明拒绝位置
 （`require_cpu` 或 `execute_on` 的“后端未实现”路径）。算子提交的同步语义（哪些调用会让宿主
 等待设备）见 [docs/async-semantics.md](docs/async-semantics.md)。
-
 `examples/inference.cpp` 按真实推理引擎的分段跑一次前向：text → tokens → embedding →
 prefill（整段 prompt 一次算完，K/V 写进 cache）→ decode（一次一个 token，复用 cache）→ logits。
 模型是随机权重的两层 decoder-only Transformer：词表与位置查表走 `IndexSelect`，多头注意力的

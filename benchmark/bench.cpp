@@ -123,6 +123,23 @@ int main(int argc, char* argv[]) {
         const Phases p = measure([&] { (void)a.clone(); });
         report("memcpy f32 16M", p, 2.0 * double(N) * 4);
     }
+    {   // 带宽上限参照（多线程口径，仅 CPU）：clone() 在 CPU 上是单线程 memcpy，
+        // 拿它当上限会让 OpenMP 逐元素内核"超过 100%"，百分比失去意义。这里用与
+        // 内核同并行度的手写拷贝循环度量真正的带宽上限。设备后端的 clone 本身就是
+        // 并行拷贝，直接用上一行那个数。
+        constexpr std::int64_t N = std::int64_t{1} << 24;  // 16M f32
+        if (dev == Device::CPU) {
+            Tensor a = Tensor::Random({N}, 0.0f, 1.0f, DT::FLOAT32, dev);
+            Tensor d({N}, DT::FLOAT32, dev);
+            const float* src = static_cast<const float*>(a.data());
+            float* dst = static_cast<float*>(d.data());
+            const Phases p = measure([&] {
+                #pragma omp parallel for schedule(static)
+                for (int64_t i = 0; i < N; ++i) dst[i] = src[i];
+            });
+            report("memcpy-mt f32 16M", p, 2.0 * double(N) * 4);
+        }
+    }
     {   // element-wise add：读 a+b 写 dst，带宽型
         constexpr std::int64_t N = std::int64_t{1} << 24;  // 16M f32
         Tensor a = Tensor::Random({N}, 0.0f, 1.0f, DT::FLOAT32, dev);

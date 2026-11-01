@@ -42,6 +42,9 @@ defines             = ['TENSORVIA_VERSION="0.3.0"']
 flags = [
     { glob = "src/**/*.cpp",   cxxflags = ["-fopenmp"] },
     { glob = "src/*.cpp",      cxxflags = ["-fopenmp"] },
+    # bench 的带宽上限参照要与被测内核同并行度（OpenMP）；CMake 路径的
+    # BUILD_BENCH 已经为 CPU 链 OpenMP::OpenMP_CXX，这里补上 mcpp 侧。
+    { glob = "benchmark/**/*.cpp", cxxflags = ["-fopenmp"] },
 ]
 
 sources = [

@@ -116,26 +116,6 @@ Tensor SumImpl<Device::VULKAN>::execute(const Tensor& a, int axis) {
     return result;
 }
 
-float ProdImpl<Device::VULKAN>::execute(const Tensor& a) {
-    auto src_impl = std::dynamic_pointer_cast<VKTensor>(a.get_impl());
-    check_vk(src_impl, "Prod");
-    auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
-    if (!ctx_impl) throw std::runtime_error("vulkan Prod: missing VulkanContext");
-
-    const int64_t numel  = a.numel();
-    const int64_t blocks = (numel + 255) / 256;
-    // scratch 用累加 dtype：着色器把窄整型在 int64 里连乘，16 位浮点提升到 float。
-    Tensor res({blocks > 0 ? blocks : 1}, reduction_type(a.dtype()), Device::VULKAN);
-    auto res_impl = std::dynamic_pointer_cast<VKTensor>(res.get_impl());
-    check_vk(res_impl, "Prod");
-
-    ctx_impl->submitCompute(OpType::Prod, a.dtype(), {src_impl->buffer(), res_impl->buffer()},
-                            static_cast<uint32_t>(blocks), 1, 1, &numel, sizeof(int64_t));
-    // 空乘积为 1；宿主按 double 折叠各块的部分积。
-    return static_cast<float>(
-        fold_partials(res, blocks, {1.0, [](double x, double v) { return x * v; }}));
-}
-
 Tensor ProdImpl<Device::VULKAN>::execute(const Tensor& a, int axis) {
     auto src_impl = std::dynamic_pointer_cast<VKTensor>(a.get_impl());
     check_vk(src_impl, "Prod");

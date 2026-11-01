@@ -501,7 +501,8 @@ TEST_F(DeviceOps, SortAndTopkMatchCpuAcrossBackends) {
     const ops::SortResult ms_neg = ops::Sort(M, -1);
     EXPECT_EQ(host_values<int64_t>(ms_neg.indices), host_values<int64_t>(ms.indices));
 
-    // topk：largest / smallest、k=0（空结果）、k=轴长（等价于全排序）、越界抛错。
+    // topk：largest / smallest、k=轴长（等价于全排序）、k=0 与越界抛错（公共契约
+    // 要求 k >= 1）。
     const ops::TopkResult tk = ops::Topk(M, 2, 1);
     EXPECT_EQ(shape_of(tk.values), (std::vector<int64_t>{2, 2}));
     expect_close(host_values<float>(tk.values), {3, 2, 6, 5}, "topk values");
@@ -935,6 +936,20 @@ TEST_F(DeviceOps, DivZeroDenominatorIsNaN) {
             EXPECT_TRUE(std::isnan(gotd[i])) << "f64 zero denominator at " << i;
         else
             EXPECT_DOUBLE_EQ(gotd[i], ad[i] / bd[i]) << "f64 ieee quotient at " << i;
+    }
+
+    // 标量除零是另一条契约：核心层显式抛错（"除零大概率是程序错误，直接失败"），
+    // 与张量/张量路径的逐元素 NaN（"数据里出现零，结果留 NaN"）刻意不同。
+    EXPECT_THROW(ops::Div(A, 0.0f), std::runtime_error);
+    EXPECT_THROW(ops::Div(A, -0.0f), std::runtime_error);
+    // 非零标量分母保持 IEEE 商。
+    const std::vector<float> got_s3 = host_values<float>(ops::Div(A, 2.0f));
+    for (size_t i = 0; i < got_s3.size(); ++i) {
+        const float want = av[i] / 2.0f;
+        if (std::isnan(want))
+            EXPECT_TRUE(std::isnan(got_s3[i])) << "scalar quotient at " << i;
+        else
+            EXPECT_FLOAT_EQ(got_s3[i], want) << "scalar quotient at " << i;
     }
 }
 

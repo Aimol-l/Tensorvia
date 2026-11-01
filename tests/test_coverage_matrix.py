@@ -268,6 +268,39 @@ class SyntheticTreeTests(unittest.TestCase):
             second = cm.render(cm.build_matrix(base_tree(pathlib.Path(tmp))))
         self.assertEqual(first, second)
 
+    def test_parses_every_declaration_form_in_the_real_header(self):
+        # 解析规则要覆盖 ops.hpp 的全部声明形态（Step 1 的盘点结论）：多行声明
+        # 的的名字在首行、重载收敛、initializer_list 参数、模板函数、结果结构体。
+        # 这条锁住"名字必须出现在解析结果里"。
+        ops_hpp = REPO / "include" / "tensorvia" / "ops.hpp"
+        names = set(cm.parse_public_ops(ops_hpp))
+        for expected in ("Add", "Sum", "Where", "Arange", "Randn", "Addmm",  # 多行/重载
+                         "println",                                          # 模板函数
+                         "SortResult", "TopkResult", "DeviceGuard",           # 结果类型
+                         "MaskedSelect", "Typecast", "Slice", "Nonzero"):
+            self.assertIn(expected, names, f"{expected} 从矩阵里消失了（解析回归）")
+
+    def test_parsed_op_count_is_anchored(self):
+        # 锚点：新增/漏掉公开算子必须显式改这个数。没有它，解析器一旦漏匹配
+        # （比如未来出现"返回类型与名字拆行"的声明），生成物与入库文档会一起
+        # 少一行，--check 发现不了。
+        ops_hpp = REPO / "include" / "tensorvia" / "ops.hpp"
+        names = cm.parse_public_ops(ops_hpp)
+        self.assertEqual(len(names), 87,
+                         "公开算子数变了：更新这个锚点，并确认 docs/coverage.md 已重生成")
+
+    def test_multiline_and_split_forms_are_rejected_loudly(self):
+        # "返回类型与名字拆行"目前**不**被支持——这条测试把该局限钉住：一旦有人
+        # 写出这种声明，解析器会漏掉它，锚点测试随之失败，从而逼出显式决策。
+        ops = ("#pragma once\nnamespace ops {\n"
+               "inline Tensor\nAdd(const Tensor& a, const Tensor& b);\n"
+               "}  // namespace ops\n")
+        with tempfile.TemporaryDirectory() as tmp:
+            p = pathlib.Path(tmp) / "ops.hpp"
+            p.write_text(ops, encoding="utf-8")
+            names = set(cm.parse_public_ops(p))
+        self.assertNotIn("Add", names, "拆行声明当前不被支持——若已支持请改此测试")
+
 
 class RealTreeTests(unittest.TestCase):
     """真实仓库：矩阵完整性与 CLI 行为。"""

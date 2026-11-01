@@ -143,7 +143,7 @@ enum class OpType {
     AddVec, SubVec, MulVec, DivVec,
     Abs, Repack,
     Sin, Cos, Tan, Exp, Erf, Relu, Silu, Tanh, Sqrt, Sigmoid, Pow, Log, Softmax,
-    Clamp, Sum, SumVec, Min, MinVec, Max, MaxVec, Mean, Prod, ProdVec, Concat,
+    Clamp, Sum, SumVec, Min, MinVec, Max, MaxVec, Mean, ProdVec, Concat,
     SortSmall, SortBlock,
     Transpose2d, TransposeNd, Equal, NotEqual, Greater, Less, GreaterEqual, LessEqual,
     All, Any, Nonzero, Argmax, Argmin,
@@ -276,7 +276,6 @@ inline const char* op_to_string(OpType op) {
         case OpType::Max:           return "max";
         case OpType::MaxVec:        return "maxvec";
         case OpType::Mean:          return "mean";
-        case OpType::Prod:          return "prod";
         case OpType::ProdVec:       return "prodvec";
         case OpType::SortSmall:     return "sort_small";
         case OpType::SortBlock:     return "sort_block";

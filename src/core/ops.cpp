@@ -33,6 +33,10 @@ concept has_cuda_impl = requires { sizeof(Impl<Device::CUDA>); };
 template <template <Device> class Impl>
 concept has_sycl_impl = requires { sizeof(Impl<Device::SYCL>); };
 
+// 后端派发：Impl<Device::X> 的全特化存在就走它，否则抛"该后端未实现"。
+// 注意：这条通用抛错**不带算子名**（spec Test Steps 4 要求带算子名）。新增
+// CPU-only 算子请用 require_cpu(t, "op_name") 显式拒绝（消息含算子名与后端），
+// 不要依赖这里的通用消息；现有的 Sort/Topk 等已按此办理。
 template <template <Device> class Impl, typename... Args>
 decltype(auto) execute_on(DeviceId device, Args&&... args) {
     ops::DeviceGuard guard(device);
