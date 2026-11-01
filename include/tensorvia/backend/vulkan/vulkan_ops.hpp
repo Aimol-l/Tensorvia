@@ -168,6 +168,10 @@ template <> struct NonZeroImpl<Device::VULKAN> {
 template <> struct MatMulImpl<Device::VULKAN> {
     static Tensor execute(const Tensor& a, const Tensor& b);
 };
+template <> struct Conv2dImpl<Device::VULKAN> {
+    static Tensor execute(const Tensor& input, const Tensor& weight, const Tensor* bias,
+                          const Conv2dShape& shape);
+};
 
 template <> struct TypecastImpl<Device::VULKAN> {
     static void execute(Tensor& a, DataType dst_type);

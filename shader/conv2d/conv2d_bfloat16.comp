@@ -1,0 +1,84 @@
+#version 460
+#extension GL_EXT_bfloat16 : enable
+#extension GL_EXT_shader_explicit_arithmetic_types : enable
+
+// 2-D 卷积（cross-correlation）：一个调用算一个输出元素。
+//
+// 输入/输出都是连续 NCHW，扁平输出下标直接解码成 (n, oc, oy, ox)。padding 落在
+// 感受野之外的位置按 0 贡献，所以越界的 (y, x) 直接跳过，不需要真的补零。
+//
+// 累加器取宽的标量类型：半精度输入在 float 里累加，写回时才收窄——与 CUDA/SYCL
+// 后端的 promoted_t 一致。
+//
+// has_bias == 0 时 binding 2 不读：宿主在那里绑的是权重 buffer，只为满足描述符
+// 布局必须非空。
+//
+// 本文件与同目录另一份 conv2d_<dtype>.comp 只有标量类型不同；改语义时四份一起改。
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform Params {
+    uint batch;
+    uint in_ch;
+    uint in_h;
+    uint in_w;
+    uint out_ch;
+    uint kh;
+    uint kw;
+    uint stride;
+    uint padding;
+    uint out_h;
+    uint out_w;
+    uint has_bias;
+} params;
+
+layout(std430, binding = 0) buffer Input {
+    bfloat16_t data[];
+} src;  // [batch, in_ch, in_h, in_w]
+
+layout(std430, binding = 1) buffer Weight {
+    bfloat16_t data[];
+} wgt;  // [out_ch, in_ch, kh, kw]
+
+layout(std430, binding = 2) buffer Bias {
+    bfloat16_t data[];
+} bia;  // [out_ch]
+
+layout(std430, binding = 3) buffer Output {
+    bfloat16_t data[];
+} dst;  // [batch, out_ch, out_h, out_w]
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    uint total = params.batch * params.out_ch * params.out_h * params.out_w;
+    if (idx >= total) return;
+
+    uint ox = idx % params.out_w;
+    uint rest = idx / params.out_w;
+    uint oy = rest % params.out_h;
+    rest /= params.out_h;
+    uint oc = rest % params.out_ch;
+    uint n = rest / params.out_ch;
+
+    float acc = params.has_bias != 0 ? float(bia.data[oc]) : 0.0;
+
+    uint in_plane = params.in_h * params.in_w;
+    uint out_plane = params.out_h * params.out_w;
+    uint taps = params.in_ch * params.kh * params.kw;
+
+    for (uint c = 0; c < params.in_ch; ++c) {
+        uint in_base = (n * params.in_ch + c) * in_plane;
+        uint w_base = oc * taps + c * params.kh * params.kw;
+        for (uint i = 0; i < params.kh; ++i) {
+            int y = int(oy * params.stride + i) - int(params.padding);
+            if (y < 0 || y >= int(params.in_h)) continue;
+            for (uint j = 0; j < params.kw; ++j) {
+                int x = int(ox * params.stride + j) - int(params.padding);
+                if (x < 0 || x >= int(params.in_w)) continue;
+                acc += float(src.data[in_base + uint(y) * params.in_w + uint(x)]) *
+                       float(wgt.data[w_base + i * params.kw + j]);
+            }
+        }
+    }
+
+    dst.data[(n * params.out_ch + oc) * out_plane + oy * params.out_w + ox] = bfloat16_t(acc);
+}

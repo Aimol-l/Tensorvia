@@ -148,7 +148,7 @@ enum class OpType {
     All, Any, Nonzero, Argmax, Argmin,
     // 条件选择、索引与累积和。也只有 Vulkan 需要把它们写进流水线键：其余后端
     // 直接跑实现，不查表。
-    Where, IndexSelect, Gather, Cumsum
+    Where, IndexSelect, Gather, Cumsum, Conv2d
 };
 
 enum class Device { CPU, CUDA, SYCL, VULKAN };
@@ -293,6 +293,7 @@ inline const char* op_to_string(OpType op) {
         case OpType::IndexSelect:   return "index_select";
         case OpType::Gather:        return "gather";
         case OpType::Cumsum:        return "cumsum";
+        case OpType::Conv2d:        return "conv2d";
         default: throw std::invalid_argument("Unknown OpType");
     }
 }

@@ -617,6 +617,140 @@ TEST_F(DeviceOps, SelectIndexAndScanMatchReference) {
                  {0, 1, 2, 3, 5, 7, 6, 7, 8, 15, 17, 19}, "cumsum axis 1 on 3-D");
 }
 
+namespace {
+
+// 卷积的参考实现：按定义逐个输出位置求和，不经过被测算子的任何一部分。
+// 输入 [N, C, H, W]、权重 [Cout, C, kh, kw]、bias 可空，输出 [N, Cout, OH, OW]。
+std::vector<float> conv_reference(const std::vector<float>& in, int64_t n, int64_t c,
+                                  int64_t h, int64_t w, const std::vector<float>& weight,
+                                  const std::vector<float>* bias, int64_t cout, int64_t kh,
+                                  int64_t kw, int64_t stride, int64_t pad) {
+    const int64_t oh = (h + 2 * pad - kh) / stride + 1;
+    const int64_t ow = (w + 2 * pad - kw) / stride + 1;
+    std::vector<float> out(static_cast<size_t>(n * cout * oh * ow));
+    for (int64_t b = 0; b < n; ++b)
+        for (int64_t oc = 0; oc < cout; ++oc)
+            for (int64_t oy = 0; oy < oh; ++oy)
+                for (int64_t ox = 0; ox < ow; ++ox) {
+                    double acc = bias ? (*bias)[static_cast<size_t>(oc)] : 0.0;
+                    for (int64_t ic = 0; ic < c; ++ic)
+                        for (int64_t i = 0; i < kh; ++i)
+                            for (int64_t j = 0; j < kw; ++j) {
+                                const int64_t y = oy * stride + i - pad;
+                                const int64_t x = ox * stride + j - pad;
+                                if (y < 0 || y >= h || x < 0 || x >= w) continue;
+                                acc += static_cast<double>(in[static_cast<size_t>(
+                                           ((b * c + ic) * h + y) * w + x)]) *
+                                       static_cast<double>(weight[static_cast<size_t>(
+                                           ((oc * c + ic) * kh + i) * kw + j)]);
+                            }
+                    out[static_cast<size_t>(((b * cout + oc) * oh + oy) * ow + ox)] =
+                        static_cast<float>(acc);
+                }
+    return out;
+}
+
+}  // namespace
+
+// 带 batch 的 3x3 卷积 + same padding：覆盖 padding 的四个边角与中间位置。
+TEST_F(DeviceOps, Conv2dBatchedMatchesReference) {
+    constexpr int64_t n = 2, c = 2, h = 5, w = 6, cout = 3, kh = 3, kw = 3;
+    // 取值压在一个小量级：卷积输出是几十个乘积之和，绝对误差随量级线性增长，
+    // 量级大了 kEps 比较的就变成浮点累加顺序，而不是语义。
+    std::vector<float> iv = ramp(n * c * h * w, 0.02f, -1.0f);
+    std::vector<float> wv = ramp(cout * c * kh * kw, 0.01f, -0.5f);
+    std::vector<float> bv{0.05f, -0.025f, 0.1f};
+
+    const Tensor input  = moved_to(from_values<float>(iv, {n, c, h, w}), kTestDevice);
+    const Tensor weight = moved_to(from_values<float>(wv, {cout, c, kh, kw}), kTestDevice);
+    const Tensor bias   = moved_to(from_values<float>(bv, {cout}), kTestDevice);
+
+    const Tensor out = ops::Conv2d(input, weight, bias, /*stride=*/1, /*padding=*/1);
+    EXPECT_EQ(out.device(), kTestDevice);
+    EXPECT_EQ(out.dtype(), DataType::FLOAT32);
+    EXPECT_EQ(shape_of(out), (std::vector<int64_t>{n, cout, h, w}));
+
+    expect_close(host_values<float>(out),
+                 conv_reference(iv, n, c, h, w, wv, &bv, cout, kh, kw, 1, 1), "conv2d same pad");
+}
+
+// 不带 batch 的 [C, H, W] 输入与 stride > 1：输出按 (H - kh)/stride + 1 收缩，
+// 且不再带 batch 维。
+TEST_F(DeviceOps, Conv2dUnbatchedStridedMatchesReference) {
+    constexpr int64_t c = 3, h = 7, w = 7, cout = 2, kh = 2, kw = 2;
+    std::vector<float> iv = ramp(c * h * w, 0.02f, -1.0f);
+    std::vector<float> wv = ramp(cout * c * kh * kw, 0.01f, -0.5f);
+
+    const Tensor input  = moved_to(from_values<float>(iv, {c, h, w}), kTestDevice);
+    const Tensor weight = moved_to(from_values<float>(wv, {cout, c, kh, kw}), kTestDevice);
+
+    const Tensor out = ops::Conv2d(input, weight, /*stride=*/3, /*padding=*/0);
+    EXPECT_EQ(out.device(), kTestDevice);
+    EXPECT_EQ(shape_of(out), (std::vector<int64_t>{cout, 2, 2}));
+
+    const std::vector<float> want =
+        conv_reference(iv, 1, c, h, w, wv, nullptr, cout, kh, kw, 3, 0);
+    expect_close(host_values<float>(out), want, "conv2d unbatched strided");
+}
+
+// 没有 bias 与给一份全零 bias 必须同值：两条路径在设备上的绑定方式不同，
+// 结果不能因此分叉。
+TEST_F(DeviceOps, Conv2dWithoutBiasMatchesZeroBias) {
+    constexpr int64_t n = 1, c = 2, h = 4, w = 4, cout = 2, kh = 3, kw = 3;
+    std::vector<float> iv = ramp(n * c * h * w, 0.02f, -1.0f);
+    std::vector<float> wv = ramp(cout * c * kh * kw, 0.01f, -0.5f);
+    std::vector<float> zv(static_cast<size_t>(cout), 0.0f);
+
+    const Tensor input  = moved_to(from_values<float>(iv, {n, c, h, w}), kTestDevice);
+    const Tensor weight = moved_to(from_values<float>(wv, {cout, c, kh, kw}), kTestDevice);
+    const Tensor zero   = moved_to(from_values<float>(zv, {cout}), kTestDevice);
+
+    const Tensor no_bias  = ops::Conv2d(input, weight, 1, 1);
+    const Tensor with_bias = ops::Conv2d(input, weight, zero, 1, 1);
+    expect_close(host_values<float>(no_bias), host_values<float>(with_bias),
+                 "conv2d: no bias vs zero bias");
+}
+
+// 形状与取值域的错误必须在公共入口被拒绝：设备内核不做这些检查。
+TEST_F(DeviceOps, Conv2dRejectsBadShapes) {
+    std::vector<float> iv = ramp(1 * 2 * 4 * 4, 0.1f, 0.0f);
+    std::vector<float> wv = ramp(2 * 2 * 3 * 3, 0.1f, 0.0f);
+    const Tensor input  = moved_to(from_values<float>(iv, {1, 2, 4, 4}), kTestDevice);
+    const Tensor weight = moved_to(from_values<float>(wv, {2, 2, 3, 3}), kTestDevice);
+
+    // 通道数对不上
+    std::vector<float> wv_bad = ramp(2 * 3 * 3 * 3, 0.1f, 0.0f);
+    const Tensor weight_bad = moved_to(from_values<float>(wv_bad, {2, 3, 3, 3}), kTestDevice);
+    EXPECT_THROW(ops::Conv2d(input, weight_bad), std::runtime_error);
+
+    // 输入秩不合法
+    std::vector<float> iv_2d = ramp(2 * 4, 0.1f, 0.0f);
+    const Tensor input_2d = moved_to(from_values<float>(iv_2d, {2, 4}), kTestDevice);
+    EXPECT_THROW(ops::Conv2d(input_2d, weight), std::runtime_error);
+
+    // 核比输入（含 padding）还大 -> 输出尺寸非正
+    std::vector<float> wv_big = ramp(2 * 2 * 5 * 5, 0.1f, 0.0f);
+    const Tensor weight_big = moved_to(from_values<float>(wv_big, {2, 2, 5, 5}), kTestDevice);
+    EXPECT_THROW(ops::Conv2d(input, weight_big, /*stride=*/1, /*padding=*/0),
+                 std::runtime_error);
+
+    // stride 至少为 1、padding 不能为负
+    EXPECT_THROW(ops::Conv2d(input, weight, 0, 1), std::runtime_error);
+    EXPECT_THROW(ops::Conv2d(input, weight, 1, -1), std::runtime_error);
+
+    // bias 元素数必须等于 Cout
+    std::vector<float> b_bad(3, 0.0f);
+    const Tensor bias_bad = moved_to(from_values<float>(b_bad, {3}), kTestDevice);
+    EXPECT_THROW(ops::Conv2d(input, weight, bias_bad, 1, 1), std::runtime_error);
+
+    // 整型输入：卷积只对浮点定义
+    std::vector<std::int32_t> ivm = {1, 2, 3, 4};
+    std::vector<std::int32_t> wvm(4, 1);
+    const Tensor input_i = moved_to(from_values<std::int32_t>(ivm, {1, 1, 2, 2}), kTestDevice);
+    const Tensor weight_i = moved_to(from_values<std::int32_t>(wvm, {1, 1, 2, 2}), kTestDevice);
+    EXPECT_THROW(ops::Conv2d(input_i, weight_i), std::runtime_error);
+}
+
 TEST_F(DeviceOps, UnsupportedOpsFailExplicitlyOnDevices) {
     std::vector<float> tv = ramp(6);
     const Tensor T = moved_to(Tensor(tv, std::vector<int64_t>{2, 3}), kTestDevice);

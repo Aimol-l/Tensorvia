@@ -212,6 +212,10 @@ template <> struct TransposeImpl<Device::SYCL> {
 template <> struct MatMulImpl<Device::SYCL> {
     static Tensor execute(const Tensor& a, const Tensor& b);
 };
+template <> struct Conv2dImpl<Device::SYCL> {
+    static Tensor execute(const Tensor& input, const Tensor& weight, const Tensor* bias,
+                          const Conv2dShape& shape);
+};
 
 // ---------------------------------------------------------------------------
 // 条件选择、索引与累积和。

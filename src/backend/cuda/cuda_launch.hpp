@@ -14,6 +14,7 @@
 
 #include <cuda_runtime.h>
 
+#include "tensorvia/cpu_ops.hpp"  // ops::Conv2dShape：卷积的几何契约
 #include "tensorvia/tensor.hpp"
 #include "tensorvia/types.hpp"
 
@@ -268,6 +269,11 @@ cudaError_t launch_index_select(cudaStream_t stream, const void* in, const void*
 cudaError_t launch_gather(cudaStream_t stream, const void* in, const void* idx,
                           void* out, DataType val_dtype, DataType idx_dtype,
                           const Gather& p, int32_t* flag);
+
+// conv2d：输入/输出都是连续 NCHW；`bias` 可为 nullptr（表示没有偏置）。
+cudaError_t launch_conv2d(cudaStream_t stream, const void* in, const void* weight,
+                          const void* bias, void* out, DataType dtype,
+                          const ops::Conv2dShape& p);
 
 // 沿 axis 的累积和；输出与输入同形同 dtype。
 cudaError_t launch_cumsum(cudaStream_t stream, const void* in, void* out,

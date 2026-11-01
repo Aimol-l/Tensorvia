@@ -1,0 +1,77 @@
+// 2-D 卷积的设备实现：一个工作组项算一个输出元素。
+//
+// 与 CUDA 同一套下标算术：输出是连续 NCHW，扁平下标解码成 (n, oc, oy, ox)，
+// 每个输出独立。累加器取提升后的计算类型，半精度输入不在半精度里累积。
+#include "common.h"
+
+using namespace tvv::sycl_dev;
+
+namespace {
+
+template <class T>
+void conv2d_kernel(::sycl::queue& q, const T* in, const T* weight, const T* bias, T* out,
+                   const tvv::sycl::Conv2d& p) {
+    const int64_t total = p.batch * p.out_ch * p.out_h * p.out_w;
+    q.parallel_for(range_of(total), [=](::sycl::id<1> id) {
+        const int64_t idx = static_cast<int64_t>(id[0]);
+
+        const int64_t ox = idx % p.out_w;
+        int64_t rest     = idx / p.out_w;
+        const int64_t oy = rest % p.out_h;
+        rest /= p.out_h;
+        const int64_t oc = rest % p.out_ch;
+        const int64_t n  = rest / p.out_ch;
+
+        using Acc = promoted_t<T>;
+        Acc acc = bias != nullptr ? to_compute<Acc>(bias[oc]) : Acc(0);
+
+        const int64_t in_plane  = p.in_h * p.in_w;
+        const int64_t out_plane = p.out_h * p.out_w;
+        const int64_t taps      = p.in_ch * p.kh * p.kw;
+
+        for (int64_t c = 0; c < p.in_ch; ++c) {
+            const T* in_c = in + (n * p.in_ch + c) * in_plane;
+            const T* w_c  = weight + oc * taps + c * p.kh * p.kw;
+            for (int64_t i = 0; i < p.kh; ++i) {
+                const int64_t y = oy * p.stride + i - p.padding;
+                if (y < 0 || y >= p.in_h) continue;
+                const T* in_row = in_c + y * p.in_w;
+                const T* w_row  = w_c + i * p.kw;
+                for (int64_t j = 0; j < p.kw; ++j) {
+                    const int64_t x = ox * p.stride + j - p.padding;
+                    if (x < 0 || x >= p.in_w) continue;
+                    acc += to_compute<Acc>(in_row[x]) * to_compute<Acc>(w_row[j]);
+                }
+            }
+        }
+
+        out[(n * p.out_ch + oc) * out_plane + oy * p.out_w + ox] = store_as<T>(acc);
+    });
+}
+
+}  // namespace
+
+extern "C" {
+
+int sycl_c_launch_conv2d(void* ctx, const void* in, const void* weight, const void* bias,
+                         void* out, int dtype, const tvv::sycl::Conv2d* p) {
+    // bias 允许为空：没有偏置时内核不读它。
+    if (ctx == nullptr || in == nullptr || weight == nullptr || out == nullptr ||
+        p == nullptr)
+        return tvv::sycl::kSyclInvalid;
+    try {
+        auto& q = queue_of(ctx);
+        return dispatch_dtype(dtype, [&](auto tag) -> int {
+            using T = typename decltype(tag)::type;
+            conv2d_kernel<T>(q, static_cast<const T*>(in), static_cast<const T*>(weight),
+                             static_cast<const T*>(bias), static_cast<T*>(out), *p);
+            return tvv::sycl::kSyclOk;
+        });
+    } catch (const std::exception& e) {
+        return record_failure(e);
+    } catch (...) {
+        return record_failure();
+    }
+}
+
+}  // extern "C"

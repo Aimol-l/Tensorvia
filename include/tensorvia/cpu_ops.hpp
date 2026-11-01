@@ -302,6 +302,29 @@ template <> struct MatMulImpl<Device::CPU> {
     static Tensor execute(const Tensor& a, const Tensor& b);
 };
 
+// 卷积的公共几何描述：张量在进入实现单元之前已被规范化成 4-D NCHW 且连续，
+// `bias` 为空指针表示没有偏置。各后端实现只做"输出下标 -> 输入偏移"的算术。
+struct Conv2dShape {
+    int64_t batch    = 1;
+    int64_t in_ch    = 0;
+    int64_t in_h     = 0;
+    int64_t in_w     = 0;
+    int64_t out_ch   = 0;
+    int64_t kh       = 0;
+    int64_t kw       = 0;
+    int64_t stride   = 1;
+    int64_t padding  = 0;
+    int64_t out_h    = 0;
+    int64_t out_w    = 0;
+    int64_t numel() const { return batch * out_ch * out_h * out_w; }
+};
+
+template <Device D> struct Conv2dImpl;
+template <> struct Conv2dImpl<Device::CPU> {
+    static Tensor execute(const Tensor& input, const Tensor& weight, const Tensor* bias,
+                          const Conv2dShape& shape);
+};
+
 template <> struct EqualImpl<Device::CPU> {
     static Tensor execute(const Tensor& a, const Tensor& b);
     static Tensor execute(const Tensor& a, float val);

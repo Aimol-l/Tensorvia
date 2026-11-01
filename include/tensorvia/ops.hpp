@@ -111,6 +111,17 @@ Tensor Addmm(const Tensor& input, const Tensor& mat1, const Tensor& mat2,
 Tensor Linear(const Tensor& input, const Tensor& weight);
 Tensor Linear(const Tensor& input, const Tensor& weight, const Tensor& bias);
 
+// 2-D 卷积（cross-correlation，与 torch.nn.functional.conv2d 一致）。
+// input 为 [N, C, H, W]，也接受不带 batch 的 [C, H, W]（此时输出不带 batch 维）；
+// weight 为 [Cout, C, kh, kw]，bias 可选、形状 [Cout]。stride 与 padding 同时
+// 作用于 H/W 两维，不做 dilation 与 groups：
+//   Hout = (H + 2 * padding - kh) / stride + 1
+// 四个浮点 dtype；输入、权重、bias 必须同 dtype 同设备。
+Tensor Conv2d(const Tensor& input, const Tensor& weight, int64_t stride = 1,
+              int64_t padding = 0);
+Tensor Conv2d(const Tensor& input, const Tensor& weight, const Tensor& bias,
+              int64_t stride = 1, int64_t padding = 0);
+
 void Abs(Tensor& a);
 void Relu(Tensor& a);
 void Sin(Tensor& a);

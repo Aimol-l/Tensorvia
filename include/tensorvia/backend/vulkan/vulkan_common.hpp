@@ -176,6 +176,25 @@ struct CumsumParams {
     int32_t inner;
 };
 
+// conv2d。全部 32 位：Vulkan 后端的元素下标本来就是 32 位，超过 INT32_MAX 的
+// 张量在分配期就被拒绝了（vulkan_detail::require_int32_indexable）。
+// `has_bias == 0` 时着色器不读 binding 2——那一格绑定的是权重 buffer，仅为满足
+// 描述符布局必须非空的要求。
+struct Conv2dParams {
+    uint32_t batch;
+    uint32_t in_ch;
+    uint32_t in_h;
+    uint32_t in_w;
+    uint32_t out_ch;
+    uint32_t kh;
+    uint32_t kw;
+    uint32_t stride;
+    uint32_t padding;
+    uint32_t out_h;
+    uint32_t out_w;
+    uint32_t has_bias;
+};
+
 // ---------------------------------------------------------------------------
 // 由 VMA 支撑的 buffer 持有者。
 //

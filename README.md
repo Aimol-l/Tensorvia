@@ -40,7 +40,8 @@
 
 - 创建：`Zeros`、`Ones`、`Fill`、`Random`；生成器 `Arange`、`Linspace`、`Eye`、`Randn` 的
   `TensorOptions` 重载在宿主生成后一次性搬到目标设备（同一 seed 各后端取值相同）
-- 算术：`Add`、`Sub`、`Mul`、`Div`、`MatMul`（N-D batched + batch 广播）、`Bmm`、`Addmm`、`Linear`
+- 算术：`Add`、`Sub`、`Mul`、`Div`、`MatMul`（N-D batched + batch 广播）、`Bmm`、`Addmm`、`Linear`、
+  `Conv2d`（NCHW 的 2-D 卷积，stride/padding + 可选 bias，接受 `[N,C,H,W]` 与 `[C,H,W]`）
 - 一元：`Abs`、`Sin`、`Cos`、`Tan`、`Exp`、`Sqrt`、`Log`、`Pow`、`Clamp`
 - 激活：`Relu`、`Silu`、`Tanh`、`Sigmoid`、`Softmax`、`LogSoftmax`
 - 归一化/统计：`LayerNorm`、`RmsNorm`、`Var`、`Std`、`Norm`（设备端由上面的逐元素与归约算子组合实现，
@@ -57,6 +58,10 @@
 prefill（整段 prompt 一次算完，K/V 写进 cache）→ decode（一次一个 token，复用 cache）→ logits。
 模型是随机权重的两层 decoder-only Transformer：词表与位置查表走 `IndexSelect`，多头注意力的
 因果掩码走 `Where`。`inference [cpu|cuda|vulkan|sycl] [prompt]` 指定后端与提示词。
+
+`examples/cnn_inference.cpp` 跑一个两层卷积网络：conv → relu → maxpool → conv → relu → maxpool
+→ 全连接 → softmax。卷积直接调 `Conv2d`，权重随机；程序会在宿主上按卷积的定义重算几个输出位置
+与算子结果比对。`cnn_inference [cpu|cuda|vulkan|sycl]` 指定后端。
 
 ## 📦 依赖
 

@@ -780,6 +780,105 @@ Tensor Linear(const Tensor& input, const Tensor& weight, const Tensor& bias) {
     return ops::Add(Linear(input, weight), bias);
 }
 
+namespace {
+
+// 卷积的入口校验与形状推导集中在这里：四个后端实现拿到的已经是 4-D 连续 NCHW，
+// 只做下标算术。stride/padding 是标量广播到两维，dilation 与 groups 不在契约内。
+Tensor conv2d_forward(const Tensor& input, const Tensor& weight, const Tensor* bias,
+                      int64_t stride, int64_t padding) {
+    const auto in_shape = input.shape();
+    const auto w_shape = weight.shape();
+    const size_t in_rank = in_shape.size();
+    if (in_rank != 3 && in_rank != 4)
+        throw std::runtime_error(std::format(
+            "conv2d: input must be 3-D [C, H, W] or 4-D [N, C, H, W], got {}D", in_rank));
+    if (w_shape.size() != 4)
+        throw std::runtime_error(std::format(
+            "conv2d: weight must be 4-D [Cout, C, kh, kw], got {}D", w_shape.size()));
+    if (stride < 1) throw std::runtime_error("conv2d: stride must be at least 1");
+    if (padding < 0) throw std::runtime_error("conv2d: padding must not be negative");
+
+    // 与 PyTorch 一致：三者的 dtype 与设备必须完全一致，不做隐式提升。
+    if (weight.dtype() != input.dtype())
+        throw std::runtime_error(std::format(
+            "conv2d: input and weight dtypes must match ({} vs {})",
+            dtype_to_string(input.dtype()), dtype_to_string(weight.dtype())));
+    if (weight.device_id() != input.device_id())
+        throw std::runtime_error("conv2d: input and weight must live on the same device");
+    if (!is_floating_dtype(input.dtype()))
+        throw std::runtime_error(std::format("conv2d: dtype must be floating point, got {}",
+                                             dtype_to_string(input.dtype())));
+
+    const int64_t channels = in_shape[in_rank - 3];
+    const int64_t in_h = in_shape[in_rank - 2];
+    const int64_t in_w = in_shape[in_rank - 1];
+    const int64_t batch = in_rank == 4 ? in_shape[0] : 1;
+    const int64_t out_ch = w_shape[0];
+    const int64_t kh = w_shape[2];
+    const int64_t kw = w_shape[3];
+
+    if (w_shape[1] != channels)
+        throw std::runtime_error(std::format(
+            "conv2d: weight expects {} input channels but the input has {}",
+            w_shape[1], channels));
+    if (kh <= 0 || kw <= 0)
+        throw std::runtime_error("conv2d: kernel size must be positive");
+
+    const int64_t out_h = (in_h + 2 * padding - kh) / stride + 1;
+    const int64_t out_w = (in_w + 2 * padding - kw) / stride + 1;
+    if (out_h <= 0 || out_w <= 0)
+        throw std::runtime_error(std::format(
+            "conv2d: {0}x{1} input with {2}x{3} kernel, stride {4}, padding {5} "
+            "yields a non-positive output size",
+            in_h, in_w, kh, kw, stride, padding));
+
+    const Conv2dShape shape{.batch = batch,       .in_ch = channels, .in_h = in_h,
+                            .in_w = in_w,         .out_ch = out_ch,  .kh = kh,
+                            .kw = kw,             .stride = stride,  .padding = padding,
+                            .out_h = out_h,       .out_w = out_w};
+
+    std::vector<int64_t> out_shape{batch, out_ch, out_h, out_w};
+    if (batch == 0 || out_ch == 0)
+        return empty_on(input, out_shape, input.dtype());
+
+    // 内核线性寻址，所以吃连续、且不带视图 offset 的操作数。
+    Tensor in_hold, w_hold, b_hold;
+    Tensor plain = in_rank == 3 ? input.unsqueeze(0) : input;
+    const Tensor& src = linearize(plain, in_hold);
+    const Tensor& w = linearize(weight, w_hold);
+
+    const Tensor* bias_arg = nullptr;
+    if (bias != nullptr) {
+        if (bias->numel() != 0) {
+            if (bias->dtype() != input.dtype())
+                throw std::runtime_error(std::format(
+                    "conv2d: bias dtype must match the input ({} vs {})",
+                    dtype_to_string(bias->dtype()), dtype_to_string(input.dtype())));
+            if (bias->device_id() != input.device_id())
+                throw std::runtime_error("conv2d: bias must live on the same device as the input");
+            if (bias->numel() != out_ch)
+                throw std::runtime_error(std::format(
+                    "conv2d: bias must have {} elements, got {}", out_ch, bias->numel()));
+            bias_arg = &linearize(*bias, b_hold);
+        }
+    }
+
+    Tensor out = execute_on<Conv2dImpl>(src.device_id(), src, w, bias_arg, shape);
+    if (in_rank == 3) out = out.reshape({out_ch, out_h, out_w});
+    return out;
+}
+
+}  // namespace
+
+Tensor Conv2d(const Tensor& input, const Tensor& weight, int64_t stride, int64_t padding) {
+    return conv2d_forward(input, weight, nullptr, stride, padding);
+}
+
+Tensor Conv2d(const Tensor& input, const Tensor& weight, const Tensor& bias, int64_t stride,
+              int64_t padding) {
+    return conv2d_forward(input, weight, &bias, stride, padding);
+}
+
 Tensor Abs(const Tensor& a) {
     require_live(a);
     require_not_bool(a, "abs");
