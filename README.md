@@ -376,7 +376,7 @@ cmake -B build -DBACKEND_CPU=ON -DCMAKE_BUILD_TYPE=Release -DBUILD_TEST=ON && cm
 
 ## 📊 性能基线
 
-`benchmark/bench.cpp` 把每次调用拆成 submit（调用返回）/ sync（`synchronize()` 耗时）/ total 三段，冷启动（JIT / 流水线创建）单独一列；吞吐按 total 计算。同机基线表（含硬件 / 驱动 / 编译器 / profile 与逐用例三段耗时）在 [`benchmark/baseline/`](benchmark/baseline/)——性能结论以那份表与同机比值为准，本文不手写数字。
+`benchmark/bench.cpp` 把每次调用拆成 submit（调用返回）/ sync（`synchronize()` 耗时）/ total 三段，冷启动（JIT / 流水线创建）单独一列；吞吐按 total 计算。同机基线表（含硬件 / 驱动 / 编译器 / profile 与逐用例三段耗时）在 [`benchmark/baseline/`](benchmark/baseline/)；分类性能下限（FR-4.3 的校准百分比、不达标项与根因）在 [`docs/performance.md`](docs/performance.md)。性能结论以那两份文档与同机比值为准，本文不手写数字。
 
 > **SYCL lane 的 llvm 构建需要 mcpp ≥ 2026.10.26.1**：该版本起 mcpp 把
 > libsycl 带来的 libstdc++ 识别为 C++ ABI island 并做链接后验证，`.so` 内

@@ -240,6 +240,13 @@ int main(int argc, char* argv[]) {
         const Phases p = measure([&] { (void)ops::MatMul(a, b); }, 5);
         report("matmul f32 1024", p, 2.0 * M * M * M, true);
     }
+    {   // conv2d：NCHW 小通道（推理常见形状）；参照为同机 cuDNN（PyTorch）
+        constexpr std::int64_t N = 8, C = 64, H = 56, W = 56, K = 64, R = 3, S = 3;
+        Tensor x = Tensor::Random({N, C, H, W}, 0.0f, 1.0f, DT::FLOAT32, dev);
+        Tensor w = Tensor::Random({K, C, R, S}, 0.0f, 1.0f, DT::FLOAT32, dev);
+        const Phases p = measure([&] { (void)ops::Conv2d(x, w); }, 5);
+        report("conv2d f32 8x64x56x56", p, 2.0 * double(N) * K * (H - 2) * (W - 2) * C * R * S, true);
+    }
     {   // arange：单写（设备生成器形式：宿主算值一次性搬到目标设备）
         constexpr std::int64_t N = std::int64_t{1} << 24;  // 16M
         TensorOptions opts(DT::FLOAT32);
