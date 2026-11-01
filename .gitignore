@@ -2,7 +2,9 @@
 !.vscode/settings.json
 !.vscode/c_cpp_properties.json
 .cache
-.github
+.github/*
+# CI 工作流要进版本库；其余 .github 内容（issue 模板等）仍然忽略
+!.github/workflows/
 .superpowers
 target/
 .mcpp/
