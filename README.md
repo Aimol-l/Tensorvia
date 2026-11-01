@@ -36,7 +36,7 @@
 
 设备枚举为 `Device::CPU`、`Device::VULKAN`、`Device::CUDA` 和 `Device::SYCL`。CPU 后端实现完整的
 `ops` API；Vulkan、CUDA 与 SYCL 覆盖下面这组算子（少数算子仍为 CPU-only，设备上调用会显式报错，
-见本节末尾）：
+完整覆盖矩阵见 [docs/coverage.md](docs/coverage.md)）：
 
 - 创建：`Zeros`、`Ones`、`Fill`、`Random`；生成器 `Arange`、`Linspace`、`Eye`、`Randn` 的
   `TensorOptions` 重载在宿主生成后一次性搬到目标设备（同一 seed 各后端取值相同）
@@ -51,8 +51,13 @@
 - 条件/索引/扫描：`Where`（三路广播）、`IndexSelect`、`Gather`（embedding 取行与逐元素取址）、`Cumsum`
 - 形状/搬移/类型：`Concat`、`Transpose`、`Slice`、`Split`、`Chunk`、`Stack`、`Pad`、`Repeat`、`Flip`、`Roll`、`Typecast`
 
-仍为 CPU-only 的算子（设备张量调用抛 `"only the CPU backend implements this op"`，不会静默回退 CPU）：
-`Erf`、`MaskedSelect`、`MaskedFill`、`Sort`、`Topk`、`Prod`。
+以上分组是便于阅读的摘要。权威的覆盖矩阵在 [docs/coverage.md](docs/coverage.md)：算子 × 后端逐格标注
+native / emulated（组合实现）/ unsupported（显式拒绝），由 `tools/coverage_matrix.py` 从源码与
+`tools/coverage_overrides.toml` 生成，CI 守漂移——那份矩阵取代了这里的手写清单。
+
+设备端未覆盖的算子（在设备张量上调用会带算子名抛错，不会静默回退 CPU）不在这里手写清单：
+以 [docs/coverage.md](docs/coverage.md) 的矩阵为准，其中 `unsupported` 的每一格都注明拒绝位置
+（`require_cpu` 或 `execute_on` 的“后端未实现”路径）。
 
 `examples/inference.cpp` 按真实推理引擎的分段跑一次前向：text → tokens → embedding →
 prefill（整段 prompt 一次算完，K/V 写进 cache）→ decode（一次一个 token，复用 cache）→ logits。

@@ -1,0 +1,77 @@
+# ============================================================
+# 覆盖矩阵的人工标注——唯一来源。tools/coverage_matrix.py 从这里读
+# emulated / unsupported / core_impl / host_side，不从代码推断。
+#
+# 键的写法：
+#   Op            —— 四个后端全部（含 CPU）
+#   Op.devices    —— 三个设备后端（CUDA / SYCL / VULKAN）
+#   Op.CPU 等      —— 单个后端
+# 条目冲突（同一格标两次）、标在已有 Impl 特化的格子上，--check 都会报错。
+#
+# 字段：
+#   note     —— 必填。为什么是这个状态，写给人看。
+#   parts    —— 仅 [emulated]。组合实现依赖的公开算子；工具会校验：所声称可用的
+#               每个后端上，部件本身必须受支持（组合声明为假即报错）。
+#   evidence—— 可选，'path:line'。指向支撑这条标注的源码行，工具校验文件、行号
+#               与行内容（提到算子名 / Impl 名 / snake_case 形式）真实存在。
+# ============================================================
+
+# 宿主侧 API：不经过后端派发，不进矩阵。
+[host_side]
+names = ["println", "export_csv", "synchronize", "empty_cache",
+         "device_count", "current_device", "set_device",
+         "DeviceGuard", "SortResult", "TopkResult"]
+
+# CPU 直实现：实现在 src/core/ops.cpp、只服务 CPU，没有 XxxImpl 特化。
+[core_impl]
+MaskedSelect = { note = "宿主侧按 mask 逐元素挑选后拷出", evidence = "src/core/ops.cpp:2013" }
+MaskedFill = { note = "宿主侧按 mask 逐元素写入", evidence = "src/core/ops.cpp:2040" }
+
+# 组合实现（emulated）：无自己的内核，由其他算子拼成，或在宿主生成后搬运。
+[emulated]
+# ---- 纯视图或视图 + Concat：src/core/ops.cpp:2056 的注释即此中缘由 ----
+Split = { note = "narrow 视图切片，纯视图无内核", evidence = "src/core/ops.cpp:2060" }
+Chunk = { note = "块长换算后转 Split", parts = ["Split"], evidence = "src/core/ops.cpp:2077" }
+Stack = { note = "unsqueeze 视图 + Concat", parts = ["Concat"], evidence = "src/core/ops.cpp:2089" }
+Pad = { note = "narrow 裁剪 + 常量块 Concat", parts = ["Concat"], evidence = "src/core/ops.cpp:2112" }
+Repeat = { note = "reshape + expand 纯视图", evidence = "src/core/ops.cpp:2149" }
+Flip = { note = "逐元素 narrow 逆序视图 + Concat", parts = ["Concat"], evidence = "src/core/ops.cpp:2178" }
+Roll = { note = "两段 narrow 视图 + Concat", parts = ["Concat"], evidence = "src/core/ops.cpp:2194" }
+CountNonzero = { note = "Typecast 归一 + Nonzero 取计数", parts = ["Typecast", "Nonzero"], evidence = "src/core/ops.cpp:1880" }
+
+# ---- 矩阵乘族：Bmm/Addmm/Linear 都是 MatMul 加少量逐元素算子拼成 ----
+Bmm = { note = "形状校验后转 MatMul", parts = ["MatMul"], evidence = "src/core/ops.cpp:745" }
+Addmm = { note = "MatMul + Mul/Add 缩放与广播相加", parts = ["MatMul", "Mul", "Add"], evidence = "src/core/ops.cpp:756" }
+Linear = { note = "MatMul(input, weight^T)，bias 形式再加 Add", parts = ["MatMul", "Transpose", "Add"], evidence = "src/core/ops.cpp:769" }
+
+# ---- 设备端组合路径：CPU 有原生内核，设备端由 ops.cpp 的 *_composed 拼出 ----
+LogSoftmax.devices = { note = "Max/Exp/Sum/Sub/Log 组合（log_softmax_composed）", parts = ["Max", "Exp", "Sum", "Sub", "Log"], evidence = "src/core/ops.cpp:1025" }
+LayerNorm.devices = { note = "Sub/Mean/Mul/Div/Sqrt/Add 组合（layer_norm_composed）", parts = ["Typecast", "Sub", "Mean", "Mul", "Div", "Sqrt", "Add"], evidence = "src/core/ops.cpp:1058" }
+RmsNorm.devices = { note = "Mean/Mul/Div/Sqrt 组合（rms_norm_composed）", parts = ["Typecast", "Mean", "Mul", "Div", "Sqrt"], evidence = "src/core/ops.cpp:1086" }
+Var.devices = { note = "Mean/Sub/Mul 组合（var_composed）", parts = ["Typecast", "Mean", "Sub", "Mul"], evidence = "src/core/ops.cpp:1358" }
+Std.devices = { note = "Sqrt(var_composed)", parts = ["Typecast", "Mean", "Sub", "Mul", "Sqrt"], evidence = "src/core/ops.cpp:1363" }
+Norm.devices = { note = "Abs+Sum 或 Mul+Sum+Sqrt 组合（norm_composed）", parts = ["Typecast", "Abs", "Sum", "Mul", "Sqrt"], evidence = "src/core/ops.cpp:1385" }
+
+# ---- 生成器：宿主生成后一次性搬到目标设备，设备端无内核 ----
+Arange.devices = { note = "宿主生成后 to_device 搬运", evidence = "src/core/ops.cpp:469" }
+Linspace.devices = { note = "宿主生成后 to_device 搬运", evidence = "src/core/ops.cpp:475" }
+Eye.devices = { note = "宿主生成后 to_device 搬运", evidence = "src/core/ops.cpp:481" }
+Randn.devices = { note = "宿主生成后 to_device 搬运", evidence = "src/core/ops.cpp:402" }
+
+# ---- CPU 组合、设备端传递性不支持 ----
+CrossEntropyLoss.CPU = { note = "LogSoftmax + NllLoss 组合", parts = ["LogSoftmax", "NllLoss"], evidence = "src/core/ops.cpp:1638" }
+
+# 显式拒绝（unsupported）：设备上调用抛错，不会静默回退 CPU。
+[unsupported]
+# require_cpu 带算子名拒绝
+Erf.devices = { note = "require_cpu 显式拒绝", evidence = "src/core/ops.cpp:1034" }
+Prod.devices = { note = "require_cpu 显式拒绝", evidence = "src/core/ops.cpp:1347" }
+MseLoss.devices = { note = "require_cpu 显式拒绝", evidence = "src/core/ops.cpp:1621" }
+NllLoss.devices = { note = "require_cpu 显式拒绝", evidence = "src/core/ops.cpp:1635" }
+MaskedSelect.devices = { note = "require_cpu 显式拒绝", evidence = "src/core/ops.cpp:2018" }
+MaskedFill.devices = { note = "require_cpu 显式拒绝", evidence = "src/core/ops.cpp:2045" }
+# execute_on 的通用抛错（当前不带算子名，见预检行 6）
+Sort.devices = { note = "execute_on 无设备特化，抛 not implemented", evidence = "src/core/ops.cpp:2212" }
+Topk.devices = { note = "execute_on 无设备特化，抛 not implemented", evidence = "src/core/ops.cpp:2222" }
+# 部件 NllLoss 在设备端被拒，组合随之不可用
+CrossEntropyLoss.devices = { note = "部件 NllLoss 设备端 require_cpu 拒绝，传递性不支持", evidence = "src/core/ops.cpp:1638" }

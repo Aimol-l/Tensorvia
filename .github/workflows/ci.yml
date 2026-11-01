@@ -37,6 +37,22 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+  coverage:
+    name: Coverage matrix
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # 覆盖矩阵是 FR-1 的守门人：算子 × 后端每一格要么有 XxxImpl 全特化，要么在
+      # tools/coverage_overrides.toml 里有显式标注。源码动了矩阵没动，这一步就红，
+      # 并指名算子与后端。只跑 Python，不构建。
+      - name: Check coverage matrix
+        run: python3 -I tools/coverage_matrix.py --check
+
+      # 矩阵生成器自己的测试（stdlib unittest，无第三方依赖）。
+      - name: Test coverage matrix tool
+        run: python3 -I tests/test_coverage_matrix.py
+
   cmake-clang:
     name: CMake (CPU, Clang)
     runs-on: ubuntu-24.04
