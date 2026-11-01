@@ -69,8 +69,5 @@ MseLoss.devices = { note = "require_cpu 显式拒绝", evidence = "src/core/ops.
 NllLoss.devices = { note = "require_cpu 显式拒绝", evidence = "src/core/ops.cpp:NllLoss" }
 MaskedSelect.devices = { note = "require_cpu 显式拒绝", evidence = "src/core/ops.cpp:MaskedSelect" }
 MaskedFill.devices = { note = "require_cpu 显式拒绝", evidence = "src/core/ops.cpp:MaskedFill" }
-# execute_on 的通用抛错（当前不带算子名，见预检行 6）
-Sort.devices = { note = "execute_on 无设备特化，抛 not implemented", evidence = "src/core/ops.cpp:Sort" }
-Topk.devices = { note = "execute_on 无设备特化，抛 not implemented", evidence = "src/core/ops.cpp:Topk" }
 # 部件 NllLoss 在设备端被拒，组合随之不可用
 CrossEntropyLoss.devices = { note = "部件 NllLoss 设备端 require_cpu 拒绝，传递性不支持", evidence = "src/core/ops.cpp:CrossEntropyLoss" }

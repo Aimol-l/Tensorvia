@@ -131,6 +131,12 @@ template <> struct ProdImpl<Device::VULKAN> {
     static float execute(const Tensor& a);
     static Tensor execute(const Tensor& a, int axis);
 };
+template <> struct SortImpl<Device::VULKAN> {
+    static SortResult execute(const Tensor& input, int dim, bool descending);
+};
+template <> struct TopkImpl<Device::VULKAN> {
+    static TopkResult execute(const Tensor& input, int64_t k, int dim, bool largest);
+};
 template <> struct ArgMaxImpl<Device::VULKAN> {
     static Tensor execute(const Tensor& a, int axis);
 };

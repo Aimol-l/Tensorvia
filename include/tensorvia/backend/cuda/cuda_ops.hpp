@@ -162,6 +162,16 @@ template <> struct NonZeroImpl<Device::CUDA> {
 };
 
 // ---------------------------------------------------------------------------
+// sort / topk。轴长上限 1024（超过显式抛错，见 sort.cu 的注释）。
+// ---------------------------------------------------------------------------
+template <> struct SortImpl<Device::CUDA> {
+    static SortResult execute(const Tensor& input, int dim, bool descending);
+};
+template <> struct TopkImpl<Device::CUDA> {
+    static TopkResult execute(const Tensor& input, int64_t k, int dim, bool largest);
+};
+
+// ---------------------------------------------------------------------------
 // dtype 转换。
 // ---------------------------------------------------------------------------
 template <> struct TypecastImpl<Device::CUDA> {

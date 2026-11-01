@@ -1,0 +1,69 @@
+#version 460
+
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform Params {
+    int outer;
+    int n;
+    int inner;
+    int keep;
+    int padded;      // 只有 block 路径用：n 补齐到的 2 的幂
+    int descending;  // 1 = 降序（topk 的 largest）
+} params;
+
+layout(std430, binding = 0) buffer InputA {
+    int data[];
+} src;
+
+layout(std430, binding = 1) buffer OutputVals {
+    int data[];
+} dstv;
+
+layout(std430, binding = 2) buffer OutputIdx {
+    int64_t data[];
+} dsti;
+
+// (值, 下标) 对：下标做次级键，天然稳定——平局时更靠前的下标在前，与 CPU 的
+// std::stable_sort 语义一致（topk 的 largest/smallest 平局次序同理）。
+struct Pair {
+    int v;
+    int   i;
+};
+
+bool pair_before(int va, int ia, int vb, int ib, bool desc) {
+    if (va == vb) return ia < ib;
+    return desc ? (vb < va) : (va < vb);
+}
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    const int columns = params.outer * params.inner;
+    if (int(idx) >= columns) return;
+    const int o = int(idx) / params.inner;
+    const int c = int(idx) % params.inner;
+    const int base = (o * params.n) * params.inner + c;
+
+    Pair pairs[32];
+    for (int i = 0; i < params.n; ++i) {
+        pairs[i].v = src.data[base + i * params.inner];
+        pairs[i].i = i;
+    }
+    for (int i = 1; i < params.n; ++i) {
+        const Pair cur = pairs[i];
+        int j = i - 1;
+        while (j >= 0 && pair_before(cur.v, cur.i, pairs[j].v, pairs[j].i,
+                                     params.descending != 0)) {
+            pairs[j + 1] = pairs[j];
+            --j;
+        }
+        pairs[j + 1] = cur;
+    }
+
+    const int out_base = (o * params.keep) * params.inner + c;
+    for (int i = 0; i < params.keep; ++i) {
+        dstv.data[out_base + i * params.inner] = pairs[i].v;
+        dsti.data[out_base + i * params.inner] = int64_t(pairs[i].i);
+    }
+}

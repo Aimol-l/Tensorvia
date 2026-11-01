@@ -103,6 +103,19 @@ struct ReduceAxis {
     int64_t inner = 0;
 };
 
+// sort / topk 的几何：输入视为 outer x n x inner，每个 (outer, inner) 列独立
+// 排序，输出排好序的前 keep 个（sort 的 keep = n，topk 的 keep = k）。
+// `padded` 是 n 补齐到的 2 的幂（block 路径的 bitonic 网络用）。
+struct SortAxis {
+    int64_t outer      = 0;
+    int64_t n          = 0;
+    int64_t inner      = 0;
+    int64_t keep       = 0;
+    int64_t padded     = 0;
+    int32_t descending = 0;  // 1 = 降序（topk 的 largest）
+    int32_t reserved   = 0;
+};
+
 // 跨步视图重排（clone_as_contiguous）。
 struct Repack {
     int64_t numel      = 0;
@@ -195,6 +208,7 @@ static_assert(std::is_trivially_copyable_v<IndexAxis>, "seam POD");
 static_assert(std::is_trivially_copyable_v<Gather>, "seam POD");
 static_assert(std::is_trivially_copyable_v<Conv2d>, "seam POD");
 static_assert(std::is_trivially_copyable_v<ReduceAxis>, "seam POD");
+static_assert(std::is_trivially_copyable_v<SortAxis>, "seam POD");
 static_assert(std::is_trivially_copyable_v<Repack>, "seam POD");
 static_assert(std::is_trivially_copyable_v<Slice>, "seam POD");
 static_assert(std::is_trivially_copyable_v<Transpose>, "seam POD");
@@ -282,6 +296,10 @@ int sycl_c_launch_reduce_axis(void* ctx, const void* in, void* out,
                               const tvv::sycl::ReduceAxis* p);
 int sycl_c_launch_arg_reduce(void* ctx, const void* in, void* out, int dtype,
                              int is_max, const tvv::sycl::ReduceAxis* p);
+// sort / topk：每列独立排序后取前 keep 个。`out_vals` 与 `out_idx` 都是
+// outer * keep * inner 个元素（vals 为 dtype，idx 为 INT64）。
+int sycl_c_launch_sort(void* ctx, const void* in, void* out_vals, void* out_idx,
+                       int dtype, const tvv::sycl::SortAxis* p);
 int sycl_c_launch_all_any(void* ctx, const void* in, void* out, int64_t numel,
                           int dtype, int is_all, double value);
 // `out` 是一个存放计数的 INT32 元素。

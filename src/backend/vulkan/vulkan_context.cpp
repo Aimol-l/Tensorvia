@@ -319,6 +319,10 @@ void VulkanContext::registerPipelines() {
     registerOp(OpType::Gather, AllTypes, 4, sizeof(GatherParams));
     registerOp(OpType::Cumsum, AllTypes, 2, sizeof(CumsumParams));
 
+    registerOp(OpType::SortSmall, AllTypes, 3, sizeof(SortParams));
+
+    registerOp(OpType::SortBlock, AllTypes, 3, sizeof(SortParams));
+
     // input / weight / bias / output。四个 dtype：卷积只对浮点定义（与 PyTorch 一致）。
     registerOp(OpType::Conv2d, FloatTypes, 4, sizeof(Conv2dParams));
 }

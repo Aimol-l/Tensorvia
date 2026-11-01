@@ -144,6 +144,7 @@ enum class OpType {
     Abs, Repack,
     Sin, Cos, Tan, Exp, Erf, Relu, Silu, Tanh, Sqrt, Sigmoid, Pow, Log, Softmax,
     Clamp, Sum, SumVec, Min, MinVec, Max, MaxVec, Mean, Prod, ProdVec, Concat,
+    SortSmall, SortBlock,
     Transpose2d, TransposeNd, Equal, NotEqual, Greater, Less, GreaterEqual, LessEqual,
     All, Any, Nonzero, Argmax, Argmin,
     // 条件选择、索引与累积和。也只有 Vulkan 需要把它们写进流水线键：其余后端
@@ -277,6 +278,8 @@ inline const char* op_to_string(OpType op) {
         case OpType::Mean:          return "mean";
         case OpType::Prod:          return "prod";
         case OpType::ProdVec:       return "prodvec";
+        case OpType::SortSmall:     return "sort_small";
+        case OpType::SortBlock:     return "sort_block";
         case OpType::Concat:        return "concat";
         case OpType::Transpose2d:   return "transpose2d";
         case OpType::TransposeNd:   return "transposeNd";

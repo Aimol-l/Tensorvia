@@ -456,39 +456,125 @@ TEST_F(DeviceOps, OffsetViewsFeedKernelsCorrectly) {
                        "layer_norm on an offset view");
 }
 
-TEST_F(DeviceOps, SortAndTopkOnCpu) {
-    // 这两个算子目前只有 CPU 内核：设备上走 FR-8 的显式错误路径。
-    if (kTestDevice != Device::CPU) {
-        std::vector<float> v{3, 1, 2};
-        const Tensor T = moved_to(Tensor(v, std::vector<int64_t>{3}), kTestDevice);
-        EXPECT_THROW(ops::Sort(T), std::runtime_error);
-        EXPECT_THROW(ops::Topk(T, 2), std::runtime_error);
-        GTEST_SKIP() << "sort/topk are CPU-only";
-    }
-
+// Sort/Topk 的语义冻结（Task 4）：平局规则（稳定次序，与 torch.sort(stable=True)
+// 一致——相等元素保持原始相对位置）、descending / largest、k 的边界（0 与轴长合法，
+// 越界抛错）、负轴、空张量、全相同元素。设备结果与 CPU 参考逐个比对——值与下标
+// 都要一致（平局数据比的是排序后的值序列与稳定下标）。
+TEST_F(DeviceOps, SortAndTopkMatchCpuAcrossBackends) {
+    // 1-D：升/降序，值 + 下标 + dtype/设备契约。
     std::vector<float> v{3, 1, 2};
-    const Tensor T(v, std::vector<int64_t>{3});
-    const ops::SortResult asc = ops::Sort(T);
+    const Tensor cpu = Tensor(v, std::vector<int64_t>{3});
+    const Tensor dev = moved_to(Tensor(v, std::vector<int64_t>{3}), kTestDevice);
+
+    const ops::SortResult asc = ops::Sort(dev);
+    EXPECT_EQ(asc.values.device(), kTestDevice);
+    EXPECT_EQ(asc.values.dtype(), DataType::FLOAT32);
+    EXPECT_EQ(asc.indices.dtype(), DataType::INT64);
     expect_close(host_values<float>(asc.values), {1, 2, 3}, "sort values");
     EXPECT_EQ(host_values<int64_t>(asc.indices), (std::vector<int64_t>{1, 2, 0}));
-    const ops::SortResult desc = ops::Sort(T, 0, true);
+
+    const ops::SortResult desc = ops::Sort(dev, 0, true);
     expect_close(host_values<float>(desc.values), {3, 2, 1}, "sort desc");
     EXPECT_EQ(host_values<int64_t>(desc.indices), (std::vector<int64_t>{0, 2, 1}));
 
-    // 2-D、沿 dim 1 排序，各行列独立。
-    std::vector<float> m{3, 1, 2, 6, 4, 5};
-    const Tensor M(m, std::vector<int64_t>{2, 3});
-    const ops::SortResult ms = ops::Sort(M, 1);
-    expect_close(host_values<float>(ms.values), {1, 2, 3, 4, 5, 6}, "sort 2-D");
-    EXPECT_EQ(host_values<int64_t>(ms.indices), (std::vector<int64_t>{1, 2, 0, 1, 2, 0}));
+    // 平局：稳定次序。升序 [1,1,3,3] 的下标是 [1,3,0,2]；降序 [3,3,1,1] 是 [0,2,1,3]。
+    std::vector<float> tv{3, 1, 3, 1};
+    const Tensor ties_cpu = Tensor(tv, std::vector<int64_t>{4});
+    const Tensor ties = moved_to(Tensor(tv, std::vector<int64_t>{4}), kTestDevice);
+    const ops::SortResult ties_asc = ops::Sort(ties);
+    expect_close(host_values<float>(ties_asc.values), {1, 1, 3, 3}, "sort ties values");
+    EXPECT_EQ(host_values<int64_t>(ties_asc.indices), (std::vector<int64_t>{1, 3, 0, 2}));
+    const ops::SortResult ties_desc = ops::Sort(ties, -1, true);
+    expect_close(host_values<float>(ties_desc.values), {3, 3, 1, 1}, "sort ties desc values");
+    EXPECT_EQ(host_values<int64_t>(ties_desc.indices), (std::vector<int64_t>{0, 2, 1, 3}));
 
+    // 2-D：沿 dim 1 与 dim 0，各行列独立；负轴等价于末尾轴。
+    std::vector<float> m{3, 1, 2, 6, 4, 5};
+    const Tensor Mcpu(m, std::vector<int64_t>{2, 3});
+    const Tensor M = moved_to(Tensor(m, std::vector<int64_t>{2, 3}), kTestDevice);
+    const ops::SortResult ms = ops::Sort(M, 1);
+    expect_close(host_values<float>(ms.values), {1, 2, 3, 4, 5, 6}, "sort 2-D dim 1");
+    EXPECT_EQ(host_values<int64_t>(ms.indices), (std::vector<int64_t>{1, 2, 0, 1, 2, 0}));
+    const ops::SortResult ms0 = ops::Sort(M, 0);
+    expect_close(host_values<float>(ms0.values), {3, 1, 2, 6, 4, 5}, "sort 2-D dim 0");
+    EXPECT_EQ(host_values<int64_t>(ms0.indices), (std::vector<int64_t>{0, 0, 0, 1, 1, 1}));
+    const ops::SortResult ms_neg = ops::Sort(M, -1);
+    EXPECT_EQ(host_values<int64_t>(ms_neg.indices), host_values<int64_t>(ms.indices));
+
+    // topk：largest / smallest、k=0（空结果）、k=轴长（等价于全排序）、越界抛错。
     const ops::TopkResult tk = ops::Topk(M, 2, 1);
     EXPECT_EQ(shape_of(tk.values), (std::vector<int64_t>{2, 2}));
     expect_close(host_values<float>(tk.values), {3, 2, 6, 5}, "topk values");
     EXPECT_EQ(host_values<int64_t>(tk.indices), (std::vector<int64_t>{0, 2, 0, 2}));
     const ops::TopkResult small = ops::Topk(M, 2, 1, false);
     expect_close(host_values<float>(small.values), {1, 2, 4, 5}, "topk smallest");
-    EXPECT_THROW(ops::Topk(M, 4, 1), std::runtime_error);
+    EXPECT_EQ(host_values<int64_t>(small.indices), (std::vector<int64_t>{1, 2, 1, 2}));
+
+    const ops::TopkResult kfull = ops::Topk(M, 3, 1);
+    // largest 的 topk 是降序，所以与降序排列的排序结果对齐。
+    EXPECT_EQ(host_values<int64_t>(kfull.indices),
+              host_values<int64_t>(ops::Sort(M, 1, true).indices));
+    EXPECT_THROW(ops::Topk(M, 4, 1), std::runtime_error);  // k > 轴长
+    EXPECT_THROW(ops::Topk(M, 0, 1), std::runtime_error);  // 公共契约要求 k >= 1
+    EXPECT_THROW(ops::Topk(M, -1, 1), std::runtime_error);  // k < 0
+
+    // 平局数据的 topk：稳定次序同样生效（相等取更靠前的下标）。
+    const ops::TopkResult tie_tk = ops::Topk(ties, 2);
+    expect_close(host_values<float>(tie_tk.values), {3, 3}, "topk ties values");
+    EXPECT_EQ(host_values<int64_t>(tie_tk.indices), (std::vector<int64_t>{0, 2}));
+
+    // 边界：单元素、全相同元素、空张量。
+    std::vector<float> one_v{7.0f};
+    const Tensor one = moved_to(Tensor(one_v, std::vector<int64_t>{1}), kTestDevice);
+    const ops::SortResult one_s = ops::Sort(one);
+    expect_close(host_values<float>(one_s.values), {7.0f}, "sort single");
+    EXPECT_EQ(host_values<int64_t>(one_s.indices), (std::vector<int64_t>{0}));
+
+    std::vector<float> same(9, 2.5f);
+    const Tensor same_cpu(same, std::vector<int64_t>{3, 3});
+    const Tensor same_dev = moved_to(Tensor(same, std::vector<int64_t>{3, 3}), kTestDevice);
+    const ops::SortResult same_s = ops::Sort(same_dev, 1);
+    EXPECT_EQ(host_values<int64_t>(same_s.indices), host_values<int64_t>(
+        ops::Sort(same_cpu, 1).indices));
+
+    const Tensor empty = moved_to(Tensor(std::vector<int64_t>{2, 0}, DataType::FLOAT32),
+                                  kTestDevice);
+    const ops::SortResult empty_s = ops::Sort(empty, 1);
+    EXPECT_EQ(shape_of(empty_s.values), (std::vector<int64_t>{2, 0}));
+    EXPECT_THROW(ops::Topk(empty, 1, 1), std::runtime_error);  // 轴长为 0，k >= 1 无可取
+
+    // 设备 vs CPU：多种轴长（含小/大两条内核路径的边界）的随机数据，值与下标
+    // 全部对齐。随机数用确定性 LCG，不依赖平台 RNG。
+    auto next_rand = [](uint32_t& s) {
+        s = s * 1664525u + 1013904223u;
+        return static_cast<float>(static_cast<int32_t>(s >> 8) % 100) / 7.0f - 7.0f;
+    };
+    for (int64_t n : {1, 2, 3, 7, 31, 32, 33, 64, 100, 257, 1000}) {
+        const int64_t outer = 3;
+        uint32_t seed = 0x9e3779b9u ^ static_cast<uint32_t>(n);
+        std::vector<float> rv(static_cast<size_t>(outer * n));
+        for (auto& x : rv) x = next_rand(seed);
+        // 掺入平局：把 1/4 的值量化到同一格。
+        for (size_t i = 0; i < rv.size(); ++i)
+            if (i % 4 == 0) rv[i] = static_cast<float>(static_cast<int>(rv[i]));
+
+        const Tensor rc(rv, std::vector<int64_t>{outer, n});
+        const Tensor rd = moved_to(Tensor(rv, std::vector<int64_t>{outer, n}), kTestDevice);
+        const ops::SortResult cs = ops::Sort(rc, 1);
+        const ops::SortResult ds = ops::Sort(rd, 1);
+        EXPECT_EQ(host_values<float>(ds.values), host_values<float>(cs.values))
+            << "sort values mismatch at axis length " << n;
+        EXPECT_EQ(host_values<int64_t>(ds.indices), host_values<int64_t>(cs.indices))
+            << "sort indices mismatch at axis length " << n;
+
+        const int64_t k = std::max<int64_t>(1, n / 3);
+        const ops::TopkResult ck = ops::Topk(rc, k, 1);
+        const ops::TopkResult dk = ops::Topk(rd, k, 1);
+        EXPECT_EQ(host_values<float>(dk.values), host_values<float>(ck.values))
+            << "topk values mismatch at axis length " << n;
+        EXPECT_EQ(host_values<int64_t>(dk.indices), host_values<int64_t>(ck.indices))
+            << "topk indices mismatch at axis length " << n;
+    }
 }
 
 // ===== FR-10 / FR-12：推理关键算子的跨后端一致性 =====
@@ -944,16 +1030,20 @@ TEST_F(DeviceOps, UnsupportedOpsFailExplicitlyOnDevices) {
         EXPECT_NO_THROW(ops::Erf(T));
         GTEST_SKIP() << "the CPU backend implements every op in this list";
     }
-    // Erf 已落到每个后端（Task 3），不再属于拒绝清单；Sort/Topk 仍只有 CPU 实现。
+    // Erf（Task 3）与 Sort/Topk（Task 4）已落到每个后端；仍只有 CPU 实现的是
+    // 掩码选择/填充与损失族。
     EXPECT_NO_THROW(ops::Erf(T));
-    EXPECT_THROW(ops::Sort(T), std::runtime_error);
-    EXPECT_THROW(ops::Topk(T, 1), std::runtime_error);
+    EXPECT_NO_THROW(ops::Sort(T));
+    EXPECT_NO_THROW(ops::Topk(T, 1));
+    EXPECT_THROW(ops::MaskedSelect(T, pred), std::runtime_error);
 
-    // 错误必须点名后端，而不是悄悄退回 CPU 或先算出错误结果。
+    // 错误必须点名后端与算子，而不是悄悄退回 CPU 或先算出错误结果。
     try {
-        (void)ops::Sort(T);
+        (void)ops::MaskedSelect(T, pred);
     } catch (const std::runtime_error& e) {
         EXPECT_NE(std::string(e.what()).find(device_to_string(kTestDevice)), std::string::npos)
+            << e.what();
+        EXPECT_NE(std::string(e.what()).find("masked_select"), std::string::npos)
             << e.what();
     }
 }

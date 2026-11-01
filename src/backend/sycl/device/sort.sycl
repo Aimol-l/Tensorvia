@@ -1,0 +1,174 @@
+// sort / topk：沿被排序的轴对每个 (outer, inner) 列独立排序。与 CUDA 后端同一
+// 套结构：排序键是 (值, 原始下标) 对——下标做次级键，天然稳定，与 CPU 的
+// std::stable_sort 语义逐位一致（平局时更靠前的下标在前）。
+//
+//   n <= 32    一个工作项一列，私有内存插入排序；
+//   n <= 1024  一个工作组一列，本地内存 bitonic（补齐到 2 的幂，尾部哨兵排在
+//              最后，只写前 keep 个）；
+// 轴长超过 1024 由宿主侧显式抛错。
+#include "common.h"
+
+using namespace tvv::sycl_dev;
+namespace contract = tvv::sycl_dev::contract;
+
+namespace {
+
+// 轴长上限：本地内存按 padded * sizeof(Pair<T>) 申请，double 的 1024 对是 16KB。
+inline constexpr int kSmallAxis = 32;
+inline constexpr int kMaxSortAxis = 1024;
+
+// (值, 下标) 对。int32 下标够用：轴长上限 1024，内核只在轴内编号，写出时再拓宽。
+template <class T>
+struct Pair {
+    T v;
+    int32_t i;
+};
+
+// 全序：先比值；相等比下标（稳定）。
+template <class T>
+inline bool pair_before(T va, int32_t ia, T vb, int32_t ib, bool desc) {
+    if (va == vb) return ia < ib;
+    return desc ? (vb < va) : (va < vb);
+}
+
+// 路径 A：一个工作项一列，插入排序。
+template <class T>
+void sort_small_kernel(::sycl::queue& q, const T* in, T* out_vals, int64_t* out_idx,
+                       const tvv::sycl::SortAxis& p) {
+    q.parallel_for(range_of(p.outer * p.inner), [=](::sycl::id<1> id) {
+        const int64_t col = static_cast<int64_t>(id[0]);
+        const int64_t o = col / p.inner;
+        const int64_t c = col % p.inner;
+        const T* base = in + o * p.n * p.inner + c;
+
+        Pair<T> pairs[kSmallAxis];
+        const int nn = static_cast<int>(p.n);
+        for (int i = 0; i < nn; ++i) {
+            pairs[i].v = base[static_cast<int64_t>(i) * p.inner];
+            pairs[i].i = static_cast<int32_t>(i);
+        }
+        for (int i = 1; i < nn; ++i) {
+            const Pair<T> cur = pairs[i];
+            int j = i - 1;
+            while (j >= 0 && pair_before(cur.v, cur.i, pairs[j].v, pairs[j].i,
+                                         p.descending != 0)) {
+                pairs[j + 1] = pairs[j];
+                --j;
+            }
+            pairs[j + 1] = cur;
+        }
+
+        T* dv      = out_vals + o * p.keep * p.inner + c;
+        int64_t* di = out_idx + o * p.keep * p.inner + c;
+        const int keep = static_cast<int>(p.keep);
+        for (int i = 0; i < keep; ++i) {
+            dv[static_cast<int64_t>(i) * p.inner] = pairs[i].v;
+            di[static_cast<int64_t>(i) * p.inner] = pairs[i].i;
+        }
+    });
+}
+
+// 路径 B：一个工作组一列，本地内存 bitonic。
+template <class T>
+void sort_block_kernel(::sycl::queue& q, const T* in, T* out_vals, int64_t* out_idx,
+                       const tvv::sycl::SortAxis& p) {
+    q.submit([&](::sycl::handler& h) {
+        ::sycl::local_accessor<Pair<T>, 1> s(
+            ::sycl::range<1>(static_cast<size_t>(p.padded)), h);
+        h.parallel_for(
+            ::sycl::nd_range<1>(
+                ::sycl::range<1>(static_cast<size_t>(p.outer * p.inner) * kWorkGroup),
+                ::sycl::range<1>(kWorkGroup)),
+            [=](::sycl::nd_item<1> item) {
+                const int64_t col = static_cast<int64_t>(item.get_group(0));
+                const int64_t o = col / p.inner;
+                const int64_t c = col % p.inner;
+                const T* base = in + o * p.n * p.inner + c;
+                const bool desc = p.descending != 0;
+                const int P = static_cast<int>(p.padded);
+                const size_t lid = item.get_local_id(0);
+
+                // 装载 + 哨兵补齐：升序取最大值、降序取最小值，下标取 INT32_MAX，
+                // 于是哨兵永远排在末尾。
+                const T sentinel = desc ? lowest_finite<T>() : max_finite<T>();
+                for (int i = static_cast<int>(lid); i < P;
+                     i += static_cast<int>(item.get_local_range(0))) {
+                    if (i < static_cast<int>(p.n)) {
+                        s[static_cast<size_t>(i)].v =
+                            base[static_cast<int64_t>(i) * p.inner];
+                        s[static_cast<size_t>(i)].i = static_cast<int32_t>(i);
+                    } else {
+                        s[static_cast<size_t>(i)].v = sentinel;
+                        s[static_cast<size_t>(i)].i =
+                            std::numeric_limits<int32_t>::max();
+                    }
+                }
+                item.barrier(::sycl::access::fence_space::local_space);
+
+                for (int k = 2; k <= P; k <<= 1) {
+                    for (int j = k >> 1; j > 0; j >>= 1) {
+                        for (int i = static_cast<int>(lid); i < P;
+                             i += static_cast<int>(item.get_local_range(0))) {
+                            const int l = i ^ j;
+                            if (l <= i) continue;
+                            const Pair<T> a = s[static_cast<size_t>(i)];
+                            const Pair<T> b = s[static_cast<size_t>(l)];
+                            bool do_swap;
+                            if ((i & k) == 0)
+                                do_swap = pair_before(b.v, b.i, a.v, a.i, desc);
+                            else
+                                do_swap = pair_before(a.v, a.i, b.v, b.i, desc);
+                            if (do_swap) {
+                                s[static_cast<size_t>(i)] = b;
+                                s[static_cast<size_t>(l)] = a;
+                            }
+                        }
+                        item.barrier(::sycl::access::fence_space::local_space);
+                    }
+                }
+
+                T* dv      = out_vals + o * p.keep * p.inner + c;
+                int64_t* di = out_idx + o * p.keep * p.inner + c;
+                const int keep = static_cast<int>(p.keep);
+                for (int i = static_cast<int>(lid); i < keep;
+                     i += static_cast<int>(item.get_local_range(0))) {
+                    dv[static_cast<int64_t>(i) * p.inner] = s[static_cast<size_t>(i)].v;
+                    di[static_cast<int64_t>(i) * p.inner] = s[static_cast<size_t>(i)].i;
+                }
+            });
+    });
+}
+
+}  // namespace
+
+extern "C" {
+
+int sycl_c_launch_sort(void* ctx, const void* in, void* out_vals, void* out_idx,
+                       int dtype, const tvv::sycl::SortAxis* p) {
+    if (ctx == nullptr || in == nullptr || out_vals == nullptr || out_idx == nullptr ||
+        p == nullptr)
+        return tvv::sycl::kSyclInvalid;
+    if (p->n <= 0 || p->keep <= 0 || p->outer * p->inner <= 0) return tvv::sycl::kSyclOk;
+    try {
+        auto& q = queue_of(ctx);
+        return dispatch_dtype(dtype, [&](auto tag) -> int {
+            using T = typename decltype(tag)::type;
+            if (p->n <= kSmallAxis) {
+                sort_small_kernel<T>(q, static_cast<const T*>(in),
+                                     static_cast<T*>(out_vals),
+                                     static_cast<int64_t*>(out_idx), *p);
+            } else {
+                sort_block_kernel<T>(q, static_cast<const T*>(in),
+                                     static_cast<T*>(out_vals),
+                                     static_cast<int64_t*>(out_idx), *p);
+            }
+            return tvv::sycl::kSyclOk;
+        });
+    } catch (const std::exception& e) {
+        return record_failure(e);
+    } catch (...) {
+        return record_failure();
+    }
+}
+
+}  // extern "C"

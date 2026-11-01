@@ -71,7 +71,7 @@
 | `Sin` | native | native | native | native |  |
 | `Slice` | native | native | native | native |  |
 | `Softmax` | native | native | native | native |  |
-| `Sort` | native | unsupported | unsupported | unsupported | execute_on 无设备特化，抛 not implemented |
+| `Sort` | native | native | native | native |  |
 | `Split` | emulated | emulated | emulated | emulated | narrow 视图切片，纯视图无内核 |
 | `Sqrt` | native | native | native | native |  |
 | `Stack` | emulated | emulated | emulated | emulated | unsqueeze 视图 + Concat |
@@ -80,7 +80,7 @@
 | `Sum` | native | native | native | native |  |
 | `Tan` | native | native | native | native |  |
 | `Tanh` | native | native | native | native |  |
-| `Topk` | native | unsupported | unsupported | unsupported | execute_on 无设备特化，抛 not implemented |
+| `Topk` | native | native | native | native |  |
 | `Transpose` | native | native | native | native |  |
 | `Typecast` | native | native | native | native |  |
 | `Var` | native | emulated | emulated | emulated | Mean/Sub/Mul 组合（var_composed） |
@@ -92,9 +92,9 @@
 | 后端 | native | emulated | unsupported | 支持率 |
 |------|--------|----------|-------------|--------|
 | CPU | 65 | 12 | 0 | 100.0% |
-| CUDA | 49 | 21 | 7 | 90.9% |
-| SYCL | 49 | 21 | 7 | 90.9% |
-| VULKAN | 49 | 21 | 7 | 90.9% |
+| CUDA | 51 | 21 | 5 | 93.5% |
+| SYCL | 51 | 21 | 5 | 93.5% |
+| VULKAN | 51 | 21 | 5 | 93.5% |
 
 支持率 = (native + emulated) / 算子总数（77）。
 

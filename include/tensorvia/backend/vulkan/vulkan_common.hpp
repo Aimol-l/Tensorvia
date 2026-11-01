@@ -176,6 +176,19 @@ struct CumsumParams {
     int32_t inner;
 };
 
+// sort / topk：输入视为 outer x n x inner，每个 (outer, inner) 列独立排序，输出
+// 排好序的前 keep 个（sort 的 keep = n，topk 的 keep = k；descending 对应 topk
+// 的 largest）。`padded` 是 n 补齐到的 2 的幂，只有 block 路径的 bitonic 网络用。
+// 全部 32 位：Vulkan 后端的元素下标本来就是 32 位。
+struct SortParams {
+    int32_t outer;
+    int32_t n;
+    int32_t inner;
+    int32_t keep;
+    int32_t padded;
+    int32_t descending;
+};
+
 // conv2d。全部 32 位：Vulkan 后端的元素下标本来就是 32 位，超过 INT32_MAX 的
 // 张量在分配期就被拒绝了（vulkan_detail::require_int32_indexable）。
 // `has_bias == 0` 时着色器不读 binding 2——那一格绑定的是权重 buffer，仅为满足

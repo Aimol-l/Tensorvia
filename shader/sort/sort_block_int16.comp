@@ -1,0 +1,98 @@
+#version 460
+
+#extension GL_EXT_shader_16bit_storage : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int16 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform Params {
+    int outer;
+    int n;
+    int inner;
+    int keep;
+    int padded;      // 只有 block 路径用：n 补齐到的 2 的幂
+    int descending;  // 1 = 降序（topk 的 largest）
+} params;
+
+layout(std430, binding = 0) buffer InputA {
+    int16_t data[];
+} src;
+
+layout(std430, binding = 1) buffer OutputVals {
+    int16_t data[];
+} dstv;
+
+layout(std430, binding = 2) buffer OutputIdx {
+    int64_t data[];
+} dsti;
+
+// 补齐槽位用 real 标志而不是魔数值：real=false 永远排在真实元素之后，值无所谓，
+// 于是不需要按 dtype 造 sentinel。比较器是严格弱序（两个哨兵互相等价），
+// bitonic 网络对任意全序都产出按该序排列的结果。
+struct BPair {
+    int16_t v;
+    int   i;
+    int   real;
+};
+
+bool bpair_before(BPair a, BPair b, bool desc) {
+    if (a.real != b.real) return a.real != 0;
+    if (a.real == 0) return false;
+    if (a.v == b.v) return a.i < b.i;
+    return desc ? (b.v < a.v) : (a.v < b.v);
+}
+
+shared BPair sharedMem[1024];
+
+void main() {
+    const int columns = params.outer * params.inner;
+    const int col = int(gl_WorkGroupID.x);
+    if (col >= columns) return;
+    const int o = col / params.inner;
+    const int c = col % params.inner;
+    const int base = (o * params.n) * params.inner + c;
+    const bool desc = params.descending != 0;
+    const int P = params.padded;
+    const int lid = int(gl_LocalInvocationID.x);
+
+    for (int i = lid; i < P; i += 256) {
+        if (i < params.n) {
+            sharedMem[i].v = src.data[base + i * params.inner];
+            sharedMem[i].i = i;
+            sharedMem[i].real = 1;
+        } else {
+            sharedMem[i].v = int16_t(0);
+            sharedMem[i].i = 0;
+            sharedMem[i].real = 0;
+        }
+    }
+    barrier();
+
+    for (int k = 2; k <= P; k <<= 1) {
+        for (int j = k >> 1; j > 0; j >>= 1) {
+            for (int i = lid; i < P; i += 256) {
+                const int l = i ^ j;
+                if (l <= i) continue;
+                const BPair a = sharedMem[i];
+                const BPair b = sharedMem[l];
+                bool do_swap;
+                if ((i & k) == 0)
+                    do_swap = bpair_before(b, a, desc);  // 升序段
+                else
+                    do_swap = bpair_before(a, b, desc);  // 降序段
+                if (do_swap) {
+                    sharedMem[i] = b;
+                    sharedMem[l] = a;
+                }
+            }
+            barrier();
+        }
+    }
+
+    const int out_base = (o * params.keep) * params.inner + c;
+    for (int i = lid; i < params.keep; i += 256) {
+        dstv.data[out_base + i * params.inner] = sharedMem[i].v;
+        dsti.data[out_base + i * params.inner] = int64_t(sharedMem[i].i);
+    }
+}
