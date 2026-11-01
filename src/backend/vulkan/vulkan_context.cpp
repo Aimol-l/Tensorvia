@@ -281,6 +281,8 @@ void VulkanContext::registerPipelines() {
     registerOp(OpType::SumVec, AllTypes, 2, sizeof(SoftmaxParams));
 
     registerOp(OpType::Mean, AllTypes, 2, sizeof(SoftmaxParams));
+    registerOp(OpType::Prod, AllTypes, 2, sizeof(int64_t));
+    registerOp(OpType::ProdVec, AllTypes, 2, sizeof(SoftmaxParams));
     registerOp(OpType::Min, AllTypes, 2, sizeof(int64_t));
     registerOp(OpType::MinVec, AllTypes, 2, sizeof(SoftmaxParams));
     registerOp(OpType::Argmax, AllTypes, 2, sizeof(SoftmaxParams));

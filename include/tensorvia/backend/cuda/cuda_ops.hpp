@@ -138,6 +138,10 @@ template <> struct MeanImpl<Device::CUDA> {
     static float execute(const Tensor& a);
     static Tensor execute(const Tensor& a, int axis);
 };
+template <> struct ProdImpl<Device::CUDA> {
+    static float execute(const Tensor& a);
+    static Tensor execute(const Tensor& a, int axis);
+};
 template <> struct ArgMaxImpl<Device::CUDA> {
     static Tensor execute(const Tensor& a, int axis);
 };

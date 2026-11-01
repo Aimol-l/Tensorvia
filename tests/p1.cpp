@@ -524,6 +524,89 @@ TEST_F(DeviceOps, NormAndSoftmaxFamilyMatchesCpu) {
     expect_same_as_cpu(ops::RmsNorm(dev, dw, 1), ops::RmsNorm(cpu, w, 1), kTestDevice, "rms_norm");
 }
 
+// Prod 的语义基线（与 PyTorch 的 torch.prod 对照）：全归约返回 0-dim、单/多轴、
+// keepdim、负轴、空张量（空乘积为 1）、整型提升到 INT64、dtype 限定、BOOL 拒绝。
+// 参考值是手算的确定值，不经过被测代码；设备结果与 CPU 参考逐项比对。
+TEST_F(DeviceOps, ProdReductionMatchesReference) {
+    const Tensor cpu = from_values<float>({1, 2, 3, 4}, {2, 2});
+    const Tensor dev = moved_to(from_values<float>({1, 2, 3, 4}, {2, 2}), kTestDevice);
+
+    // 全归约：0-dim，空集合之外的最小情形 1*2*3*4 = 24。
+    const Tensor full = ops::Prod(dev);
+    EXPECT_EQ(full.device(), kTestDevice);
+    EXPECT_EQ(full.dims(), 0);
+    EXPECT_FLOAT_EQ(full.item<float>(), 24.0f);
+    expect_same_as_cpu(ops::Prod(dev), ops::Prod(cpu), kTestDevice, "prod full");
+
+    // 单轴与负轴：axis 0 → [3, 8]；axis 1 → [2, 12]；-1 与 1 等价。
+    expect_same_as_cpu(ops::Prod(dev, 0), ops::Prod(cpu, 0), kTestDevice, "prod axis 0");
+    expect_same_as_cpu(ops::Prod(dev, 1), ops::Prod(cpu, 1), kTestDevice, "prod axis 1");
+    expect_same_as_cpu(ops::Prod(dev, -1), ops::Prod(cpu, -1), kTestDevice, "prod axis -1");
+
+    // keepdim：被归约的轴保留为长度 1。
+    const Tensor kd = ops::Prod(dev, 1, true);
+    EXPECT_EQ(shape_of(kd), (std::vector<int64_t>{2, 1}));
+    expect_close(host_values<float>(kd), {2.0f, 12.0f}, "prod keepdim");
+
+    // 多轴：initializer_list 与 vector 两条重载；keepdim 的多轴结果是 {1,1}。
+    const Tensor both = ops::Prod(dev, {0, 1});
+    EXPECT_EQ(both.dims(), 0);
+    EXPECT_FLOAT_EQ(both.item<float>(), 24.0f);
+    const Tensor both_kd = ops::Prod(dev, std::vector<int64_t>{0, 1}, true);
+    EXPECT_EQ(shape_of(both_kd), (std::vector<int64_t>{1, 1}));
+    expect_same_as_cpu(ops::Prod(dev, {0, 1}), ops::Prod(cpu, {0, 1}), kTestDevice,
+                       "prod multi-axis");
+
+    // dtype 限定：先按归约规则求值再 cast，FLOAT64 保持 FLOAT64。
+    const Tensor as_f64 = ops::Prod(dev, DataType::FLOAT64);
+    EXPECT_EQ(as_f64.dtype(), DataType::FLOAT64);
+    EXPECT_FLOAT_EQ(as_f64.item<double>(), 24.0);
+
+    // 3-D 双轴归约：{2,2,3} 归约 {1,2} → {2}；1..6 与 7..12 两段各自连乘。
+    const Tensor cpu3 = from_values<float>({1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}, {2, 2, 3});
+    const Tensor dev3 = moved_to(
+        from_values<float>({1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}, {2, 2, 3}), kTestDevice);
+    expect_same_as_cpu(ops::Prod(dev3, {1, 2}), ops::Prod(cpu3, {1, 2}), kTestDevice,
+                       "prod 3d two axes");
+    expect_close(host_values<float>(ops::Prod(dev3, {1, 2})), {720.0f, 665280.0f},
+                 "prod 3d two axes values");
+
+    // 非连续输入：切末维的 narrow 是跨步视图，按 strided 路径物化，结果与 CPU 一致。
+    const Tensor cpu_s = from_values<float>({1, 2, 3, 4, 5, 6}, {2, 3});
+    const Tensor dev_s = moved_to(from_values<float>({1, 2, 3, 4, 5, 6}, {2, 3}), kTestDevice);
+    const Tensor cpu_t = cpu_s.narrow(1, 1, 2);   // [[2,3],[5,6]]，跨步视图
+    const Tensor dev_t = dev_s.narrow(1, 1, 2);
+    EXPECT_FALSE(dev_t.is_contiguous());
+    expect_same_as_cpu(ops::Prod(dev_t, 1), ops::Prod(cpu_t, 1), kTestDevice,
+                       "prod on a strided view");
+    expect_same_as_cpu(ops::Prod(dev_t), ops::Prod(cpu_t), kTestDevice,
+                       "prod full on a strided view");
+
+    // 空张量：空乘积为 1（全归约 0-dim；空轴归约出全 1）。
+    const Tensor empty = moved_to(Tensor(std::vector<int64_t>{0}, DataType::FLOAT32),
+                                  kTestDevice);
+    const Tensor empty_full = ops::Prod(empty);
+    EXPECT_EQ(empty_full.dims(), 0);
+    EXPECT_FLOAT_EQ(empty_full.item<float>(), 1.0f);
+    const Tensor empty_axis = ops::Prod(
+        moved_to(Tensor(std::vector<int64_t>{2, 0}, DataType::FLOAT32), kTestDevice), 1);
+    expect_close(host_values<float>(empty_axis), {1.0f, 1.0f}, "prod over an empty axis");
+
+    // 整型提升：INT32/INT64 输入的归约结果是 INT64（reduction_type 规则）。
+    const Tensor ints = moved_to(from_values<int32_t>({2, 3, 4}, {3}), kTestDevice);
+    const Tensor int_full = ops::Prod(ints);
+    EXPECT_EQ(int_full.dtype(), DataType::INT64);
+    EXPECT_EQ(int_full.item<int64_t>(), 24);
+    const Tensor int_axis = ops::Prod(
+        moved_to(from_values<int64_t>({2, 3, 4, 5}, {2, 2}), kTestDevice), 0);
+    EXPECT_EQ(int_axis.dtype(), DataType::INT64);
+    expect_close(host_values<int64_t>(int_axis), {8, 15}, "prod int64 axis");
+
+    // BOOL 拒绝：归约结果是数值，谓词形式请用 All/Any。
+    const Tensor flag = moved_to(Tensor::Zeros({3}, DataType::BOOL), kTestDevice);
+    EXPECT_THROW(ops::Prod(flag), std::runtime_error);
+}
+
 TEST_F(DeviceOps, GeneratorsLandOnTheDevice) {
     TensorOptions opts(DataType::FLOAT32);
     opts.with_device(kTestDevice, 0);

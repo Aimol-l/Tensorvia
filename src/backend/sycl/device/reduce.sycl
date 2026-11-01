@@ -22,6 +22,11 @@ void reduce_all_kernel(sycl::queue& q, const T* in, Out* out, int64_t numel, int
                                for (int64_t i = static_cast<int64_t>(lid); i < numel;
                                     i += static_cast<int64_t>(n))
                                    acc += static_cast<Acc>(to_compute<Acc>(in[i]));
+                           } else if (op == tvv::sycl::kReduceProd) {
+                               acc = Acc(1);
+                               for (int64_t i = static_cast<int64_t>(lid); i < numel;
+                                    i += static_cast<int64_t>(n))
+                                   acc *= static_cast<Acc>(to_compute<Acc>(in[i]));
                            } else if (op == tvv::sycl::kReduceMin) {
                                acc = max_finite<Acc>();
                                for (int64_t i = static_cast<int64_t>(lid); i < numel;
@@ -42,6 +47,8 @@ void reduce_all_kernel(sycl::queue& q, const T* in, Out* out, int64_t numel, int
                                    const Acc b = sdata[lid + s];
                                    if (op == tvv::sycl::kReduceSum)
                                        sdata[lid] = static_cast<Acc>(a + b);
+                                   else if (op == tvv::sycl::kReduceProd)
+                                       sdata[lid] = static_cast<Acc>(a * b);
                                    else if (op == tvv::sycl::kReduceMin)
                                        sdata[lid] = contract::min_contract(a, b);
                                    else
@@ -70,6 +77,10 @@ void reduce_axis_kernel(sycl::queue& q, const T* in, Out* out,
             acc = Acc(0);
             for (int64_t k = 0; k < p.axis; ++k)
                 acc += static_cast<Acc>(to_compute<Acc>(in[base + k * p.inner]));
+        } else if (op == tvv::sycl::kReduceProd) {
+            acc = Acc(1);
+            for (int64_t k = 0; k < p.axis; ++k)
+                acc *= static_cast<Acc>(to_compute<Acc>(in[base + k * p.inner]));
         } else if (op == tvv::sycl::kReduceMin) {
             acc = to_compute<Acc>(in[base]);
             for (int64_t k = 1; k < p.axis; ++k)

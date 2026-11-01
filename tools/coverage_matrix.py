@@ -302,26 +302,36 @@ class Matrix:
 def _verify_evidence(root: pathlib.Path, entry: Entry) -> None:
     if not entry.evidence:
         return
-    m = re.fullmatch(r"(.+):(\d+)", entry.evidence.strip())
+    m = re.fullmatch(r"(.+):(\d+|\w+)", entry.evidence.strip())
     if not m:
         raise CoverageError(
-            f"[{entry.section}]: {entry.op}: evidence must be 'path:line', got {entry.evidence!r}")
-    rel, lineno = m.group(1), int(m.group(2))
+            f"[{entry.section}]: {entry.op}: evidence must be 'path:line' or "
+            f"'path:Symbol', got {entry.evidence!r}")
+    rel, anchor = m.group(1), m.group(2)
     path = root / rel
     if not path.is_file():
         raise CoverageError(f"[{entry.section}]: {entry.op}: evidence file not found: {rel}")
     lines = path.read_text(encoding="utf-8").splitlines()
-    if not 1 <= lineno <= len(lines):
+    if anchor.isdigit():
+        lineno = int(anchor)
+        if not 1 <= lineno <= len(lines):
+            raise CoverageError(
+                f"[{entry.section}]: {entry.op}: evidence line {lineno} out of range in {rel}")
+        line = lines[lineno - 1].lower()
+        # 接受算子名本身、Impl 名、以及 snake_case 形式（LogSoftmax → log_softmax_composed）。
+        tokens = {entry.op.lower(), f"{entry.op.lower()}impl",
+                  re.sub(r"(?<!^)(?=[A-Z])", "_", entry.op).lower()}
+        if not any(t in line for t in tokens):
+            raise CoverageError(
+                f"[{entry.section}]: {entry.op}: evidence {rel}:{lineno} does not mention "
+                f"{entry.op} — stale line number?")
+        return
+    # 符号锚点：文件里必须有一处 `Symbol(`。行号会因无关编辑漂移，函数名不会。
+    pattern = re.compile(rf"(?<!\w){re.escape(anchor)}\s*\(")
+    if not any(pattern.search(line) for line in lines):
         raise CoverageError(
-            f"[{entry.section}]: {entry.op}: evidence line {lineno} out of range in {rel}")
-    line = lines[lineno - 1].lower()
-    # 接受算子名本身、Impl 名、以及 snake_case 形式（LogSoftmax → log_softmax_composed）。
-    tokens = {entry.op.lower(), f"{entry.op.lower()}impl",
-              re.sub(r"(?<!^)(?=[A-Z])", "_", entry.op).lower()}
-    if not any(t in line for t in tokens):
-        raise CoverageError(
-            f"[{entry.section}]: {entry.op}: evidence {rel}:{lineno} does not mention "
-            f"{entry.op} — stale line number?")
+            f"[{entry.section}]: {entry.op}: evidence {rel}:{anchor} — no line in {rel} "
+            f"mentions {anchor}( — stale anchor?")
 
 
 def _match_public(impl_base: str, public: set[str], where: str) -> str:

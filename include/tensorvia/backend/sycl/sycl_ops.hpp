@@ -138,6 +138,10 @@ template <> struct MeanImpl<Device::SYCL> {
     static float execute(const Tensor& a);
     static Tensor execute(const Tensor& a, int axis);
 };
+template <> struct ProdImpl<Device::SYCL> {
+    static float execute(const Tensor& a);
+    static Tensor execute(const Tensor& a, int axis);
+};
 template <> struct ArgMaxImpl<Device::SYCL> {
     static Tensor execute(const Tensor& a, int axis);
 };

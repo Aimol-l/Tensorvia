@@ -33,6 +33,9 @@ __global__ void reduce_all_kernel(const T* in, Out* out, int64_t numel, int op) 
     if (op == kReduceSum) {
         acc = Acc(0);
         for (int64_t i = idx; i < numel; i += stride) acc += static_cast<Acc>(to_compute<Acc>(in[i]));
+    } else if (op == kReduceProd) {
+        acc = Acc(1);
+        for (int64_t i = idx; i < numel; i += stride) acc *= static_cast<Acc>(to_compute<Acc>(in[i]));
     } else if (op == kReduceMin) {
         acc = max_finite<Acc>();
         for (int64_t i = idx; i < numel; i += stride)
@@ -49,6 +52,7 @@ __global__ void reduce_all_kernel(const T* in, Out* out, int64_t numel, int op) 
             Acc a = sdata[threadIdx.x];
             const Acc b = sdata[threadIdx.x + s];
             if (op == kReduceSum) sdata[threadIdx.x] = a + b;
+            else if (op == kReduceProd) sdata[threadIdx.x] = a * b;
             else if (op == kReduceMin) sdata[threadIdx.x] = contract::min_contract(a, b);
             else sdata[threadIdx.x] = contract::max_contract(a, b);
         }
@@ -73,6 +77,9 @@ __global__ void reduce_axis_kernel(const T* in, Out* out, ReduceAxis p, int op) 
         if (op == kReduceSum || op == kReduceMean) {
             acc = Acc(0);
             for (int64_t i = 0; i < p.axis; ++i) acc += static_cast<Acc>(to_compute<Acc>(in[base + i * p.inner]));
+        } else if (op == kReduceProd) {
+            acc = Acc(1);
+            for (int64_t i = 0; i < p.axis; ++i) acc *= static_cast<Acc>(to_compute<Acc>(in[base + i * p.inner]));
         } else if (op == kReduceMin) {
             acc = to_compute<Acc>(in[base]);
             for (int64_t i = 1; i < p.axis; ++i)
@@ -408,6 +415,15 @@ float MeanImpl<Device::CUDA>::execute(const Tensor& a) {
     // 用 double 做除法：超过 2^24 后 float 除数不再精确。
     const double sum = reduce_all_value(a, tvv::cuda::kReduceSum, "Mean");
     return static_cast<float>(sum / static_cast<double>(a.numel()));
+}
+
+float ProdImpl<Device::CUDA>::execute(const Tensor& a) {
+    return static_cast<float>(reduce_all_value(a, tvv::cuda::kReduceProd, "Prod"));
+}
+
+Tensor ProdImpl<Device::CUDA>::execute(const Tensor& a, int axis) {
+    // Prod 与 Sum 同族：窄整型与 16 位浮点拓宽到 reduction_type 再累加。
+    return axis_reduce(a, axis, reduction_type(a.dtype()), tvv::cuda::kReduceProd, "Prod");
 }
 
 Tensor MeanImpl<Device::CUDA>::execute(const Tensor& a, int axis) {

@@ -64,6 +64,7 @@ inline constexpr int kReduceSum  = 0;
 inline constexpr int kReduceMin  = 1;
 inline constexpr int kReduceMax  = 2;
 inline constexpr int kReduceMean = 3;
+inline constexpr int kReduceProd = 4;
 
 inline constexpr int kCmpEqual        = 0;
 inline constexpr int kCmpNotEqual     = 1;

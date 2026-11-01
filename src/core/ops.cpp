@@ -1344,8 +1344,7 @@ Tensor Prod(const Tensor& a, int axis, bool keepdim) {
     if (numel_of(out_shape) == 0) return empty_on(a, out_shape, out_type);
     Tensor storage;
     const Tensor& A = prepare_reduce_input(a, storage, axis);
-    require_cpu(A, "prod");
-    return with_reduced_shape(ProdImpl<Device::CPU>::execute(A, axis), a.shape(), axis, keepdim);
+    return with_reduced_shape(execute_on<ProdImpl>(A.device_id(), A, axis), a.shape(), axis, keepdim);
 }
 Tensor Var(const Tensor& a, int axis, bool keepdim) {
     require_live(a);

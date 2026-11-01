@@ -59,7 +59,7 @@
 | `Ones` | native | native | native | native |  |
 | `Pad` | emulated | emulated | emulated | emulated | narrow 裁剪 + 常量块 Concat |
 | `Pow` | native | native | native | native |  |
-| `Prod` | native | unsupported | unsupported | unsupported | require_cpu 显式拒绝 |
+| `Prod` | native | native | native | native |  |
 | `Randn` | native | emulated | emulated | emulated | 宿主生成后 to_device 搬运 |
 | `Random` | native | native | native | native |  |
 | `Relu` | native | native | native | native |  |
@@ -92,9 +92,9 @@
 | 后端 | native | emulated | unsupported | 支持率 |
 |------|--------|----------|-------------|--------|
 | CPU | 65 | 12 | 0 | 100.0% |
-| CUDA | 47 | 21 | 9 | 88.3% |
-| SYCL | 47 | 21 | 9 | 88.3% |
-| VULKAN | 47 | 21 | 9 | 88.3% |
+| CUDA | 48 | 21 | 8 | 89.6% |
+| SYCL | 48 | 21 | 8 | 89.6% |
+| VULKAN | 48 | 21 | 8 | 89.6% |
 
 支持率 = (native + emulated) / 算子总数（77）。
 

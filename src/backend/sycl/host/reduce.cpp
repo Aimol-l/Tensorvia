@@ -169,6 +169,15 @@ float MeanImpl<Device::SYCL>::execute(const Tensor& a) {
     return static_cast<float>(sum / static_cast<double>(a.numel()));
 }
 
+float ProdImpl<Device::SYCL>::execute(const Tensor& a) {
+    return static_cast<float>(reduce_all_value(a, tvv::sycl::kReduceProd, "Prod"));
+}
+
+Tensor ProdImpl<Device::SYCL>::execute(const Tensor& a, int axis) {
+    // Prod 与 Sum 同族：窄整型与 16 位浮点拓宽到 reduction_type 再累加。
+    return axis_reduce(a, axis, reduction_type(a.dtype()), tvv::sycl::kReduceProd, "Prod");
+}
+
 Tensor MeanImpl<Device::SYCL>::execute(const Tensor& a, int axis) {
     return axis_reduce(a, axis, float_reduction_type(a.dtype()),
                        tvv::sycl::kReduceMean, "Mean");

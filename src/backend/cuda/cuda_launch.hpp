@@ -46,10 +46,11 @@ inline constexpr int kUnarySigmoid = 11;
 inline constexpr int kUnaryClamp   = 12;  // p0 = 下界，p1 = 上界
 
 // 归约算子码。
-inline constexpr int kReduceSum  = 0;
-inline constexpr int kReduceMin  = 1;
-inline constexpr int kReduceMax  = 2;
-inline constexpr int kReduceMean = 3;
+inline constexpr int kReduceSum   = 0;
+inline constexpr int kReduceMin   = 1;
+inline constexpr int kReduceMax   = 2;
+inline constexpr int kReduceMean  = 3;
+inline constexpr int kReduceProd  = 4;
 
 // 比较算子码；结果是存放 0/1 的 INT8 张量。
 inline constexpr int kCmpEqual        = 0;
