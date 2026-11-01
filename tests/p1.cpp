@@ -881,6 +881,63 @@ TEST_F(DeviceOps, ContiguousAndStridedPathsAgree) {
                        kTestDevice, "add broadcast vs cpu");
 }
 
+// div 的零分母契约：b == 0（含 -0.0）时结果是 NaN 而不是 ±inf，0/0 也是 NaN；
+// b != 0 时是 IEEE 商。Task 8 给 f32/f64 补 AVX2 快路径后这条契约必须逐位保持，
+// 所以用例同时覆盖小张量（标量尾）与含零分母的大张量（SIMD 主体）。
+TEST_F(DeviceOps, DivZeroDenominatorIsNaN) {
+    const float inf = std::numeric_limits<float>::infinity();
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    std::vector<float> av{1.0f, -1.0f, 0.0f, 3.5f, inf, -inf, 2.0f, nan, 7.0f, -7.0f,
+                          1e-30f, 5.0f};
+    std::vector<float> bv{0.0f, -0.0f, 0.0f, 2.0f, 0.0f, 0.0f, inf, 1.0f, -0.0f, 0.0f,
+                          1e30f, -0.0f};
+    const Tensor A(av, std::vector<int64_t>{12});
+    const Tensor B(bv, std::vector<int64_t>{12});
+    const std::vector<float> got = host_values<float>(ops::Div(A, B));
+    ASSERT_EQ(got.size(), av.size());
+    for (size_t i = 0; i < got.size(); ++i) {
+        if (bv[i] == 0.0f) {  // -0.0 也走这里
+            EXPECT_TRUE(std::isnan(got[i])) << "zero denominator at " << i;
+        } else {
+            const float want = av[i] / bv[i];
+            if (std::isnan(want))
+                EXPECT_TRUE(std::isnan(got[i])) << "nan quotient at " << i;
+            else
+                EXPECT_FLOAT_EQ(got[i], want) << "ieee quotient at " << i;
+        }
+    }
+
+    // 大张量：零分母每 7 个一个，确保 SIMD 主体里也有混合。
+    constexpr int64_t N = 1000;
+    std::vector<float> a2(static_cast<size_t>(N)), b2(static_cast<size_t>(N), 1.0f);
+    for (int64_t i = 0; i < N; ++i)
+        a2[static_cast<size_t>(i)] = static_cast<float>((i * 13) % 17) * 0.25f - 2.0f;
+    for (int64_t i = 0; i < N; i += 7) b2[static_cast<size_t>(i)] = 0.0f;
+    const Tensor A2(a2, std::vector<int64_t>{N});
+    const Tensor B2(b2, std::vector<int64_t>{N});
+    const std::vector<float> got2 = host_values<float>(ops::Div(A2, B2));
+    ASSERT_EQ(got2.size(), a2.size());
+    for (size_t i = 0; i < got2.size(); ++i) {
+        if (b2[i] == 0.0f)
+            EXPECT_TRUE(std::isnan(got2[i])) << "zero denominator at " << i;
+        else
+            EXPECT_FLOAT_EQ(got2[i], a2[i] / b2[i]) << "ieee quotient at " << i;
+    }
+
+    // float64 同契约（Task 8 的 f64 快路径同样要逐位保持）。
+    std::vector<double> ad{1.0, -2.5, 0.0, 4.0}, bd{0.0, 0.5, 0.0, -0.0};
+    const Tensor AD(ad, std::vector<int64_t>{4});
+    const Tensor BD(bd, std::vector<int64_t>{4});
+    const std::vector<double> gotd = host_values<double>(ops::Div(AD, BD));
+    ASSERT_EQ(gotd.size(), ad.size());
+    for (size_t i = 0; i < gotd.size(); ++i) {
+        if (bd[i] == 0.0)
+            EXPECT_TRUE(std::isnan(gotd[i])) << "f64 zero denominator at " << i;
+        else
+            EXPECT_DOUBLE_EQ(gotd[i], ad[i] / bd[i]) << "f64 ieee quotient at " << i;
+    }
+}
+
 TEST_F(DeviceOps, GeneratorsLandOnTheDevice) {
     TensorOptions opts(DataType::FLOAT32);
     opts.with_device(kTestDevice, 0);

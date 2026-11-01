@@ -70,12 +70,39 @@ void mul_kernel(T* a, float b, size_t size) {
 }
 template <typename T>
 void div_kernel(const T* RESTRICT a, const T* RESTRICT b, T* RESTRICT out, size_t size) {
-    #pragma omp parallel for if (size > 4096)
-    for (size_t i = 0; i < size; ++i) {
-        if (b[i] != T(0))
-            out[i] = static_cast<T>(a[i] / b[i]);  // 注意类型转换
-        else
-            out[i] = std::numeric_limits<T>::quiet_NaN();
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>) {
+        // f32/f64 快路径（Task 8）：编译器不为"每元素分支 b != 0"生成向量码
+        // （反汇编确认 div_kernel<float> 是标量 divss），而分支可以无损改写成先除
+        // 后混合：b == 0 -> NaN，b != 0 -> 同一个 IEEE 商。与标量路径逐位一致
+        // （0/0 两边都是 NaN；-0.0 分母两边都判零）。
+        constexpr int kWidth = std::is_same_v<T, float> ? 8 : 4;
+        const size_t vec_end = size & ~size_t(kWidth - 1);
+        const T nan_scalar = std::numeric_limits<T>::quiet_NaN();
+        #pragma omp parallel for schedule(static)
+        for (size_t i = 0; i < vec_end; i += kWidth) {
+            if constexpr (std::is_same_v<T, float>) {
+                const __m256 bb = _mm256_loadu_ps(b + i);
+                const __m256 q  = _mm256_div_ps(_mm256_loadu_ps(a + i), bb);
+                const __m256 m  = _mm256_cmp_ps(bb, _mm256_setzero_ps(), _CMP_EQ_OQ);
+                _mm256_storeu_ps(out + i, _mm256_blendv_ps(q, _mm256_set1_ps(nan_scalar), m));
+            } else {
+                const __m256d bb = _mm256_loadu_pd(b + i);
+                const __m256d q  = _mm256_div_pd(_mm256_loadu_pd(a + i), bb);
+                const __m256d m  = _mm256_cmp_pd(bb, _mm256_setzero_pd(), _CMP_EQ_OQ);
+                _mm256_storeu_pd(out + i, _mm256_blendv_pd(q, _mm256_set1_pd(nan_scalar), m));
+            }
+        }
+        for (size_t i = vec_end; i < size; ++i)
+            out[i] = b[i] != T(0) ? static_cast<T>(a[i] / b[i]) : nan_scalar;
+    } else {
+        // 整型与 16 位浮点保留标量：AVX2 没有整数除法，半精度要逐元素转换。
+        #pragma omp parallel for if (size > 4096)
+        for (size_t i = 0; i < size; ++i) {
+            if (b[i] != T(0))
+                out[i] = static_cast<T>(a[i] / b[i]);  // 注意类型转换
+            else
+                out[i] = std::numeric_limits<T>::quiet_NaN();
+        }
     }
 }
 template <typename T>

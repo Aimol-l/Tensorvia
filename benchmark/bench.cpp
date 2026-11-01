@@ -153,6 +153,39 @@ int main(int argc, char* argv[]) {
         const Phases p = measure([&] { ops::Add(a, 1.5f); });
         report("add-scalar f32 16M", p, 2.0 * double(N) * 4);
     }
+    {   // 逐元素 sub / div / relu / sigmoid / tanh / cast：SIMD 审计的对照项
+        constexpr std::int64_t N = std::int64_t{1} << 24;
+        Tensor a = Tensor::Random({N}, 0.0f, 1.0f, DT::FLOAT32, dev);
+        Tensor b = Tensor::Random({N}, 0.5f, 1.0f, DT::FLOAT32, dev);
+        Tensor d({N}, DT::FLOAT32, dev);
+        // const 引用：逼编译器选 out-of-place 重载（否则 lvalue 会命中原地版，
+        // 把被测张量改掉，后续 rep 变成无操作）。
+        const Tensor& ca = a;
+        const Tensor& cb = b;
+        const Phases sub = measure([&] { ops::Sub(ca, cb, d); });
+        report("sub f32 16M", sub, 3.0 * double(N) * 4);
+        const Phases div = measure([&] { ops::Div(ca, cb, d); });
+        report("div f32 16M", div, 3.0 * double(N) * 4);
+        // L2 常驻的小张量：访存不再是瓶颈，除法吞吐本身成为度量对象
+        // （Task 8 的 SIMD 化对照项）。
+        constexpr std::int64_t M = 1 << 20;  // 1M f32 = 4MB x 3
+        Tensor sa = Tensor::Random({M}, 0.5f, 1.0f, DT::FLOAT32, dev);
+        Tensor sb = Tensor::Random({M}, 0.5f, 1.0f, DT::FLOAT32, dev);
+        Tensor sd({M}, DT::FLOAT32, dev);
+        const Tensor& sca = sa;
+        const Tensor& scb = sb;
+        const Phases sdiv = measure([&] { ops::Div(sca, scb, sd); });
+        report("div f32 1M (L2)", sdiv, 3.0 * double(M) * 4);
+        const Tensor relu_in = a - 0.5f;  // 预备输入，别把构造算进被测时间
+        const Phases relu = measure([&] { (void)ops::Relu(relu_in); });
+        report("relu f32 16M", relu, 2.0 * double(N) * 4);
+        const Phases sig = measure([&] { (void)ops::Sigmoid(ca); });
+        report("sigmoid f32 16M", sig, 2.0 * double(N) * 4);
+        const Phases th = measure([&] { (void)ops::Tanh(ca); });
+        report("tanh f32 16M", th, 2.0 * double(N) * 4);
+        const Phases cast = measure([&] { (void)ops::Typecast(ca, DT::FLOAT64); });
+        report("cast f32->f64 16M", cast, 3.0 * double(N) * 4);
+    }
     {   // 超越函数（CPU 侧标量 libm，无法自动向量化）
         constexpr std::int64_t N = std::int64_t{1} << 22;  // 4M
         Tensor a = Tensor::Random({N}, 0.0f, 1.0f, DT::FLOAT32, dev);
