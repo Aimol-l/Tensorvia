@@ -590,6 +590,59 @@ float MeanImpl<Device::CPU>::execute(const Tensor& a) {
     return mean;
 }
 // ================================================================
+// 跨步单轴归约。
+//
+// 被归约轴在内存里连续（stride 1）时，每个输出元素对应一次连续扫描：起点由
+// 非归约维的 stride 累加得到。这样转置/permute 视图不必先拷成连续张量——
+// 归约组本身仍交给上面那些内核，以 (outer=1, inner=1, axis) 的形式调用，
+// 所以累加 dtype、NaN 传播、首个极值下标等语义与连续路径共用同一份实现。
+//
+// 被归约轴跨步（stride != 1）时该路径不适用：按列读是缓存最坏的形态，一次
+// 连续拷贝反而更便宜——由 ops::iter 的策略决定物化，而不是这里硬判。
+// ================================================================
+
+struct ReduceMap {
+    std::array<int64_t, kMaxTensorDims> dim{};
+    std::array<int64_t, kMaxTensorDims> stride{};
+    int     ndim  = 0;
+    int64_t numel = 1;
+
+    static ReduceMap make(const Tensor& a, int axis) {
+        ReduceMap m;
+        const auto shape = a.shape();
+        const auto strides = a.strides();
+        for (int d = 0; d < static_cast<int>(shape.size()); ++d) {
+            if (d == axis) continue;
+            m.dim[m.ndim]    = shape[d];
+            m.stride[m.ndim] = strides[d];
+            ++m.ndim;
+        }
+        for (int i = 0; i < m.ndim; ++i) m.numel *= m.dim[i];
+        return m;
+    }
+
+    int64_t base(int64_t index) const {
+        int64_t off = 0;
+        for (int d = ndim; d-- > 0;) {
+            off += (index % dim[d]) * stride[d];
+            index /= dim[d];
+        }
+        return off;
+    }
+};
+
+// per_output(j, base)：输出第 j 个元素，输入起点偏移 base（元素，相对 Tensor::data()）。
+// 返回 false 表示这个输入不吃跨步路径。
+template <class F>
+bool strided_reduce(const Tensor& a, int axis, F&& per_output) {
+    if (a.is_contiguous() || a.strides()[axis] != 1) return false;
+    const ReduceMap map = ReduceMap::make(a, axis);
+    #pragma omp parallel for schedule(static)
+    for (int64_t j = 0; j < map.numel; ++j)
+        per_output(j, map.base(j));
+    return true;
+}
+
 Tensor SumImpl<Device::CPU>::execute(const Tensor& a, int axis) {
     std::vector<int64_t> new_shape;
     for (int i = 0; i < static_cast<int>(a.shape().size()); ++i) {
@@ -613,8 +666,12 @@ Tensor SumImpl<Device::CPU>::execute(const Tensor& a, int axis) {
         const T* a_ptr = static_cast<const T*>(a.data());
         dispatch_dtype(out_type, [&](auto rid) {
             using R = typename decltype(rid)::type;
-            sum_kernel<T, R>(a_ptr, static_cast<R*>(result.data()),
-                             outer_size, inner_size, axis_size);
+            R* res_ptr = static_cast<R*>(result.data());
+            if (strided_reduce(a, axis, [&](int64_t j, int64_t base) {
+                    sum_kernel<T, R>(a_ptr + base, res_ptr + j, 1, 1, int(axis_size));
+                }))
+                return;
+            sum_kernel<T, R>(a_ptr, res_ptr, outer_size, inner_size, axis_size);
         });
     });
     return result;
@@ -639,6 +696,10 @@ Tensor MinImpl<Device::CPU>::execute(const Tensor& a, int axis) {
         using T = typename decltype(type_id)::type;
         const T* a_ptr = static_cast<const T*>(a.data());
         T* res_ptr = static_cast<T*>(result.data());
+        if (strided_reduce(a, axis, [&](int64_t j, int64_t base) {
+                min_kernel<T>(a_ptr + base, res_ptr + j, 1, 1, int(axis_size));
+            }))
+            return;
         min_kernel<T>(a_ptr,res_ptr,outer_size, inner_size, axis_size);
     });
     return result;
@@ -664,6 +725,10 @@ Tensor MaxImpl<Device::CPU>::execute(const Tensor& a, int axis) {
         using T = typename decltype(type_id)::type;
         const T* a_ptr = static_cast<const T*>(a.data());
         T* res_ptr = static_cast<T*>(result.data());
+        if (strided_reduce(a, axis, [&](int64_t j, int64_t base) {
+                max_kernel<T>(a_ptr + base, res_ptr + j, 1, 1, int(axis_size));
+            }))
+            return;
         max_kernel<T>(a_ptr,res_ptr,outer_size, inner_size, axis_size);
     });
     return result;
@@ -691,8 +756,12 @@ Tensor MeanImpl<Device::CPU>::execute(const Tensor& a, int axis) {
         const T* a_ptr = static_cast<const T*>(a.data());
         dispatch_dtype(out_type, [&](auto rid) {
             using R = typename decltype(rid)::type;
-            mean_kernel<T, R>(a_ptr, static_cast<R*>(result.data()),
-                              outer_size, inner_size, axis_size);
+            R* res_ptr = static_cast<R*>(result.data());
+            if (strided_reduce(a, axis, [&](int64_t j, int64_t base) {
+                    mean_kernel<T, R>(a_ptr + base, res_ptr + j, 1, 1, int(axis_size));
+                }))
+                return;
+            mean_kernel<T, R>(a_ptr, res_ptr, outer_size, inner_size, axis_size);
         });
     });
     return result;
@@ -739,6 +808,10 @@ Tensor ArgMaxImpl<Device::CPU>::execute(const Tensor &a, int axis){
     dispatch_dtype(a.dtype(), [&](auto type_id) {
         using T = typename decltype(type_id)::type;
         const T* a_ptr = static_cast<const T*>(a.data());
+        if (strided_reduce(a, axis, [&](int64_t j, int64_t base) {
+                argmax_kernel<T>(a_ptr + base, res_ptr + j, 1, 1, int(axis_size));
+            }))
+            return;
         argmax_kernel<T>(a_ptr,res_ptr,outer_size, inner_size, axis_size);
     });
     return result;
@@ -764,6 +837,10 @@ Tensor ArgMinImpl<Device::CPU>::execute(const Tensor &a, int axis) {
     dispatch_dtype(a.dtype(), [&](auto type_id) {
         using T = typename decltype(type_id)::type;
         const T* a_ptr = static_cast<const T*>(a.data());
+        if (strided_reduce(a, axis, [&](int64_t j, int64_t base) {
+                argmin_kernel<T>(a_ptr + base, res_ptr + j, 1, 1, int(axis_size));
+            }))
+            return;
         argmin_kernel<T>(a_ptr,res_ptr,outer_size, inner_size, axis_size);
     });
     return result;
@@ -796,8 +873,12 @@ Tensor ProdImpl<Device::CPU>::execute(const Tensor& a, int axis) {
         const T* a_ptr = static_cast<const T*>(a.data());
         dispatch_dtype(out_type, [&](auto rid) {
             using R = typename decltype(rid)::type;
-            prod_kernel<T, R>(a_ptr, static_cast<R*>(result.data()),
-                              outer_size, inner_size, axis_size);
+            R* res_ptr = static_cast<R*>(result.data());
+            if (strided_reduce(a, axis, [&](int64_t j, int64_t base) {
+                    prod_kernel<T, R>(a_ptr + base, res_ptr + j, 1, 1, int(axis_size));
+                }))
+                return;
+            prod_kernel<T, R>(a_ptr, res_ptr, outer_size, inner_size, axis_size);
         });
     });
     return result;
@@ -829,9 +910,14 @@ Tensor VarImpl<Device::CPU>::execute(const Tensor& a, int axis) {
         using T = typename decltype(type_id)::type;
         dispatch_dtype(out_type, [&](auto rid) {
             using R = typename decltype(rid)::type;
-            var_std_kernel<T, R, false>(static_cast<const T*>(a.data()),
-                                        static_cast<R*>(result.data()),
-                                        outer_size, inner_size, axis_size);
+            const T* a_ptr = static_cast<const T*>(a.data());
+            R* res_ptr = static_cast<R*>(result.data());
+            if (strided_reduce(a, axis, [&](int64_t j, int64_t base) {
+                    var_std_kernel<T, R, false>(a_ptr + base, res_ptr + j, 1, 1,
+                                                int(axis_size));
+                }))
+                return;
+            var_std_kernel<T, R, false>(a_ptr, res_ptr, outer_size, inner_size, axis_size);
         });
     });
     return result;
@@ -863,9 +949,14 @@ Tensor StdImpl<Device::CPU>::execute(const Tensor& a, int axis) {
         using T = typename decltype(type_id)::type;
         dispatch_dtype(out_type, [&](auto rid) {
             using R = typename decltype(rid)::type;
-            var_std_kernel<T, R, true>(static_cast<const T*>(a.data()),
-                                       static_cast<R*>(result.data()),
-                                       outer_size, inner_size, axis_size);
+            const T* a_ptr = static_cast<const T*>(a.data());
+            R* res_ptr = static_cast<R*>(result.data());
+            if (strided_reduce(a, axis, [&](int64_t j, int64_t base) {
+                    var_std_kernel<T, R, true>(a_ptr + base, res_ptr + j, 1, 1,
+                                               int(axis_size));
+                }))
+                return;
+            var_std_kernel<T, R, true>(a_ptr, res_ptr, outer_size, inner_size, axis_size);
         });
     });
     return result;
@@ -897,8 +988,13 @@ Tensor NormImpl<Device::CPU>::execute(const Tensor& a, float p, int axis) {
         using T = typename decltype(type_id)::type;
         dispatch_dtype(out_type, [&](auto rid) {
             using R = typename decltype(rid)::type;
-            norm_kernel<T, R>(static_cast<const T*>(a.data()), static_cast<R*>(result.data()),
-                              outer_size, inner_size, axis_size, p);
+            const T* a_ptr = static_cast<const T*>(a.data());
+            R* res_ptr = static_cast<R*>(result.data());
+            if (strided_reduce(a, axis, [&](int64_t j, int64_t base) {
+                    norm_kernel<T, R>(a_ptr + base, res_ptr + j, 1, 1, int(axis_size), p);
+                }))
+                return;
+            norm_kernel<T, R>(a_ptr, res_ptr, outer_size, inner_size, axis_size, p);
         });
     });
     return result;

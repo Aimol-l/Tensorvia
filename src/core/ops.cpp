@@ -35,10 +35,6 @@ concept has_sycl_impl = requires { sizeof(Impl<Device::SYCL>); };
 
 template <template <Device> class Impl, typename... Args>
 decltype(auto) execute_on(DeviceId device, Args&&... args) {
-    // 在本次调用期间把 `device` 设为当前线程的 current device。后端算子的函数体
-    // 用裸 `Device` 字面量分配输出（有上百处），那个字面量经 current device 解析；
-    // 正是这个守卫让这些输出留在输入所在的 GPU 上，而无需改任何一行后端代码。
-    // execute_on 之外的 Tensor 核心路径必须显式传递设备索引。
     ops::DeviceGuard guard(device);
     switch (device.kind) {
     case Device::CPU:
@@ -107,6 +103,16 @@ const Tensor& linearize(const Tensor& t, Tensor& storage) {
     // 物化拷贝：两种情况下结果都是 offset 为 0 的独立 buffer。
     storage = t.clone();
     return storage;
+}
+
+// 归约输入准备：CPU 上被归约轴在内存里连续（stride 1）时直接吃视图——每个输出
+// 元素就是一次连续扫描，先拷一遍整个张量只是白花带宽。其余情况物化：被归约轴跨步
+// 的按列读是缓存最坏的形态（一次拷贝更便宜），设备后端的内核也按连续
+// (outer, axis, inner) 布局寻址。
+const Tensor& prepare_reduce_input(const Tensor& t, Tensor& storage, int axis) {
+    if (t.device() == Device::CPU && !t.is_contiguous() && t.strides()[axis] == 1)
+        return t;
+    return linearize(t, storage);
 }
 
 // 写入型（in-place / dst 输出）操作从 Tensor::data() 起线性读写 numel 个元素：
@@ -1187,7 +1193,7 @@ Tensor Sum(const Tensor& a, int axis, bool keepdim) {
     if (a.shape(axis) == 0) return filled_on(a, out_shape, out_type, 0.0f);
     if (numel_of(out_shape) == 0) return empty_on(a, out_shape, out_type);
     Tensor storage;
-    const Tensor& A = linearize(a, storage);
+    const Tensor& A = prepare_reduce_input(a, storage, axis);
     return with_reduced_shape(execute_on<SumImpl>(A.device_id(), A, axis), a.shape(), axis, keepdim);
 }
 Tensor Min(const Tensor& a, int axis, bool keepdim) {
@@ -1200,7 +1206,7 @@ Tensor Min(const Tensor& a, int axis, bool keepdim) {
     const std::vector<int64_t> out_shape = reduced_shape(a.shape(), axis, keepdim);
     if (numel_of(out_shape) == 0) return empty_on(a, out_shape, a.dtype());
     Tensor storage;
-    const Tensor& A = linearize(a, storage);
+    const Tensor& A = prepare_reduce_input(a, storage, axis);
     return with_reduced_shape(execute_on<MinImpl>(A.device_id(), A, axis), a.shape(), axis, keepdim);
 }
 Tensor Max(const Tensor& a, int axis, bool keepdim) {
@@ -1213,7 +1219,7 @@ Tensor Max(const Tensor& a, int axis, bool keepdim) {
     const std::vector<int64_t> out_shape = reduced_shape(a.shape(), axis, keepdim);
     if (numel_of(out_shape) == 0) return empty_on(a, out_shape, a.dtype());
     Tensor storage;
-    const Tensor& A = linearize(a, storage);
+    const Tensor& A = prepare_reduce_input(a, storage, axis);
     return with_reduced_shape(execute_on<MaxImpl>(A.device_id(), A, axis), a.shape(), axis, keepdim);
 }
 Tensor Mean(const Tensor& a, int axis, bool keepdim) {
@@ -1226,7 +1232,7 @@ Tensor Mean(const Tensor& a, int axis, bool keepdim) {
     if (a.shape(axis) == 0) return filled_on(a, out_shape, out_type, kNaN);
     if (numel_of(out_shape) == 0) return empty_on(a, out_shape, out_type);
     Tensor storage;
-    const Tensor& A = linearize(a, storage);
+    const Tensor& A = prepare_reduce_input(a, storage, axis);
     return with_reduced_shape(execute_on<MeanImpl>(A.device_id(), A, axis), a.shape(), axis, keepdim);
 }
 Tensor Prod(const Tensor& a, int axis, bool keepdim) {
@@ -1238,7 +1244,7 @@ Tensor Prod(const Tensor& a, int axis, bool keepdim) {
     if (a.shape(axis) == 0) return filled_on(a, out_shape, out_type, 1.0f);
     if (numel_of(out_shape) == 0) return empty_on(a, out_shape, out_type);
     Tensor storage;
-    const Tensor& A = linearize(a, storage);
+    const Tensor& A = prepare_reduce_input(a, storage, axis);
     require_cpu(A, "prod");
     return with_reduced_shape(ProdImpl<Device::CPU>::execute(A, axis), a.shape(), axis, keepdim);
 }
@@ -1252,7 +1258,7 @@ Tensor Var(const Tensor& a, int axis, bool keepdim) {
     if (numel_of(out_shape) == 0) return empty_on(a, out_shape, out_type);
     if (a.device() != Device::CPU) return var_composed(a, axis, keepdim);
     Tensor storage;
-    const Tensor& A = linearize(a, storage);
+    const Tensor& A = prepare_reduce_input(a, storage, axis);
     return with_reduced_shape(VarImpl<Device::CPU>::execute(A, axis), a.shape(), axis, keepdim);
 }
 Tensor Std(const Tensor& a, int axis, bool keepdim) {
@@ -1265,7 +1271,7 @@ Tensor Std(const Tensor& a, int axis, bool keepdim) {
     if (numel_of(out_shape) == 0) return empty_on(a, out_shape, out_type);
     if (a.device() != Device::CPU) return Sqrt(var_composed(a, axis, keepdim));
     Tensor storage;
-    const Tensor& A = linearize(a, storage);
+    const Tensor& A = prepare_reduce_input(a, storage, axis);
     return with_reduced_shape(StdImpl<Device::CPU>::execute(A, axis), a.shape(), axis, keepdim);
 }
 Tensor Norm(const Tensor& a, float p, int axis, bool keepdim) {
@@ -1279,7 +1285,7 @@ Tensor Norm(const Tensor& a, float p, int axis, bool keepdim) {
     if (numel_of(out_shape) == 0) return empty_on(a, out_shape, out_type);
     if (a.device() != Device::CPU) return norm_composed(a, p, axis, keepdim);
     Tensor storage;
-    const Tensor& A = linearize(a, storage);
+    const Tensor& A = prepare_reduce_input(a, storage, axis);
     return with_reduced_shape(NormImpl<Device::CPU>::execute(A, p, axis), a.shape(), axis, keepdim);
 }
 Tensor Cumsum(const Tensor& a, int axis) {
@@ -2117,7 +2123,7 @@ Tensor Argmax(const Tensor& a, int axis, bool keepdim) {
         throw std::runtime_error("argmax: an empty axis has no index");
     if (numel_of(out_shape) == 0) return empty_on(a, out_shape, DataType::INT64);
     Tensor storage;
-    const Tensor& A = linearize(a, storage);
+    const Tensor& A = prepare_reduce_input(a, storage, axis);
     Tensor result = execute_on<ArgMaxImpl>(A.device_id(), A, axis);
     // 即使后端原生索引内核是 INT32，契约输出仍是 INT64。
     if (result.dtype() != DataType::INT64) result = result.to_type(DataType::INT64);
@@ -2132,7 +2138,7 @@ Tensor Argmin(const Tensor& a, int axis, bool keepdim) {
         throw std::runtime_error("argmin: an empty axis has no index");
     if (numel_of(out_shape) == 0) return empty_on(a, out_shape, DataType::INT64);
     Tensor storage;
-    const Tensor& A = linearize(a, storage);
+    const Tensor& A = prepare_reduce_input(a, storage, axis);
     Tensor result = execute_on<ArgMinImpl>(A.device_id(), A, axis);
     if (result.dtype() != DataType::INT64) result = result.to_type(DataType::INT64);
     return with_reduced_shape(std::move(result), a.shape(), axis, keepdim);
