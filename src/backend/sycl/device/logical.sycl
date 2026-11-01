@@ -44,6 +44,14 @@ template <class T>
 void compare_kernel(sycl::queue& q, const T* a, const T* b, int8_t* out,
                     const tvv::sycl::Bcast& p, int op, double abs_tol,
                     double rel_tol) {
+    // 连续快路径（FR-4.2）：宿主对 linearizable 布局把 ndim 置 0，跳过 stride 解码。
+    if (p.ndim == 0) {
+        q.parallel_for(range_of(p.numel), [=](sycl::id<1> idx) {
+            const int64_t i = static_cast<int64_t>(idx[0]);
+            out[p.off_o + i] = cmp_value(op, a[p.off_a + i], b[p.off_b + i], abs_tol, rel_tol);
+        });
+        return;
+    }
     q.parallel_for(range_of(p.numel), [=](sycl::id<1> idx) {
         const int64_t i = static_cast<int64_t>(idx[0]);
         const int64_t ia = p.off_a + bcast_offset(i, p, p.sa);

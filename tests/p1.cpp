@@ -782,6 +782,105 @@ TEST_F(DeviceOps, ErfMatchesStdErfWithinTolerance) {
     EXPECT_FLOAT_EQ(sv[2], -1.0f);
 }
 
+// 连续快路径契约（FR-4.2）：同一算子，连续输入走一维内核、非连续输入走 strided
+// 路径，两条路径结果必须一致。连续夹具同时覆盖"带 offset 的连续视图"（快路径的
+// off_a/off_b 非零）与"跨步视图"（strided 路径）；广播仍走 strided（stride 0 的
+// 重复读取比物化便宜）。
+TEST_F(DeviceOps, ContiguousAndStridedPathsAgree) {
+    std::vector<float> v(24);
+    for (int i = 0; i < 24; ++i) v[i] = static_cast<float>((i * 7) % 11) * 0.5f - 2.0f;
+    const std::vector<int64_t> s{2, 3, 4};
+    const Tensor cpu(v, s);
+    const Tensor dev = moved_to(Tensor(v, s), kTestDevice);
+
+    const Tensor strided_cpu = cpu.narrow(2, 1, 2);      // {2,3,2}，跨步
+    const Tensor strided_dev = dev.narrow(2, 1, 2);
+    ASSERT_EQ(strided_cpu.numel(), 12u);
+    EXPECT_FALSE(strided_dev.is_contiguous());
+    const Tensor packed_dev = strided_dev.contiguous();  // 同样值的连续张量
+    EXPECT_TRUE(packed_dev.is_contiguous());
+
+    // 同样数值的连续输入：结果一致（快路径 vs strided 路径）。
+    auto expect_paths_agree = [&](const Tensor& fast, const Tensor& slow,
+                                  std::string_view what) {
+        ASSERT_EQ(shape_of(fast), shape_of(slow)) << what;
+        expect_close(host_values<float>(fast), host_values<float>(slow), what);
+    };
+    // 比较类算子输出 INT8，按字节读。
+    auto expect_bool_paths_agree = [&](const Tensor& fast, const Tensor& slow,
+                                       std::string_view what) {
+        ASSERT_EQ(shape_of(fast), shape_of(slow)) << what;
+        const std::vector<int8_t> a = host_values<int8_t>(fast);
+        const std::vector<int8_t> b = host_values<int8_t>(slow);
+        ASSERT_EQ(a.size(), b.size()) << what;
+        for (size_t i = 0; i < a.size(); ++i)
+            EXPECT_EQ(a[i], b[i]) << what << " at " << i;
+    };
+
+    // 逐元素算术：四个算子都走同一条 bcast 发射路径。
+    expect_paths_agree(ops::Add(packed_dev, packed_dev), ops::Add(strided_dev, strided_dev),
+                       "add fast vs strided");
+    expect_paths_agree(ops::Sub(packed_dev, packed_dev), ops::Sub(strided_dev, strided_dev),
+                       "sub fast vs strided");
+    expect_paths_agree(ops::Mul(packed_dev, packed_dev), ops::Mul(strided_dev, strided_dev),
+                       "mul fast vs strided");
+    expect_paths_agree(ops::Div(packed_dev, packed_dev + 3.0f),
+                       ops::Div(strided_dev, strided_dev + 3.0f), "div fast vs strided");
+
+    // 与 CPU 参考一致（两条路径各自对）。
+    expect_same_as_cpu(ops::Add(strided_dev, strided_dev),
+                       ops::Add(strided_cpu, strided_cpu), kTestDevice, "add strided vs cpu");
+    expect_same_as_cpu(ops::Mul(strided_dev, strided_dev),
+                       ops::Mul(strided_cpu, strided_cpu), kTestDevice, "mul strided vs cpu");
+    expect_same_as_cpu(ops::Add(packed_dev, packed_dev),
+                       ops::Add(strided_cpu.contiguous(), strided_cpu.contiguous()),
+                       kTestDevice, "add fast vs cpu");
+
+    // 比较：同样两条路径。
+    expect_bool_paths_agree(ops::Greater(packed_dev, packed_dev - 1.0f),
+                            ops::Greater(strided_dev, strided_dev - 1.0f),
+                            "greater fast vs strided");
+    expect_bool_paths_agree(ops::Equal(packed_dev, packed_dev),
+                            ops::Equal(strided_dev, strided_dev), "equal fast vs strided");
+    // 与 CPU 参考一致：结果是 INT8，按字节比（expect_same_as_cpu 只认 float）。
+    const std::vector<int8_t> cmp_want =
+        host_values<int8_t>(ops::Greater(strided_cpu, strided_cpu - 1.0f));
+    const std::vector<int8_t> cmp_got =
+        host_values<int8_t>(ops::Greater(strided_dev, strided_dev - 1.0f));
+    ASSERT_EQ(cmp_got.size(), cmp_want.size());
+    for (size_t i = 0; i < cmp_got.size(); ++i)
+        EXPECT_EQ(cmp_got[i], cmp_want[i]) << "greater strided vs cpu at " << i;
+
+    // where：三路广播，同样覆盖。
+    const Tensor pred_cpu = ops::Greater(strided_cpu, 0.0f);
+    const Tensor pred_dev = ops::Greater(strided_dev, 0.0f);
+    expect_paths_agree(ops::Where(pred_dev, packed_dev, packed_dev * -1.0f),
+                       ops::Where(pred_dev, strided_dev, strided_dev * -1.0f),
+                       "where fast vs strided");
+    expect_same_as_cpu(ops::Where(pred_dev, strided_dev, strided_dev * -1.0f),
+                       ops::Where(pred_cpu, strided_cpu, strided_cpu * -1.0f), kTestDevice,
+                       "where strided vs cpu");
+
+    // 带 offset 的连续视图（narrow 领先维）：快路径，off_a/off_b 非零。
+    const Tensor shifted_cpu = cpu.narrow(0, 1, 1);   // {1,3,4}，offset 12，仍连续
+    const Tensor shifted_dev = dev.narrow(0, 1, 1);
+    EXPECT_TRUE(shifted_dev.is_contiguous());
+    EXPECT_NE(shifted_dev.offset(), 0);
+    expect_same_as_cpu(ops::Add(shifted_dev, shifted_dev),
+                       ops::Add(shifted_cpu, shifted_cpu), kTestDevice,
+                       "add on an offset view");
+    expect_same_as_cpu(ops::Mul(shifted_dev, shifted_dev),
+                       ops::Mul(shifted_cpu, shifted_cpu), kTestDevice,
+                       "mul on an offset view");
+
+    // 广播仍走 strided 路径，且与 CPU 一致。
+    std::vector<float> col_v{1.0f, -1.0f, 2.0f};
+    const Tensor col_cpu(col_v, std::vector<int64_t>{3, 1});
+    const Tensor col_dev = moved_to(Tensor(col_v, std::vector<int64_t>{3, 1}), kTestDevice);
+    expect_same_as_cpu(ops::Add(strided_dev, col_dev), ops::Add(strided_cpu, col_cpu),
+                       kTestDevice, "add broadcast vs cpu");
+}
+
 TEST_F(DeviceOps, GeneratorsLandOnTheDevice) {
     TensorOptions opts(DataType::FLOAT32);
     opts.with_device(kTestDevice, 0);

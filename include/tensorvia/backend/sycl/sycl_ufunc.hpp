@@ -59,10 +59,12 @@ inline void require_dims(size_t ndim, const char* what) {
 }
 
 // 只做"布局 → 参数结构体"的翻译；偏移量随参数走，内核从 impl 基址寻址。
+// linearizable 布局把 ndim 置 0：内核据此走连续快路径（两侧 stride 恒为 1），
+// 跳过每元素的 stride 解码；shape/strides 留原值，快路径不读它们。
 inline ::tvv::sycl::Bcast make_bcast_params(const Layout& lay, const Tensor& out) {
     ::tvv::sycl::Bcast p{};
     require_dims(static_cast<size_t>(lay.ndim), "binary op");
-    p.ndim  = lay.ndim;
+    p.ndim  = iter::linearizable(lay) ? 0 : lay.ndim;
     p.numel = lay.numel;
     for (int32_t d = 0; d < lay.ndim; ++d) {
         p.shape[d] = lay.shape[d];

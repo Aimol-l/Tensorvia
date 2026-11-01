@@ -32,15 +32,24 @@ layout(std430, binding = 2) writeonly buffer Output {
 void main() {
     int64_t idx = int64_t(gl_GlobalInvocationID.x);
     if (idx >= p.numel) return;
-    // flat -> coord -> 双侧元素偏移（广播维 stride 为 0，off 为视图基偏移）
-    int64_t ia = p.off_a;
-    int64_t ib = p.off_b;
-    int64_t tmp = idx;
-    for (int d = p.ndim - 1; d >= 0; --d) {
-        int64_t c = tmp % int64_t(p.shape[d]);
-        tmp /= int64_t(p.shape[d]);
-        ia += c * int64_t(p.sa[d]);
-        ib += c * int64_t(p.sb[d]);
+    int64_t ia;
+    int64_t ib;
+    if (p.ndim == 0) {
+        // 连续快路径（FR-4.2）：linearizable 布局下两侧 stride 恒为 1，下标即元素
+        // 偏移——跳过每元素每操作数的 div/mod 解码。0 维 x 0 维也走这里（numel 1）。
+        ia = idx + p.off_a;
+        ib = idx + p.off_b;
+    } else {
+        // flat -> coord -> 双侧元素偏移（广播维 stride 为 0，off 为视图基偏移）
+        ia = p.off_a;
+        ib = p.off_b;
+        int64_t tmp = idx;
+        for (int d = p.ndim - 1; d >= 0; --d) {
+            int64_t c = tmp % int64_t(p.shape[d]);
+            tmp /= int64_t(p.shape[d]);
+            ia += c * int64_t(p.sa[d]);
+            ib += c * int64_t(p.sb[d]);
+        }
     }
 
     outBuf.data[int(idx) + p.off_o] = a.data[int(ia)] - b.data[int(ib)];

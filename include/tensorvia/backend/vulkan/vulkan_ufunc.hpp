@@ -25,9 +25,11 @@ using ops::iter::promote;
 
 // 只做"布局 → push constant"的翻译；Vulkan 的 push constant 是 32 位域，所以
 // 形状、步长与偏移都要先确认能装下。偏移量随参数走，shader 从 buffer 基址寻址。
+// linearizable 布局把 ndim 置 0：shader 据此走连续快路径（两侧 stride 恒为 1），
+// 跳过每元素的 stride 解码；shape/strides 留原值，快路径不读它们。
 inline BcastVecParams make_bcast_params(const Layout& lay, const Tensor& out) {
     BcastVecParams p{};
-    p.ndim  = lay.ndim;
+    p.ndim  = iter::linearizable(lay) ? 0 : lay.ndim;
     p.numel = lay.numel;
     if (lay.numel > INT32_MAX)
         throw std::runtime_error("vulkan binary op: result exceeds 2^31 elements");

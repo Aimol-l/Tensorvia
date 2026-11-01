@@ -139,6 +139,14 @@ int main(int argc, char* argv[]) {
         const Phases p = measure([&] { ops::Mul(a, b, d); });
         report("mul f32 16M", p, 3.0 * double(N) * 4);
     }
+    {   // 2-D 连续二元：strided 内核每元素要解码 ndim 个维度，连续输入是纯开销
+        constexpr std::int64_t M = 4096;
+        Tensor a = Tensor::Random({M, M}, 0.0f, 1.0f, DT::FLOAT32, dev);
+        Tensor b = Tensor::Random({M, M}, 0.0f, 1.0f, DT::FLOAT32, dev);
+        Tensor d({M, M}, DT::FLOAT32, dev);
+        const Phases p = measure([&] { ops::Add(a, b, d); }, 5);
+        report("add f32 4096x4096", p, 3.0 * double(M) * M * 4);
+    }
     {   // 标量 in-place：读写各一次
         constexpr std::int64_t N = std::int64_t{1} << 24;
         Tensor a = Tensor::Random({N}, 0.0f, 1.0f, DT::FLOAT32, dev);

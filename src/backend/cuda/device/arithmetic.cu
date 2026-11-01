@@ -58,6 +58,15 @@ template <class T>
 __global__ void binary_kernel(const T* a, const T* b, T* out, tvv::cuda::Bcast p, int op) {
     using C = contract::promoted_t<T>;
     const int64_t stride = static_cast<int64_t>(gridDim.x) * blockDim.x;
+    // 连续快路径（FR-4.2）：宿主对 linearizable 布局把 ndim 置 0，此时两侧 stride
+    // 恒为 1，下标即元素偏移——跳过每元素每操作数的 div/mod 解码。
+    if (p.ndim == 0) {
+        for (int64_t i = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+             i < p.numel; i += stride)
+            out[p.off_o + i] = store_as<T>(binary_value(op, to_compute<C>(a[p.off_a + i]),
+                                                        to_compute<C>(b[p.off_b + i])));
+        return;
+    }
     for (int64_t i = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
          i < p.numel; i += stride) {
         const int64_t ia = p.off_a + bcast_offset(i, p, p.sa);
