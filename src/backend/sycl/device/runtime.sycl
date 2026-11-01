@@ -1,12 +1,59 @@
 // 上下文、USM 分配、宿主传输与队列同步。
 //
-// 队列就是设备的全部状态：SYCL 内核提交给它，其 in-order 特性让同步式宿主驱动
-// 天然正确。
+// 每条（线程, 上下文）一条 in-order 队列，首次使用时惰性创建；同一上下文内的
+// 所有队列共享一个 sycl::context，USM 分配才能跨队列使用。in-order 特性让同步式
+// 宿主驱动天然正确，同时保留跨线程并行的可能（对齐 CUDA 的每线程流语义）。
 #include "common.h"
 
+#include <atomic>
 #include <cstring>
+#include <mutex>
+#include <unordered_map>
+#include <vector>
 
 using namespace tvv::sycl_dev;
+
+namespace {
+
+// 上下文 id 永不复用，已销毁上下文残留的线程私有条目不会误配到新上下文。
+std::atomic<uint64_t> g_next_context_id{1};
+
+// 每条（线程, 上下文）一条队列。线程私有：查表无需加锁，也没有线程能看到别的
+// 线程的队列；新创建的队列同时登记到 context，供 wait 与析构使用。
+thread_local std::unordered_map<uint64_t, ::sycl::queue*> tls_queue;
+
+}  // namespace
+
+Context::Context(int device_index)
+    : device(device_of(device_index)),
+      sycl_context(device),
+      id(g_next_context_id.fetch_add(1, std::memory_order_relaxed)) {}
+
+Context::~Context() {
+    // queue 析构会等待已提交的工作完成，因此 host_task 里的 sycl::free 一定先跑完。
+    for (::sycl::queue* q : queues) {
+        try {
+            delete q;
+        } catch (...) {
+            // 析构函数不抛异常；清理失败时无计可施。
+        }
+    }
+}
+
+::sycl::queue& Context::current_queue() {
+    const auto it = tls_queue.find(id);
+    if (it != tls_queue.end()) return *it->second;
+
+    auto* created = new ::sycl::queue{
+        sycl_context, device,
+        ::sycl::property_list{::sycl::property::queue::in_order()}};
+    {
+        std::lock_guard<std::mutex> lock(queues_mutex);
+        queues.push_back(created);
+    }
+    tls_queue[id] = created;
+    return *created;
+}
 
 extern "C" {
 
@@ -53,20 +100,40 @@ int sycl_c_default_device_index() {
 
 int sycl_c_wait(void* ctx) {
     if (ctx == nullptr) return tvv::sycl::kSyclInvalid;
+    auto* context = static_cast<Context*>(ctx);
     try {
-        queue_of(ctx).wait_and_throw();
+        // 设备级契约是“所有队列空闲”，与 cudaDeviceSynchronize / torch.cuda.synchronize
+        // 一致。先快照队列列表再逐个等待，等待期间不持锁——其他线程建新队列不会被
+        // 卡住（那条队列此刻还没有本调用可见的工作）。
+        std::vector<::sycl::queue*> snapshot;
+        {
+            std::lock_guard<std::mutex> lock(context->queues_mutex);
+            snapshot = context->queues;
+        }
+        for (::sycl::queue* q : snapshot) {
+            q->wait_and_throw();
+        }
         return tvv::sycl::kSyclOk;
     } catch (...) {
         return tvv::sycl::kSyclFailure;
     }
 }
 
+void* sycl_c_current_queue(void* ctx) {
+    if (ctx == nullptr) return nullptr;
+    try {
+        return &queue_of(ctx);
+    } catch (...) {
+        return nullptr;
+    }
+}
+
 int sycl_c_device_name(void* ctx, char* out, int cap) {
     if (ctx == nullptr || out == nullptr || cap <= 0) return tvv::sycl::kSyclInvalid;
     try {
-        const auto name = queue_of(ctx)
-                              .get_device()
-                              .get_info<sycl::info::device::name>();
+        // 问 context 而不是队列：命名是设备属性，不该为一个名字凭空造条队列。
+        const auto name = static_cast<Context*>(ctx)
+                              ->device.get_info<sycl::info::device::name>();
         const size_t n = name.size() < static_cast<size_t>(cap - 1)
                              ? name.size()
                              : static_cast<size_t>(cap - 1);
@@ -78,34 +145,38 @@ int sycl_c_device_name(void* ctx, char* out, int cap) {
     }
 }
 
-void* sycl_c_malloc(void* ctx, size_t bytes) {
+void* sycl_c_malloc(void* ctx, void* queue, size_t bytes) {
     if (ctx == nullptr) return nullptr;
     try {
         // malloc_device(0) 不可移植；零字节张量仍需有效句柄，好让析构与拷贝路径
-        // 保持统一。
-        return sycl::malloc_device(bytes == 0 ? 1 : bytes, queue_of(ctx));
+        // 保持统一。没有句柄时退回调用线程的队列。
+        ::sycl::queue& q = queue == nullptr ? queue_of(ctx) : queue_from_handle(queue);
+        return sycl::malloc_device(bytes == 0 ? 1 : bytes, q);
     } catch (...) {
         return nullptr;
     }
 }
 
-void sycl_c_free(void* ctx, void* ptr) {
+void sycl_c_free(void* ctx, void* queue_handle, void* ptr) {
     if (ctx == nullptr || ptr == nullptr) return;
-    auto& queue = queue_of(ctx);
+    if (queue_handle == nullptr) queue_handle = sycl_c_current_queue(ctx);
+    if (queue_handle == nullptr) return;
+    // 释放交还给**分配该块的那条队列**：块可能仍被那条队列里尚未完成的 kernel
+    // 引用，in-order 特性保证这个 host task 排在它们之后。别的队列上的后续工作
+    // 不在本契约内（跨线程交接本就要求显式同步）。
+    auto& q = queue_from_handle(queue_handle);
     try {
-        // 块可能仍被队列里尚未完成的 kernel 引用。in-order 队列保证这个 host task
-        // 排在它们之后，于是释放既不用阻塞宿主，也不会回收仍在使用的内存。
-        queue.submit([ptr, &queue](sycl::handler& h) {
-            h.host_task([ptr, &queue] { sycl::free(ptr, queue); });
+        q.submit([ptr, &q](sycl::handler& h) {
+            h.host_task([ptr, &q] { sycl::free(ptr, q); });
         });
     } catch (...) {
         // 入队失败：先等队列清空再直接释放。慢，但不会释放仍在使用的内存。
         try {
-            queue.wait_and_throw();
+            q.wait_and_throw();
         } catch (...) {
         }
         try {
-            sycl::free(ptr, queue);
+            sycl::free(ptr, q);
         } catch (...) {
             // 析构路径上的释放失败无计可施。
         }

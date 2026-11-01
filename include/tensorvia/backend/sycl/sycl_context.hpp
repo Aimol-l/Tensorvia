@@ -29,17 +29,18 @@ public:
     SYCLContext(SYCLContext&&) = delete;
     SYCLContext& operator=(SYCLContext&&) = delete;
 
-    // 不透明的 queue 句柄；queue 由 pimpl 持有。所有 sycl_c_* seam 函数的 `ctx`
-    // 参数就是它。
+    // 不透明的 context 句柄；它拥有本设备的 sycl::context 与所有线程的队列。所有
+    // sycl_c_* seam 函数的 `ctx` 参数就是它。
     void* ctx_raw_ptr() override;
     void* handle() const;
 
-    // queue 自带设备，没有可切换的线程级 current device。保留此函数只是为了与其它
-    // 后端的驱动保持对称。
+    // 设备在 context 创建时就固定了，没有可切换的线程级 current device。保留此函数
+    // 只是为了与其它后端的驱动保持对称。
     void activate() const {}
 
-    // 等队列清空，即设备级同步点（ops::synchronize()）。算子入队后不在这里等待；
-    // 宿主读数据前由 to_host/item<T>() 负责同步。
+    // 设备级同步：等待本上下文上所有线程的队列清空，对应
+    // torch.cuda.synchronize()。单个算子入队后本后端不额外等待，`item<T>()` /
+    // `to_host()` 会经由 memcpy 的等待拿到已完成的数据。
     void wait() const;
 
     // 所选设备的诊断名称，例如 "Intel(R) Core(TM) ..."。

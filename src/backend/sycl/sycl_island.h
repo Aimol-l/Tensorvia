@@ -154,9 +154,10 @@ extern "C" {
 // 上下文、内存与宿主传输。
 // ---------------------------------------------------------------------------
 
-// 在设备 `device_index` 上创建队列：-1 表示 sycl::default_selector_v（优先 GPU，
-// 以 OpenCL CPU 兜底），0.. 表示 sycl::device::get_devices() 中的对应位置。没有
-// 可用设备时返回 nullptr。
+// 在设备 `device_index` 上创建上下文（含其后所有线程共享的 sycl::context）：
+// -1 表示 sycl::default_selector_v（优先 GPU，以 OpenCL CPU 兜底），0.. 表示
+// sycl::device::get_devices() 中的对应位置。没有可用设备时返回 nullptr。
+// 上下文本身不持有队列：队列按（线程, 上下文）惰性创建，见 sycl_c_current_queue。
 void* sycl_c_context_create(int device_index);
 void  sycl_c_context_destroy(void* ctx);
 // 本进程可见的设备数量。设备索引空间是这个后端自己的：即
@@ -164,17 +165,26 @@ void  sycl_c_context_destroy(void* ctx);
 int   sycl_c_device_count();
 // sycl::default_selector_v 会选中的设备索引，或 -1。
 int   sycl_c_default_device_index();
+// 等待本上下文上**所有线程的队列**清空（设备级同步，对应 torch.cuda.synchronize）。
 int   sycl_c_wait(void* ctx);
 // 把设备名拷入 `out`；返回写入的字节数。
 int   sycl_c_device_name(void* ctx, char* out, int cap);
 
-void* sycl_c_malloc(void* ctx, size_t bytes);
-void  sycl_c_free(void* ctx, void* ptr);
+// 调用线程在这个上下文上的队列句柄；首次调用时惰性创建。返回 nullptr 表示创建
+// 失败。句柄归 context 所有，生命周期与 context 相同。
+void* sycl_c_current_queue(void* ctx);
+
+// 分配 / 释放 USM 设备内存。`queue` 是 sycl_c_current_queue 返回的句柄；为
+// nullptr 时退回调用线程当前的队列。释放会排在 `queue` 上既有工作之后完成，
+// 因此调用方传的应当是**分配该块的那条队列**。
+void* sycl_c_malloc(void* ctx, void* queue, size_t bytes);
+void  sycl_c_free(void* ctx, void* queue, void* ptr);
+// 把 dst/src 拷入 `queue` 上并等待其完成：返回即表示数据可被宿主读取。
 int   sycl_c_memcpy(void* ctx, void* dst, const void* src, size_t bytes, int kind);
 
 // ---------------------------------------------------------------------------
-// 启动函数。每个都在 in-order 队列上提交工作后立即返回；宿主驱动随后调用
-// sycl_c_wait，与其它后端的同步语义保持一致。
+// 启动函数。每个都在**调用线程的** in-order 队列上提交工作后立即返回；宿主
+// 驱动随后调用 sycl_c_wait，与其它后端的同步语义保持一致。
 // ---------------------------------------------------------------------------
 
 int sycl_c_launch_fill(void* ctx, void* out, int64_t numel, int dtype, double value);

@@ -101,9 +101,12 @@ void SYCLTensor::init(void* ptr, size_t numel, DataType dtype,
     if (!m_context) throw std::runtime_error("SYCLTensor: null SYCLContext");
 
     const size_t bytes = numel * calc_dtype_size(dtype);
-    // 零字节张量也需要有效句柄，好让析构和拷贝路径保持统一（接缝把 0 字节映射为
-    // 1 字节）。
-    m_data = ::sycl_c_malloc(m_context->handle(), bytes);
+    // 先取本线程的队列再分配：buffer 归属这条队列，释放时要交还给它。零字节
+    // 张量也需要有效句柄，好让析构和拷贝路径保持统一（接缝把 0 字节映射为 1 字节）。
+    m_queue = ::sycl_c_current_queue(m_context->handle());
+    if (m_queue == nullptr) throw std::runtime_error("SYCLTensor: cannot create a SYCL queue");
+
+    m_data = ::sycl_c_malloc(m_context->handle(), m_queue, bytes);
     if (m_data == nullptr) throw std::runtime_error("SYCLTensor: device allocation failed");
 
     if (ptr != nullptr) {
@@ -111,7 +114,7 @@ void SYCLTensor::init(void* ptr, size_t numel, DataType dtype,
                                       tvv::sycl::kHostToDevice);
         if (status != tvv::sycl::kSyclOk) {
             // 构造函数抛出时，对象的析构函数不会运行。
-            ::sycl_c_free(m_context->handle(), m_data);
+            ::sycl_c_free(m_context->handle(), m_queue, m_data);
             m_data = nullptr;
             check(status, "SYCLTensor::init: host-to-device copy");
         }
@@ -120,8 +123,9 @@ void SYCLTensor::init(void* ptr, size_t numel, DataType dtype,
 
 SYCLTensor::~SYCLTensor() {
     if (m_data != nullptr) {
-        // 析构函数不抛异常；释放失败在这里也无从处理。
-        ::sycl_c_free(m_context->handle(), m_data);
+        // 析构函数不抛异常；释放失败在这里也无从处理。交还给分配它的队列，排在
+        // 引用该 buffer 的既有工作之后。
+        ::sycl_c_free(m_context->handle(), m_queue, m_data);
         m_data = nullptr;
     }
 }

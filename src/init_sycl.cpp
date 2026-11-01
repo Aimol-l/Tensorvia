@@ -8,7 +8,7 @@
 #include "sycl_island.h"
 
 namespace {
-// 队列与 USM 分配器只有在请求第一个 Device::SYCL 张量时才会被触及；纯 CPU 程序
+// sycl::context 与设备只有在请求第一个 Device::SYCL 张量时才会被触及；纯 CPU 程序
 // 从不加载 libsycl。
 struct SyclLazyRegistrar {
     SyclLazyRegistrar() {
@@ -21,8 +21,9 @@ struct SyclLazyRegistrar {
                                  [ctx](void* ptr, size_t numel, DataType dtype) {
                                      return std::make_shared<SYCLTensor>(ptr, numel, dtype, ctx);
                                  });
-            // 队列是 in-order 的：等它清空就是设备级同步。USM 由驱动直接管理，没有
-            // 缓存可清。SYCL 没有 per-thread 的流，所以这一条覆盖所有宿主线程。
+            // 每条（线程, 上下文）有自己的 in-order 队列，wait() 会等它们全部清空，
+            // 因此这就是设备级同步，与 cudaDeviceSynchronize 一致。USM 由驱动直接
+            // 管理，没有缓存可清。
             register_device_control(DeviceId{Device::SYCL, index}, DeviceControl{
                 [ctx] { ctx->wait(); },
                 [] {},

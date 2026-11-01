@@ -20,14 +20,17 @@
 #include "tensorvia/tensor.hpp"
 #include "tensorvia/ops.hpp"
 #include "tensorvia/cpu_ops.hpp"
+#include "tensorvia/tensor_iterator.hpp"
 #include "tensorvia/backend/sycl/sycl_context.hpp"
 #include "tensorvia/backend/sycl/sycl_tensor.hpp"
 
 namespace ops::sycl_ufunc {
 
-using ops::ufunc::broadcast_shapes;
-using ops::ufunc::broadcast_strides;
-using ops::ufunc::same_shape;
+using ops::iter::broadcast_shapes;
+using ops::iter::broadcast_strides;
+using ops::iter::same_shape;
+using ops::iter::Layout;
+using ops::iter::promote;
 
 // 把 seam 状态码变成其它后端本来会抛的异常。
 inline void check(int status, const char* what) {
@@ -50,37 +53,21 @@ inline void require_dims(size_t ndim, const char* what) {
     }
 }
 
-inline ::tvv::sycl::Bcast make_bcast_params(const Tensor& A, const Tensor& B,
-                                            std::span<const int64_t> out_shape,
-                                            const Tensor& out) {
+// 只做"布局 → 参数结构体"的翻译；偏移量随参数走，内核从 impl 基址寻址。
+inline ::tvv::sycl::Bcast make_bcast_params(const Layout& lay, const Tensor& out) {
     ::tvv::sycl::Bcast p{};
-    const size_t ndim = out_shape.size();
-    require_dims(ndim, "binary op");
-    p.ndim = static_cast<int32_t>(ndim);
-
-    int64_t total = 1;
-    for (int64_t d : out_shape) total *= d;
-    p.numel = total;
-
-    const auto sa = broadcast_strides(A.shape(), A.strides(), ndim);
-    const auto sb = broadcast_strides(B.shape(), B.strides(), ndim);
-    for (size_t d = 0; d < ndim; ++d) {
-        p.shape[d] = out_shape[d];
-        p.sa[d]    = sa[d];
-        p.sb[d]    = sb[d];
+    require_dims(static_cast<size_t>(lay.ndim), "binary op");
+    p.ndim  = lay.ndim;
+    p.numel = lay.numel;
+    for (int32_t d = 0; d < lay.ndim; ++d) {
+        p.shape[d] = lay.shape[d];
+        p.sa[d]    = lay.operands[0].strides[d];
+        p.sb[d]    = lay.operands[1].strides[d];
     }
-    p.off_a = A.offset();
-    p.off_b = B.offset();
+    p.off_a = lay.operands[0].offset;
+    p.off_b = lay.operands[1].offset;
     p.off_o = out.offset();
     return p;
-}
-
-// 无需转换时零拷贝，否则生成一个物化的 Typecast 临时量。每次 SYCL launch 都是同步
-// 的，所以临时量在离开作用域前已被完全消费。
-inline const Tensor& promote(const Tensor& t, DataType res, Tensor& storage) {
-    if (t.dtype() == res) return t;
-    storage = ops::Typecast(t, res);
-    return storage;
 }
 
 inline std::shared_ptr<SYCLContext> context_of(const Tensor& t, const char* what) {
@@ -94,42 +81,31 @@ inline std::shared_ptr<SYCLContext> context_of(const Tensor& t, const char* what
     return ctx;
 }
 
+// 后端策略：把统一迭代层的 Layout 翻译成 seam 参数并发射。
+struct SyclElementwise {
+    using Impl = SYCLTensor;
+    using Ctx  = SYCLContext;
+
+    static constexpr Device           device = Device::SYCL;
+    static constexpr std::string_view name   = "sycl";
+
+    static void activate(Ctx& ctx) { ctx.activate(); }
+
+    template <class Op>
+    static void launch(Ctx& ctx, const Tensor& A, const Tensor& B, const Tensor& out,
+                       const std::shared_ptr<Impl>& ai, const std::shared_ptr<Impl>& bi,
+                       const std::shared_ptr<Impl>& oi, DataType, Op op, const Layout& lay) {
+        const ::tvv::sycl::Bcast p = make_bcast_params(lay, out);
+        check(::sycl_c_launch_binary(handle_of(ctx), ai->data(), bi->data(), oi->data(),
+                                     static_cast<int>(A.dtype()), op, &p),
+              "binary launch");
+    }
+};
+
 // 通用的广播 launch。
 inline Tensor bcast_binary(int op, const Tensor& A, const Tensor& B, DataType out_dtype,
                            Tensor* dst) {
-    DimArray out_shape;
-    if (!broadcast_shapes(A.shape(), B.shape(), out_shape))
-        throw std::runtime_error("binary op: shapes are not broadcastable");
-    const std::span<const int64_t> want(out_shape);
-
-    if (dst != nullptr) {
-        if (!dst->is_contiguous())
-            throw std::runtime_error(
-                "dst: non-contiguous view is not supported here; call to_contiguous() first");
-        if (dst->dtype() != out_dtype)
-            throw std::runtime_error("dst dtype must equal the promoted result dtype");
-        if (!same_shape(dst->shape(), want))
-            throw std::runtime_error("dst shape must equal the broadcast result shape");
-    }
-    Tensor res;
-    if (dst == nullptr) res = Tensor(want, out_dtype, Device::SYCL);
-    Tensor& out = dst != nullptr ? *dst : res;
-
-    const auto A_impl = std::dynamic_pointer_cast<SYCLTensor>(A.get_impl());
-    const auto B_impl = std::dynamic_pointer_cast<SYCLTensor>(B.get_impl());
-    const auto O_impl = std::dynamic_pointer_cast<SYCLTensor>(out.get_impl());
-    if (!A_impl || !B_impl || !O_impl)
-        throw std::runtime_error("sycl binary op: operands must live on the SYCL device");
-    auto ctx = std::dynamic_pointer_cast<SYCLContext>(A_impl->context());
-    if (!ctx) throw std::runtime_error("sycl binary op: missing SYCLContext");
-
-    ctx->activate();
-    const ::tvv::sycl::Bcast p = make_bcast_params(A, B, want, out);
-    check(::sycl_c_launch_binary(
-              handle_of(*ctx), A_impl->data(), B_impl->data(), O_impl->data(),
-              static_cast<int>(A.dtype()), op, &p),
-          "binary launch");
-    return res;
+    return ops::iter::launch_binary<SyclElementwise>(op, A, B, out_dtype, dst);
 }
 
 // 二元算术：dtype 提升 + NumPy 广播。
@@ -174,10 +150,8 @@ inline Tensor compare_impl(int cmp, const Tensor& a, const Tensor& b) {
     const Tensor& A = promote(a, res_type, storage_a);
     const Tensor& B = promote(b, res_type, storage_b);
 
-    DimArray out_shape;
-    if (!broadcast_shapes(A.shape(), B.shape(), out_shape))
-        throw std::runtime_error("comparison: shapes are not broadcastable");
-    const std::span<const int64_t> want(out_shape);
+    const Layout lay = ops::iter::build_binary(A, B, "comparison");
+    const std::span<const int64_t> want(lay.shape);
 
     Tensor out(want, DataType::BOOL, Device::SYCL);
     const auto A_impl = std::dynamic_pointer_cast<SYCLTensor>(A.get_impl());
@@ -192,7 +166,7 @@ inline Tensor compare_impl(int cmp, const Tensor& a, const Tensor& b) {
     equality_tolerances(a.dtype(), b.dtype(), abs_tol, rel_tol);
 
     ctx->activate();
-    const ::tvv::sycl::Bcast p = make_bcast_params(A, B, want, out);
+    const ::tvv::sycl::Bcast p = make_bcast_params(lay, out);
     check(::sycl_c_launch_compare(
               handle_of(*ctx), A_impl->data(), B_impl->data(), O_impl->data(),
               static_cast<int>(A.dtype()), cmp, abs_tol, rel_tol, &p),

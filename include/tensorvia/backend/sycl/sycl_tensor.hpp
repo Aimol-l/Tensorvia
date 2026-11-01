@@ -16,6 +16,9 @@ private:
     void*                        m_data = nullptr;
     size_t                       m_numel = 0;
     DataType                     m_dtype = DataType::FLOAT32;
+    // 分配这条 buffer 的队列（对应 CUDA 的 m_stream）。释放必须交还给同一条
+    // 队列，才能排在引用它的既有工作之后；句柄归 context 所有，析构时必然有效。
+    void*                        m_queue = nullptr;
     std::shared_ptr<SYCLContext> m_context;
 
     void init(void* ptr, size_t numel, DataType dtype,

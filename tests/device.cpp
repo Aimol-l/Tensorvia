@@ -7,6 +7,11 @@
 #include "tensorvia/backend/cuda/cuda_context.hpp"
 #include "tensorvia/backend/cuda/cuda_tensor.hpp"
 #endif
+#if defined(BACKEND_VULKAN)
+// 通道相关用例要看 VulkanContext 本身的队列池。
+#include "tensorvia/backend/vulkan/vulkan_context.hpp"
+#include "tensorvia/backend/vulkan/vulkan_tensor.hpp"
+#endif
 
 // ---------- 0. 被测后端 ----------
 // 先报告这次构建选中的后端在这台机器上能不能跑，避免把 CPU 的结果误当成
@@ -396,6 +401,54 @@ TEST(CudaStream, OneLazyStreamPerThreadAndOpsStayCorrect) {
     ctx->synchronize_all();
 }
 #endif  // BACKEND_CUDA
+
+
+// ---------- 0f'. Vulkan 提交通道：每线程一条（P2） ----------
+#if defined(BACKEND_VULKAN)
+namespace {
+
+std::shared_ptr<VulkanContext> vulkan_context_of(const Tensor& t) {
+    auto impl = std::dynamic_pointer_cast<VKTensor>(t.get_impl());
+    return impl == nullptr ? nullptr
+                           : std::dynamic_pointer_cast<VulkanContext>(impl->context());
+}
+
+}  // namespace
+
+TEST(VulkanQueue, OneChannelPerThreadAndOpsStayCorrect) {
+    if (!backend_available(Device::VULKAN)) GTEST_SKIP() << "Vulkan is unavailable in this build";
+
+    Tensor probe = Tensor::Ones({4, 4}, DataType::FLOAT32, Device::VULKAN);
+    auto   ctx   = vulkan_context_of(probe);
+    ASSERT_NE(ctx, nullptr);
+    ASSERT_GE(ctx->queue_channel_count(), 1u);
+    std::println("[tensorvia] Vulkan queue channels: {}", ctx->queue_channel_count());
+
+    // 同一线程每次拿到的是同一条通道。
+    VulkanContext::QueueChannel* mine = &ctx->currentQueue();
+    EXPECT_EQ(&ctx->currentQueue(), mine);
+
+    // 算子走这条通道，入队后回到宿主的同步点仍必须正确。
+    Tensor a = probe + probe;
+    for (float v : host_values<float>(a)) EXPECT_FLOAT_EQ(v, 2.0f);
+
+    // 另一条线程拿到的通道可能相同（线程数超过通道数时按设计共享），但它的算子
+    // 与宿主读取必须自成一体。
+    void* other_channel = nullptr;
+    float other_value   = 0.0f;
+    std::thread thread([&] {
+        other_channel = &ctx->currentQueue();
+        Tensor local  = probe * 3.0f;
+        other_value   = host_values<float>(local).front();
+    });
+    thread.join();
+    ASSERT_NE(other_channel, nullptr);
+    EXPECT_FLOAT_EQ(other_value, 3.0f);
+
+    // 设备级同步覆盖所有通道。
+    EXPECT_NO_THROW(ops::synchronize());
+}
+#endif  // BACKEND_VULKAN
 
 
 // ---------- 0g. empty_cache 不碰活着的张量（CUDA） ----------

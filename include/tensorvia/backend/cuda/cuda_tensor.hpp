@@ -3,9 +3,6 @@
 #include <cstddef>
 #include <memory>
 
-// 只有声明：buffer 管理与拷贝路径定义在 src/backend/cuda/device/runtime.cu。
-// data() 返回真正的设备指针（Vulkan 那边返回的是 buffer 句柄），但在宿主上仍然
-// 不能解引用：请用 copy_to_host / Tensor::to_host。
 #include "tensorvia/types.hpp"
 #include "tensorvia/tensor.hpp"
 #include "tensorvia/context.hpp"
@@ -16,8 +13,6 @@ private:
     void*                         m_data = nullptr;
     size_t                        m_numel = 0;
     DataType                      m_dtype = DataType::FLOAT32;
-    // buffer 是在哪条流上分配的；释放记录也记在那条流上，因此复用该块的另一个
-    // 线程只需等待这条流，而不需要设备级屏障。
     CUDAContext::CUDAStream       m_stream;
     std::shared_ptr<CUDAContext>  m_context;
 

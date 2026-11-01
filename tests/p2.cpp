@@ -120,6 +120,46 @@ TEST_F(DeviceOps, RepeatedAllocFreeKeepsValuesCorrect) {
     ops::synchronize();
 }
 
+// ---------- 每线程各自一条队列：并发提交互不干扰 ----------
+// 每条线程只碰自己的张量，并在自己的同步点上读回结果。每（线程, 设备实例）一条
+// 队列时，这些提交真正并发；共享一条队列时它们只是被串行化，结果同样必须正确。
+TEST_F(DeviceOps, ConcurrentThreadsKeepTheirOwnResults) {
+    if (dev == Device::CPU) GTEST_SKIP() << "CPU 后端没有队列，并发提交不经过异步路径";
+    if (!backend_available(dev)) GTEST_SKIP() << device_to_string(dev) << " is unavailable";
+
+    constexpr int kThreads = 4;
+    constexpr int kRounds = 8;
+    std::array<std::atomic<int>, kThreads> mismatches{};
+
+    std::vector<std::thread> workers;
+    for (int i = 0; i < kThreads; ++i) {
+        workers.emplace_back([&, i] {
+            const float base = static_cast<float>(i + 1);
+            for (int round = 0; round < kRounds; ++round) {
+                // 全部是线程私有张量：跨线程没有任何共享写入。
+                Tensor a = Tensor::Fill({32, 32}, base, DataType::FLOAT32, dev);
+                Tensor b = ops::MatMul(a, a);           // 32 * base * base
+                Tensor c = b + a;                       // 32 * base^2 + base
+                // 只在本线程的同步点上读：这条队列之前的提交必须先完成。
+                const auto values = host_values<float>(c);
+                const float expected = 32.0f * base * base + base;
+                for (float v : values) {
+                    if (std::abs(v - expected) > kEps) {
+                        mismatches[i].fetch_add(1);
+                        break;
+                    }
+                }
+            }
+        });
+    }
+    for (auto& worker : workers) worker.join();
+
+    for (int i = 0; i < kThreads; ++i) {
+        EXPECT_EQ(mismatches[i].load(), 0) << "thread " << i;
+    }
+    EXPECT_NO_THROW(ops::synchronize());
+}
+
 // ---------- 设备级控制覆盖所有线程 ----------
 // 每条线程各自入队，最后由主线程 synchronize：所有线程的流都要被覆盖。
 TEST_F(DeviceOps, SynchronizeCoversOtherThreadsWork) {

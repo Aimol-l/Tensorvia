@@ -32,8 +32,7 @@ struct CudaLazyRegistrar {
             return DeviceProbe{CUDAContext::device_count(),
                                CUDAContext::preferred_device_index()};
         });
-        // 每个被请求的索引一个上下文；注册表记得哪些索引已初始化，所以每个最多
-        // 运行一次。
+        // 每个被请求的索引一个上下文；注册表记得哪些索引已初始化，所以每个最多运行一次。
         register_backend_initializer(Device::CUDA, [](int index) {
             auto ctx = std::make_shared<CUDAContext>(index);
             {

@@ -17,6 +17,9 @@ private:
     DataType                      m_dtype;
     vk::Buffer                    m_buffer;
     VmaAllocation                 m_allocation = nullptr;
+    // 分配这条 buffer 的提交通道（对应 CUDA 的 m_stream）。释放必须交还给同一条
+    // 通道，才能排在引用它的既有命令之后；通道归 context 所有，析构时必然有效。
+    VulkanContext::QueueChannel*  m_queue = nullptr;
     std::shared_ptr<VulkanContext> m_context;
 
 public:

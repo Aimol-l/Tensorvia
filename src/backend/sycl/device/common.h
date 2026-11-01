@@ -9,7 +9,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <mutex>
 #include <type_traits>
+#include <vector>
 
 #include <sycl/sycl.hpp>
 
@@ -21,13 +23,25 @@ using tvv::sycl::kMaxDims;
 
 inline constexpr size_t kWorkGroup = 256;
 
-// queue 放在这里，每个单元都能从那个不透明句柄取回它。索引 -1 表示“由
-// default_selector_v 决定”；非负索引是 sycl::device::get_devices() 中的位置，
-// 也就是外部设备探测所报告的那个索引空间。
+// 每条（线程, 上下文）一条 in-order 队列：首次使用时惰性创建，登记在 context
+// 里供 wait 与析构使用。所有队列都由同一个 sycl::context 构造——USM 分配归属
+// context，不共享 context 的队列之间不能互用同一块内存。
+// 索引 -1 表示“由 default_selector_v 决定”；非负索引是
+// sycl::device::get_devices() 中的位置，也就是外部设备探测所报告的那个索引空间。
 struct Context {
-    ::sycl::queue queue;
-    explicit Context(int device_index = -1)
-        : queue(device_of(device_index), ::sycl::property::queue::in_order()) {}
+    ::sycl::device  device;
+    ::sycl::context sycl_context;
+    uint64_t        id = 0;
+    std::mutex      queues_mutex;
+    std::vector<::sycl::queue*> queues;  // 所有线程已创建的队列
+
+    explicit Context(int device_index = -1);
+    ~Context();
+    Context(const Context&) = delete;
+    Context& operator=(const Context&) = delete;
+
+    // 调用线程在本 context 上的队列；首次调用时创建并登记到 queues。
+    ::sycl::queue& current_queue();
 
     static ::sycl::device device_of(int device_index) {
         if (device_index < 0) return ::sycl::device(::sycl::default_selector_v);
@@ -41,7 +55,12 @@ struct Context {
 };
 
 inline ::sycl::queue& queue_of(void* ctx) {
-    return static_cast<Context*>(ctx)->queue;
+    return static_cast<Context*>(ctx)->current_queue();
+}
+
+// 句柄就是 context 拥有的那个 queue 对象的地址，生命周期与 context 一致。
+inline ::sycl::queue& queue_from_handle(void* handle) {
+    return *static_cast<::sycl::queue*>(handle);
 }
 
 // ---------------------------------------------------------------------------

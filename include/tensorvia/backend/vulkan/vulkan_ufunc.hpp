@@ -10,89 +10,71 @@
 #include "tensorvia/tensor.hpp"
 #include "tensorvia/ops.hpp"
 #include "tensorvia/cpu_ops.hpp"
+#include "tensorvia/tensor_iterator.hpp"
 #include "tensorvia/backend/vulkan/vulkan_common.hpp"
 #include "tensorvia/backend/vulkan/vulkan_context.hpp"
 #include "tensorvia/backend/vulkan/vulkan_tensor.hpp"
 
 namespace ops::vk_ufunc {
 
-using ops::ufunc::broadcast_shapes;
-using ops::ufunc::broadcast_strides;
-using ops::ufunc::same_shape;
+using ops::iter::broadcast_shapes;
+using ops::iter::broadcast_strides;
+using ops::iter::same_shape;
+using ops::iter::Layout;
+using ops::iter::promote;
 
-inline BcastVecParams make_bcast_params(const Tensor& A, const Tensor& B,
-                                        std::span<const int64_t> out_shape) {
+// 只做"布局 → push constant"的翻译；Vulkan 的 push constant 是 32 位域，所以
+// 形状、步长与偏移都要先确认能装下。偏移量随参数走，shader 从 buffer 基址寻址。
+inline BcastVecParams make_bcast_params(const Layout& lay, const Tensor& out) {
     BcastVecParams p{};
-    p.ndim = int32_t(out_shape.size());
-    int64_t total = 1;
-    for (int64_t d : out_shape) total *= d;
-    if (total > INT32_MAX)
+    p.ndim  = lay.ndim;
+    p.numel = lay.numel;
+    if (lay.numel > INT32_MAX)
         throw std::runtime_error("vulkan binary op: result exceeds 2^31 elements");
-    p.numel = total;
-    const auto sa = broadcast_strides(A.shape(), A.strides(), out_shape.size());
-    const auto sb = broadcast_strides(B.shape(), B.strides(), out_shape.size());
-    for (size_t d = 0; d < out_shape.size(); ++d) {
-        if (out_shape[d] > INT32_MAX || sa[d] > INT32_MAX || sb[d] > INT32_MAX)
+    for (int32_t d = 0; d < lay.ndim; ++d) {
+        const int64_t sa = lay.operands[0].strides[d];
+        const int64_t sb = lay.operands[1].strides[d];
+        if (lay.shape[d] > INT32_MAX || sa > INT32_MAX || sb > INT32_MAX)
             throw std::runtime_error("vulkan binary op: shape/stride exceeds int32");
-        p.shape[d] = int32_t(out_shape[d]);
-        p.sa[d]    = int32_t(sa[d]);
-        p.sb[d]    = int32_t(sb[d]);
+        p.shape[d] = int32_t(lay.shape[d]);
+        p.sa[d]    = int32_t(sa);
+        p.sb[d]    = int32_t(sb);
     }
-    if (A.offset() > INT32_MAX || B.offset() > INT32_MAX)
+    if (lay.operands[0].offset > INT32_MAX || lay.operands[1].offset > INT32_MAX)
         throw std::runtime_error("vulkan binary op: view offset exceeds int32");
-    p.off_a = int32_t(A.offset());
-    p.off_b = int32_t(B.offset());
+    if (out.offset() > INT32_MAX)
+        throw std::runtime_error("vulkan binary op: view offset exceeds int32");
+    p.off_a = int32_t(lay.operands[0].offset);
+    p.off_b = int32_t(lay.operands[1].offset);
+    p.off_o = int32_t(out.offset());
     return p;
 }
 
-inline const Tensor& promote(const Tensor& t, DataType res, Tensor& storage) {
-    if (t.dtype() == res) return t;
-    storage = ops::Typecast(t, res);
-    return storage;
-}
+// 后端策略：把统一迭代层的 Layout 翻译成 push constant 并递交给 shader。
+struct VulkanElementwise {
+    using Impl = VKTensor;
+    using Ctx  = VulkanContext;
+
+    static constexpr Device           device = Device::VULKAN;
+    static constexpr std::string_view name   = "vulkan";
+
+    // Vulkan 的提交通道按线程选取，无需显式切换"当前设备"。
+    static void activate(Ctx&) {}
+
+    static void launch(Ctx& ctx, const Tensor& A, const Tensor& B, const Tensor& out,
+                       const std::shared_ptr<Impl>& ai, const std::shared_ptr<Impl>& bi,
+                       const std::shared_ptr<Impl>& oi, DataType, OpType op,
+                       const Layout& lay) {
+        const BcastVecParams p = make_bcast_params(lay, out);
+        ctx.submitCompute(op, A.dtype(), {ai->buffer(), bi->buffer(), oi->buffer()},
+                          static_cast<uint32_t>((p.numel + 255) / 256), 1, 1,
+                          &p, sizeof(p));
+    }
+};
 
 inline Tensor bcast_binary(OpType op, const Tensor& A, const Tensor& B,
                            DataType out_dtype, Tensor* dst) {
-    DimArray out_shape;
-    if (!broadcast_shapes(A.shape(), B.shape(), out_shape))
-        throw std::runtime_error("binary op: shapes are not broadcastable");
-    const std::span<const int64_t> want(out_shape);
-
-    if (dst != nullptr) {
-        if (!dst->is_contiguous())
-            throw std::runtime_error(
-                "dst: non-contiguous view is not supported here; call to_contiguous() first");
-        if (dst->dtype() != out_dtype)
-            throw std::runtime_error("dst dtype must equal the promoted result dtype");
-        if (!same_shape(dst->shape(), want))
-            throw std::runtime_error("dst shape must equal the broadcast result shape");
-    }
-    Tensor res;
-    if (dst == nullptr) res = Tensor(want, out_dtype, Device::VULKAN);
-    Tensor& out = dst != nullptr ? *dst : res;
-
-    const auto A_impl   = std::dynamic_pointer_cast<VKTensor>(A.get_impl());
-    const auto B_impl   = std::dynamic_pointer_cast<VKTensor>(B.get_impl());
-    const auto out_impl = std::dynamic_pointer_cast<VKTensor>(out.get_impl());
-    if (!A_impl || !B_impl || !out_impl)
-        throw std::runtime_error("vulkan binary op: operands must live on the VULKAN device");
-    auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(A_impl->context());
-    if (!ctx_impl)
-        throw std::runtime_error("vulkan binary op: missing VulkanContext");
-
-    const BcastVecParams p = [&] {
-        BcastVecParams q = make_bcast_params(A, B, want);
-        if (out.offset() > INT32_MAX)
-            throw std::runtime_error("vulkan binary op: view offset exceeds int32");
-        q.off_o = int32_t(out.offset());
-        return q;
-    }();
-    ctx_impl->submitCompute(
-        op, A.dtype(),
-        {A_impl->buffer(), B_impl->buffer(), out_impl->buffer()},
-        static_cast<uint32_t>((p.numel + 255) / 256), 1, 1,
-        &p, sizeof(p));
-    return res;
+    return ops::iter::launch_binary<VulkanElementwise>(op, A, B, out_dtype, dst);
 }
 
 // 二元算术：dtype 提升 + NumPy 广播。

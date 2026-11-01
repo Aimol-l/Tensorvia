@@ -29,16 +29,14 @@ int current_device(Device kind);
 void set_device(Device kind, int index);
 
 class DeviceGuard {
+private:
+    DeviceId m_previous;
 public:
     explicit DeviceGuard(DeviceId id);
     DeviceGuard(Device kind, int index) : DeviceGuard(DeviceId{kind, index}) {}
     ~DeviceGuard();
-
     DeviceGuard(const DeviceGuard&) = delete;
     DeviceGuard& operator=(const DeviceGuard&) = delete;
-
-private:
-    DeviceId m_previous;
 };
 
 void export_csv(Tensor& a, const std::string& path);

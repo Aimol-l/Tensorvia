@@ -78,8 +78,7 @@ TensorImplFactory find_factory(DeviceId device) {
         reg.in_flight.erase(device);
         reg.cv.notify_all();
         if (failure) {
-            // 让下一次调用重试，而不是把暂时性失败（比如驱动忙）固化成“该设备
-            // 不存在”。
+            // 让下一次调用重试，而不是把暂时性失败（比如驱动忙）固化成“该设备不存在”。
             reg.attempted.erase(device);
             std::rethrow_exception(failure);
         }

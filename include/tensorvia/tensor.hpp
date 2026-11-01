@@ -190,12 +190,6 @@ public:
     Tensor& operator=(const Tensor& other);
     Tensor& operator=(Tensor&& other) noexcept;
 
-    // 复用 Tensor 对象自身的所有内部容量（shape vector + 数据 buffer）。
-    // 用于热循环里反复使用同一个 Tensor 容器，避免反复构造/析构。
-    // - shape/dtype 与当前一致时：零分配
-    // - dtype 一致、numel 变化：复用 shape vector 容量，buffer 走 pool 重分配
-    // - dtype 或 device 变化：全量重分配（仍走 pool，比从头构造快）
-    // 调用后 buffer 内容未初始化（垃圾值）。
     void reset(std::vector<int64_t> shape, DataType dtype);
     void reset(std::initializer_list<int64_t> shape, DataType dtype);
 

@@ -15,7 +15,7 @@
 #include "tensorvia/backend/vulkan/vulkan_tensor.hpp"
 
 VKTensor::~VKTensor() {
-    if (m_buffer) m_context->destroyBuffer(m_buffer, m_allocation);
+    if (m_buffer) m_context->destroyBuffer(m_buffer, m_allocation, m_queue);
 }
 
 void VKTensor::init(void* ptr, size_t numel, DataType dtype,
@@ -25,7 +25,9 @@ void VKTensor::init(void* ptr, size_t numel, DataType dtype,
     this->m_context = std::move(context);
     if (!m_context) throw std::runtime_error("VKTensor: null VulkanContext");
 
-    std::lock_guard<std::recursive_mutex> lock(m_context->submitMutex());
+    // 先领取本线程的通道：buffer 归属它，之后的提交与释放都要走同一条。
+    m_queue = &m_context->currentQueue();
+    std::lock_guard<std::recursive_mutex> lock(m_queue->mutex);
     vk::Device device = m_context->getDevice();
 
     vulkan_detail::require_int32_indexable(static_cast<int64_t>(numel), "VKTensor::init");
@@ -55,7 +57,7 @@ void VKTensor::init(void* ptr, size_t numel, DataType dtype,
         vmaFlushAllocation(m_context->allocator(), staging_guard.allocation(), 0, VK_WHOLE_SIZE);
 
         vk::CommandBufferAllocateInfo cmdAlloc{};
-        cmdAlloc.setCommandPool(m_context->commandPool())
+        cmdAlloc.setCommandPool(*m_context->currentQueue().command_pool)
             .setLevel(vk::CommandBufferLevel::ePrimary)
             .setCommandBufferCount(1);
         vk::CommandBuffer cmd = device.allocateCommandBuffers(cmdAlloc)[0];
@@ -83,7 +85,7 @@ VKTensor::VKTensor(void* ptr, size_t numel, DataType dtype,
 }
 
 void VKTensor::copy_to(std::shared_ptr<TensorImpl> dst) const {
-    std::lock_guard<std::recursive_mutex> lock(m_context->submitMutex());
+    std::lock_guard<std::recursive_mutex> lock(m_context->currentQueue().mutex);
     auto vk_dst = std::dynamic_pointer_cast<VKTensor>(dst);
     if (!vk_dst) throw std::invalid_argument("copy_to: destination is not a VKTensor");
     if (m_numel != vk_dst->m_numel || m_dtype != vk_dst->m_dtype) {
@@ -97,7 +99,7 @@ void VKTensor::copy_to(std::shared_ptr<TensorImpl> dst) const {
     vk::Device device       = m_context->getDevice();
 
     vk::CommandBufferAllocateInfo allocInfo{};
-    allocInfo.setCommandPool(m_context->commandPool())
+    allocInfo.setCommandPool(*m_context->currentQueue().command_pool)
         .setLevel(vk::CommandBufferLevel::ePrimary)
         .setCommandBufferCount(1);
     vk::CommandBuffer cmd = device.allocateCommandBuffers(allocInfo)[0];
@@ -115,13 +117,13 @@ void VKTensor::copy_to(std::shared_ptr<TensorImpl> dst) const {
 
 std::unique_ptr<TensorImpl> VKTensor::clone() const {
     // 下面的 init() 会在此线程上取同一把递归锁。
-    std::lock_guard<std::recursive_mutex> lock(m_context->submitMutex());
+    std::lock_guard<std::recursive_mutex> lock(m_context->currentQueue().mutex);
     auto cloned            = std::make_unique<VKTensor>(m_numel, m_dtype, m_context);
     const size_t size_bytes = m_numel * calc_dtype_size(m_dtype);
     vk::Device device       = m_context->getDevice();
 
     vk::CommandBufferAllocateInfo cmdAlloc{};
-    cmdAlloc.setCommandPool(m_context->commandPool())
+    cmdAlloc.setCommandPool(*m_context->currentQueue().command_pool)
         .setLevel(vk::CommandBufferLevel::ePrimary)
         .setCommandBufferCount(1);
     vk::CommandBuffer cmd = device.allocateCommandBuffers(cmdAlloc)[0];
