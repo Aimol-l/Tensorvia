@@ -10,7 +10,6 @@ target/
 .mcpp/
 compile_commands.json
 dist/
-specs/
 
 # CMake build trees
 build/
@@ -25,6 +24,10 @@ cmake-build-*/
 *.dylib
 *.dll
 *.exe
+
+# Python 字节码（tools/ 下的生成器与测试运行后产生；曾误提交过一个 .pyc）
+__pycache__/
+*.pyc
 
 # Generated SPIR-V registry (written into the build tree, never the source tree)
 gen/

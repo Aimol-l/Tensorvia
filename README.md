@@ -231,7 +231,7 @@ Python，也不需要宿主机上装 shader 编译器）；规则从 `[build] so
 | `BACKEND_SYCL` | 启用SYCL后端 | OFF |
 | `BACKEND_VULKAN` | 启用Vulkan后端 | OFF |
 | `BUILD_TEST` | 构建测试可执行文件（`tests/`，facade 与 bench 除外） | OFF |
-| `BUILD_BENCH` | 构建 `tests/bench.cpp` | OFF |
+| `BUILD_BENCH` | 构建 `benchmark/bench.cpp` | OFF |
 | `CMAKE_BUILD_TYPE` | 构建类型 (Release/Debug) | Release |
 
 Vulkan 后端需要 `glslangValidator`（≥ 16.5，`GL_EXT_bfloat16`）与 Vulkan 头文件；
