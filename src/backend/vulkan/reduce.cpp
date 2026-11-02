@@ -21,177 +21,117 @@ inline void check_vk(const std::shared_ptr<TensorImpl>& impl, const char* what) 
     if (!impl) throw std::runtime_error(std::string("vulkan ") + what + ": expected a VKTensor");
 }
 
+// 五个归约算子（Sum/Prod/Mean/Min/Max）的轴形式在这里完全同构：形状计算、结果
+// 分配与提交参数都一样，只有输出 dtype 与 OpType 不同。两趟全归约的分岔因此也
+// 只写一份。
+//
+// 全归约（outer*inner == 1）的几何让 vec 着色器的 total=1——一个工作组的 256 个
+// 工作项里只有一个在跑，16M 个元素要串行 500ms 以上。改成先切成
+// kFlatReduceBlocks 段并行算部分值，再对这 B 个部分值折叠；段长取 ceil，末段短于
+// 段长，由着色器按 numel 截断（见 shader 里的 limit）。
+//
+// B 取 1024 足以饱和常见设备；每段 N/1024 个元素（16M 时 64 个/工作项）仍是访存
+// 受限而非 submit 受限。阈值取得比 CUDA/SYCL 高一些：Vulkan 每次 submitCompute
+// 都要录命令并管 fence，固定开销明显更大，小张量上两趟不划算。
+constexpr int32_t kFlatReduceBlocks   = 1024;
+constexpr int64_t kFlatReduceMinNumel = 1 << 18;
+
+Tensor axis_reduce_vk(const Tensor& a, int axis, DataType out_type, OpType op,
+                      const char* what) {
+    auto src_impl = std::dynamic_pointer_cast<VKTensor>(a.get_impl());
+    check_vk(src_impl, what);
+    auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
+    if (!ctx_impl) throw std::runtime_error(std::string("vulkan ") + what + ": missing VulkanContext");
+
+    const int dims = static_cast<int>(a.shape().size());
+    std::vector<int64_t> new_shape;
+    for (int i = 0; i < dims; ++i) {
+        if (i != axis) new_shape.push_back(a.shape(i));
+    }
+    // 单轴内核早于 rank-0 张量出现，把空的归约形状写作 {1}；核心层通过
+    // with_reduced_shape 把结果重塑为真正的 0-dim 张量，所以该回退永远不会到达
+    // 公开 API。
+    if (new_shape.empty()) new_shape = {1};
+
+    int32_t inner_dim = 1;
+    for (int i = axis + 1; i < dims; ++i) inner_dim *= static_cast<int32_t>(a.shape(i));
+    const int32_t axis_dim = static_cast<int32_t>(a.shape(axis));
+    int32_t outer_dim      = 1;
+    for (int i = 0; i < axis; ++i) outer_dim *= static_cast<int32_t>(a.shape(i));
+
+    Tensor result(new_shape, out_type, Device::VULKAN);
+    auto result_impl = std::dynamic_pointer_cast<VKTensor>(result.get_impl());
+    check_vk(result_impl, what);
+
+    if (outer_dim * inner_dim == 1 && axis_dim >= kFlatReduceMinNumel) {
+        const int32_t chunk = static_cast<int32_t>((static_cast<int64_t>(axis_dim) +
+                                                    kFlatReduceBlocks - 1) /
+                                                   kFlatReduceBlocks);
+        Tensor partial({kFlatReduceBlocks}, out_type, Device::VULKAN);
+        auto partial_impl = std::dynamic_pointer_cast<VKTensor>(partial.get_impl());
+        check_vk(partial_impl, what);
+
+        // 趟 1：Mean 先算纯部分和——末段短于 chunk，先除会少算，分母留到趟 2。
+        // numel 传真实元素数：chunk 是 ceil 出来的，B*chunk 会比它大，末段靠这个
+        // 字段截断。
+        const OpType pass1_op = (op == OpType::Mean) ? OpType::SumVec : op;
+        const ReduceVecParams first{.axis_dim = chunk,
+                                    .outer_dim = kFlatReduceBlocks,
+                                    .inner_dim = 1,
+                                    .numel = axis_dim,
+                                    .mean_n = 0};
+        ctx_impl->submitCompute(pass1_op, a.dtype(),
+                                {src_impl->buffer(), partial_impl->buffer()},
+                                static_cast<uint32_t>((kFlatReduceBlocks + 255) / 256), 1, 1,
+                                &first, sizeof(ReduceVecParams));
+
+        // 趟 2：折叠 B 个部分值。输入就是 partial，元素数恰好 B。Mean 的分母是
+        // 全归约的元素数，不是趟 2 自己的 axis_dim（=B）。
+        const ReduceVecParams second{.axis_dim = kFlatReduceBlocks,
+                                     .outer_dim = 1,
+                                     .inner_dim = 1,
+                                     .numel = kFlatReduceBlocks,
+                                     .mean_n = (op == OpType::Mean) ? axis_dim : 0};
+        ctx_impl->submitCompute(op, out_type, {partial_impl->buffer(), result_impl->buffer()},
+                                1, 1, 1, &second, sizeof(ReduceVecParams));
+        return result;
+    }
+
+    // 参数布局与 SoftmaxParams 一致，外加 numel 与 mean_n。
+    const ReduceVecParams params{.axis_dim = axis_dim,
+                                 .outer_dim = outer_dim * inner_dim,
+                                 .inner_dim = inner_dim,
+                                 .numel = static_cast<int32_t>(a.numel()),
+                                 .mean_n = 0};
+    ctx_impl->submitCompute(op, a.dtype(), {src_impl->buffer(), result_impl->buffer()},
+                            static_cast<uint32_t>(((outer_dim * inner_dim) + 255) / 256), 1, 1,
+                            &params, sizeof(ReduceVecParams));
+    return result;
+}
+
 }  // namespace
 
 Tensor SumImpl<Device::VULKAN>::execute(const Tensor& a, int axis) {
-    auto src_impl = std::dynamic_pointer_cast<VKTensor>(a.get_impl());
-    check_vk(src_impl, "Sum");
-    auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
-    if (!ctx_impl) throw std::runtime_error("vulkan Sum: missing VulkanContext");
-
-    const int dims = static_cast<int>(a.shape().size());
-    std::vector<int64_t> new_shape;
-    for (int i = 0; i < dims; ++i) {
-        if (i != axis) new_shape.push_back(a.shape(i));
-    }
-    // 单轴内核早于 rank-0 张量出现，把空的归约形状写作 {1}；核心层通过
-    // with_reduced_shape 把结果重塑为真正的 0-dim 张量，所以该回退永远不会到达
-    // 公开 API。
-    if (new_shape.empty()) new_shape = {1};
-
-    int32_t inner_dim = 1;
-    for (int i = axis + 1; i < dims; ++i) inner_dim *= static_cast<int32_t>(a.shape(i));
-    const int32_t axis_dim = static_cast<int32_t>(a.shape(axis));
-    int32_t outer_dim      = 1;
-    for (int i = 0; i < axis; ++i) outer_dim *= static_cast<int32_t>(a.shape(i));
-
-    Tensor result(new_shape, reduction_type(a.dtype()), Device::VULKAN);
-    auto result_impl = std::dynamic_pointer_cast<VKTensor>(result.get_impl());
-    check_vk(result_impl, "Sum");
-
-    // 参数布局恰好与 SoftmaxParams 一致。
-    SoftmaxParams params{
-        .axis_dim = axis_dim, .outer_dim = outer_dim * inner_dim, .inner_dim = inner_dim};
-
-    ctx_impl->submitCompute(OpType::SumVec, a.dtype(),
-                            {src_impl->buffer(), result_impl->buffer()},
-                            static_cast<uint32_t>(((outer_dim * inner_dim) + 255) / 256), 1, 1,
-                            &params, sizeof(SoftmaxParams));
-    return result;
+    // Sum 把窄整型与 16 位浮点拓宽到真正的累加类型；所有后端遵循同一条
+    // reduction_type 规则。
+    return axis_reduce_vk(a, axis, reduction_type(a.dtype()), OpType::SumVec, "Sum");
 }
 
 Tensor ProdImpl<Device::VULKAN>::execute(const Tensor& a, int axis) {
-    auto src_impl = std::dynamic_pointer_cast<VKTensor>(a.get_impl());
-    check_vk(src_impl, "Prod");
-    auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
-    if (!ctx_impl) throw std::runtime_error("vulkan Prod: missing VulkanContext");
-
-    const int dims = static_cast<int>(a.shape().size());
-    std::vector<int64_t> new_shape;
-    for (int i = 0; i < dims; ++i) {
-        if (i != axis) new_shape.push_back(a.shape(i));
-    }
-    // 单轴内核早于 rank-0 张量出现，把空的归约形状写作 {1}；核心层通过
-    // with_reduced_shape 把结果重塑为真正的 0-dim 张量，所以该回退永远不会到达
-    // 公开 API。
-    if (new_shape.empty()) new_shape = {1};
-
-    int32_t inner_dim = 1;
-    for (int i = axis + 1; i < dims; ++i) inner_dim *= static_cast<int32_t>(a.shape(i));
-    const int32_t axis_dim = static_cast<int32_t>(a.shape(axis));
-    int32_t outer_dim      = 1;
-    for (int i = 0; i < axis; ++i) outer_dim *= static_cast<int32_t>(a.shape(i));
-
-    Tensor result(new_shape, reduction_type(a.dtype()), Device::VULKAN);
-    auto result_impl = std::dynamic_pointer_cast<VKTensor>(result.get_impl());
-    check_vk(result_impl, "Prod");
-
-    // 参数布局恰好与 SoftmaxParams 一致。
-    SoftmaxParams params{
-        .axis_dim = axis_dim, .outer_dim = outer_dim * inner_dim, .inner_dim = inner_dim};
-
-    ctx_impl->submitCompute(OpType::ProdVec, a.dtype(),
-                            {src_impl->buffer(), result_impl->buffer()},
-                            static_cast<uint32_t>(((outer_dim * inner_dim) + 255) / 256), 1, 1,
-                            &params, sizeof(SoftmaxParams));
-    return result;
+    // Prod 与 Sum 同族：窄整型与 16 位浮点拓宽到 reduction_type 再累加。
+    return axis_reduce_vk(a, axis, reduction_type(a.dtype()), OpType::ProdVec, "Prod");
 }
 
 Tensor MeanImpl<Device::VULKAN>::execute(const Tensor& a, int axis) {
-    auto src_impl = std::dynamic_pointer_cast<VKTensor>(a.get_impl());
-    check_vk(src_impl, "Mean");
-    auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
-    if (!ctx_impl) throw std::runtime_error("vulkan Mean: missing VulkanContext");
-
-    std::vector<int64_t> new_shape;
-    for (size_t i = 0; i < a.shape().size(); ++i) {
-        if (static_cast<int>(i) != axis) new_shape.push_back(a.shape(i));
-    }
-    if (new_shape.empty()) new_shape = {1};
-
-    const int dims    = static_cast<int>(a.shape().size());
-    int32_t inner_dim = 1;
-    for (int i = axis + 1; i < dims; ++i) inner_dim *= static_cast<int32_t>(a.shape(i));
-    const int32_t axis_dim = static_cast<int32_t>(a.shape(axis));
-    int32_t outer_dim      = 1;
-    for (int i = 0; i < axis; ++i) outer_dim *= static_cast<int32_t>(a.shape(i));
-
-    SoftmaxParams params{
-        .axis_dim = axis_dim, .outer_dim = outer_dim * inner_dim, .inner_dim = inner_dim};
-
-    Tensor result(new_shape, float_reduction_type(a.dtype()), Device::VULKAN);
-    auto res_impl = std::dynamic_pointer_cast<VKTensor>(result.get_impl());
-    check_vk(res_impl, "Mean");
-    ctx_impl->submitCompute(OpType::Mean, a.dtype(), {src_impl->buffer(), res_impl->buffer()},
-                            static_cast<uint32_t>(((outer_dim * inner_dim) + 255) / 256), 1, 1,
-                            &params, sizeof(SoftmaxParams));
-    return result;
+    return axis_reduce_vk(a, axis, float_reduction_type(a.dtype()), OpType::Mean, "Mean");
 }
 
 Tensor MinImpl<Device::VULKAN>::execute(const Tensor& a, int axis) {
-    auto src_impl = std::dynamic_pointer_cast<VKTensor>(a.get_impl());
-    check_vk(src_impl, "Min");
-    auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
-    if (!ctx_impl) throw std::runtime_error("vulkan Min: missing VulkanContext");
-
-    const int dims = static_cast<int>(a.shape().size());
-    std::vector<int64_t> new_shape;
-    for (int i = 0; i < dims; ++i) {
-        if (i != axis) new_shape.push_back(a.shape(i));
-    }
-    if (new_shape.empty()) new_shape = {1};
-
-    int32_t inner_dim = 1;
-    for (int i = axis + 1; i < dims; ++i) inner_dim *= static_cast<int32_t>(a.shape(i));
-    const int32_t axis_dim = static_cast<int32_t>(a.shape(axis));
-    int32_t outer_dim      = 1;
-    for (int i = 0; i < axis; ++i) outer_dim *= static_cast<int32_t>(a.shape(i));
-
-    Tensor result(new_shape, a.dtype(), Device::VULKAN);
-    auto result_impl = std::dynamic_pointer_cast<VKTensor>(result.get_impl());
-    check_vk(result_impl, "Min");
-
-    SoftmaxParams params{
-        .axis_dim = axis_dim, .outer_dim = outer_dim * inner_dim, .inner_dim = inner_dim};
-
-    ctx_impl->submitCompute(OpType::MinVec, a.dtype(),
-                            {src_impl->buffer(), result_impl->buffer()},
-                            static_cast<uint32_t>(((outer_dim * inner_dim) + 255) / 256), 1, 1,
-                            &params, sizeof(SoftmaxParams));
-    return result;
+    return axis_reduce_vk(a, axis, a.dtype(), OpType::MinVec, "Min");
 }
 
 Tensor MaxImpl<Device::VULKAN>::execute(const Tensor& a, int axis) {
-    auto src_impl = std::dynamic_pointer_cast<VKTensor>(a.get_impl());
-    check_vk(src_impl, "Max");
-    auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
-    if (!ctx_impl) throw std::runtime_error("vulkan Max: missing VulkanContext");
-
-    const int dims = static_cast<int>(a.shape().size());
-    std::vector<int64_t> new_shape;
-    for (int i = 0; i < dims; ++i) {
-        if (i != axis) new_shape.push_back(a.shape(i));
-    }
-    if (new_shape.empty()) new_shape = {1};
-
-    int32_t inner_dim = 1;
-    for (int i = axis + 1; i < dims; ++i) inner_dim *= static_cast<int32_t>(a.shape(i));
-    const int32_t axis_dim = static_cast<int32_t>(a.shape(axis));
-    int32_t outer_dim      = 1;
-    for (int i = 0; i < axis; ++i) outer_dim *= static_cast<int32_t>(a.shape(i));
-
-    Tensor result(new_shape, a.dtype(), Device::VULKAN);
-    auto result_impl = std::dynamic_pointer_cast<VKTensor>(result.get_impl());
-    check_vk(result_impl, "Max");
-
-    SoftmaxParams params{
-        .axis_dim = axis_dim, .outer_dim = outer_dim * inner_dim, .inner_dim = inner_dim};
-
-    ctx_impl->submitCompute(OpType::MaxVec, a.dtype(),
-                            {src_impl->buffer(), result_impl->buffer()},
-                            static_cast<uint32_t>(((outer_dim * inner_dim) + 255) / 256), 1, 1,
-                            &params, sizeof(SoftmaxParams));
-    return result;
+    return axis_reduce_vk(a, axis, a.dtype(), OpType::MaxVec, "Max");
 }
 
 Tensor ArgMaxImpl<Device::VULKAN>::execute(const Tensor& a, int axis) {

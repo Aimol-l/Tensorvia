@@ -2,7 +2,9 @@
 
 > 本文是 spec `specs/2026-11-01-multi-backend-maturity.md` FR-4.3 的校准记录：
 > 每个百分比都能由 `benchmark/bench.cpp` 在参考机器上复现。基线原始数据在
-> [`benchmark/baseline/2026-11-01-i5-14600kf-rtx4070ti.md`](../benchmark/baseline/2026-11-01-i5-14600kf-rtx4070ti.md)，
+> [`benchmark/baseline/2026-11-01-i5-14600kf-rtx4070ti.md`](../benchmark/baseline/2026-11-01-i5-14600kf-rtx4070ti.md)
+> （全量表）与 [`benchmark/baseline/2026-11-02-full-reduce-two-pass.md`](../benchmark/baseline/2026-11-02-full-reduce-two-pass.md)
+> （全归约两趟化后重测的受影响用例），
 > 机器/驱动/编译器/profile 见该文首节。本文不手写 Bench 数字——所有"实测"列
 > 都从基线表取。
 
@@ -51,7 +53,7 @@
 很远的子类（conv2d 2~4%、Vulkan gather 8%）下限因此定得低——下限的作用是抓
 回归，不是假装到达上限。
 
-## 现状对照（Task 9 校准 / Task 10 验收时的基线）
+## 现状对照（Task 9 校准 / Task 10 验收时的基线；全归约一行已按 2026-11-02 的修复更新）
 
 | 子类（用例） | CPU | CUDA | SYCL | VULKAN |
 |---|---|---|---|---|
@@ -61,23 +63,24 @@
 | gather | 32% ✅ | 84% ✅ | 16% ✅ | 8% ✅ |
 | index_select | 120% ✅ | 20% ✅ | 16% ✅ | 1% ✅（贴线） |
 | 轴归约 | 144% ✅ | 16% ✅ | 142% ✅ | 38% ✅ |
-| 全归约（Sum/Prod） | 43% ✅ | **0% ❌** | 21% ✅ | **0% ❌** |
+| 全归约（Sum/Prod） | 43% ✅ | **6% ✅**（原 0% ❌） | **113% ✅**（原 21%） | **20% ✅**（原 0% ❌） |
 | matmul 1024 | 82% ✅ | 12% ✅ | 11% ✅ | 8% ✅ |
 | conv2d | 2% ✅ | 3% ✅（贴线） | 3% ✅ | 4% ✅（贴线） |
 
+全归约的修复见 `specs/2026-11-02-full-reduce-parallelism.md`：轴内核的全归约几何
+是 `outer=inner=1`，`total=1` 让 256 个线程里只有一个串行走完整个 buffer。改成
+两趟（先切 B 段算部分值，再折叠）后，`sum f32 16M` 的 total 从 CUDA 521.8ms /
+SYCL 521.8ms / VULKAN 526.9ms 降到 1.76 / 1.73 / 2.44ms（约 300×）。百分比按各
+后端当次运行的 memcpy 折算，与基线表的分母略有差异（同机波动）。
+
 ## 不达标项（单列，含根因与归属）
 
-1. **CUDA / VULKAN 全归约**（Sum 与 Prod 都是 0.0x% of memcpy，下限 1%）。根因：
-   公共同款 API 把全归约展开成 `axis=0` 且 `outer=inner=1` 的轴归约，轴内核的
-   `total = outer*inner = 1`，只剩一个线程串行走完整个轴（`sum f32 16M`：CUDA
-   ~520ms / Vulkan ~560ms，CPU 2.7ms）。旧 bench 只测提交、看不到设备耗时，
-   Task 6 的三段计时才暴露。修法：全归约走多 block 两趟归约（partial + fold），
-   或让轴内核在 total 过小时也按轴切分网格。**未列入本计划的 Files，归属后续
-   性能任务。**
-2. **VULKAN 类型转换**（2% of memcpy，下限 100%；submit 72.7ms / sync 10.2ms）。
+1. **VULKAN 类型转换**（2% of memcpy，下限 100%；submit 72.7ms / sync 10.2ms）。
    submit 远大于 sync 说明耗时在宿主侧：`to_type` 在 Vulkan 上走了逐元素的宿主
    路径而不是一个 cast 着色器。修法：补 cast 的 Vulkan 着色器路径。**归属后续
    任务。**
+   ~~CUDA / VULKAN 全归约~~（原第 1 项，已于 2026-11-02 修复，见上表与
+   `specs/2026-11-02-full-reduce-parallelism.md`）
 
 贴线项（达标但余量 < 30%，回归会立刻踩线，值得回头看）：CUDA conv2d 3%、
 VULKAN conv2d 4%、VULKAN index_select 1%。conv2d 全后端都只有参照的 2~4%——

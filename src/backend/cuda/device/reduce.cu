@@ -21,35 +21,43 @@ namespace tvv::cuda {
 namespace {
 
 // 每个 (outer, inner) 对一个线程，沿被归约的轴行走。
+//
+// 轴循环的上限按 p.numel 截断：正常布局下恒等（base + axis*inner <= numel 总
+// 成立），只有两趟全归约的趟 1 末段会短于 axis。每个输出只多一次 min，不在
+// 内层循环里。
 template <class T, class Out>
 __global__ void reduce_axis_kernel(const T* in, Out* out, ReduceAxis p, int op) {
     using Acc = contract::reduction_acc_t<T>;
     const int64_t total = p.outer * p.inner;
+    const int64_t numel = p.numel > 0 ? p.numel : p.outer * p.axis * p.inner;
     const int64_t stride = static_cast<int64_t>(gridDim.x) * blockDim.x;
     for (int64_t idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
          idx < total; idx += stride) {
         const int64_t outer_idx = idx / p.inner;
         const int64_t inner_idx = idx % p.inner;
         const int64_t base = outer_idx * p.axis * p.inner + inner_idx;
+        const int64_t limit = min(p.axis, numel - base);
 
         Acc acc;
         if (op == kReduceSum || op == kReduceMean) {
             acc = Acc(0);
-            for (int64_t i = 0; i < p.axis; ++i) acc += static_cast<Acc>(to_compute<Acc>(in[base + i * p.inner]));
+            for (int64_t i = 0; i < limit; ++i) acc += static_cast<Acc>(to_compute<Acc>(in[base + i * p.inner]));
         } else if (op == kReduceProd) {
             acc = Acc(1);
-            for (int64_t i = 0; i < p.axis; ++i) acc *= static_cast<Acc>(to_compute<Acc>(in[base + i * p.inner]));
+            for (int64_t i = 0; i < limit; ++i) acc *= static_cast<Acc>(to_compute<Acc>(in[base + i * p.inner]));
         } else if (op == kReduceMin) {
             acc = to_compute<Acc>(in[base]);
-            for (int64_t i = 1; i < p.axis; ++i)
+            for (int64_t i = 1; i < limit; ++i)
                 acc = contract::min_contract(acc, to_compute<Acc>(in[base + i * p.inner]));
         } else {
             acc = to_compute<Acc>(in[base]);
-            for (int64_t i = 1; i < p.axis; ++i)
+            for (int64_t i = 1; i < limit; ++i)
                 acc = contract::max_contract(acc, to_compute<Acc>(in[base + i * p.inner]));
         }
         if (op == kReduceMean) {
-            out[idx] = store_as<Out>(static_cast<double>(acc) / static_cast<double>(p.axis));
+            const double denom = p.mean_n > 0 ? static_cast<double>(p.mean_n)
+                                              : static_cast<double>(p.axis);
+            out[idx] = store_as<Out>(static_cast<double>(acc) / denom);
         } else {
             out[idx] = store_as<Out>(acc);
         }
@@ -233,6 +241,9 @@ AxisLayout axis_layout(const Tensor& a, int axis, const char* what) {
     for (int i = axis + 1; i < dim; ++i) layout.params.inner *= a.shape(i);
     layout.params.outer = 1;
     for (int i = 0; i < axis; ++i) layout.params.outer *= a.shape(i);
+    // 输入的真实元素数：轴循环按它截断（见 reduce_axis_kernel）。正常布局下等于
+    // outer*axis*inner，填真值只是让恒等式显式。
+    layout.params.numel = static_cast<int64_t>(a.numel());
 
     for (int i = 0; i < dim; ++i) {
         if (i != axis) layout.shape.push_back(a.shape(i));
@@ -242,6 +253,23 @@ AxisLayout axis_layout(const Tensor& a, int axis, const char* what) {
 // API。
     if (layout.shape.empty()) layout.shape = {1};
     return layout;
+}
+
+// 全归约的两趟派发。
+//
+// 轴内核的几何是 outer x axis x inner，全归约展平后是 outer=inner=1、
+// axis=numel，于是 total=1：一个 block 里只有 thread 0 在跑，16M 个元素要串行
+// 500ms 以上（CPU 只要 2.7ms）。改成先切成 kFlatReduceBlocks 段并行算部分值，
+// 再对这 B 个部分值折叠。段长取 ceil，末段短于段长，由内核按 numel 截断。
+//
+// B 取 1024 足以饱和消费级 GPU；每段 N/1024 个元素（16M 时 64 个/线程）仍是
+// 访存受限而非 launch 受限。阈值以下不划算：单线程串行只有数十 µs，多一次派发
+// 加一次 scratch 分配回不来。
+constexpr int64_t kFlatReduceBlocks   = 1024;
+constexpr int64_t kFlatReduceMinNumel = 1 << 16;
+
+bool flat_reduce_applies(const tvv::cuda::ReduceAxis& p) {
+    return p.outer * p.inner == 1 && p.axis >= kFlatReduceMinNumel;
 }
 
 Tensor axis_reduce(const Tensor& a, int axis, DataType out_type, int op, const char* what) {
@@ -255,10 +283,45 @@ Tensor axis_reduce(const Tensor& a, int axis, DataType out_type, int op, const c
         throw std::runtime_error(std::string("cuda ") + what + ": failed to allocate the result");
 
     ctx->activate();
+    const auto stream = static_cast<cudaStream_t>(ctx->stream());
+    const tvv::cuda::ReduceAxis& p = layout.params;
+
+    if (flat_reduce_applies(p)) {
+        const int64_t chunk = (p.axis + kFlatReduceBlocks - 1) / kFlatReduceBlocks;
+        Tensor partial({kFlatReduceBlocks}, out_type, Device::CUDA);
+        const auto partial_impl = std::dynamic_pointer_cast<CUDATensor>(partial.get_impl());
+        if (!partial_impl)
+            throw std::runtime_error(std::string("cuda ") + what +
+                                     ": failed to allocate the reduction scratch");
+
+        // 趟 1：Mean 先算纯部分和——末段短于 chunk，先除会少算，分母留到趟 2。
+        const int pass1_op = (op == tvv::cuda::kReduceMean) ? tvv::cuda::kReduceSum : op;
+        const tvv::cuda::ReduceAxis first{.outer = kFlatReduceBlocks,
+                               .axis = chunk,
+                               .inner = 1,
+                               .numel = p.axis,
+                               .mean_n = 0};
+        tvv::cuda::check_cuda(
+            tvv::cuda::launch_reduce_axis(stream, src.data(), partial_impl->data(),
+                                          src.dtype(), out_type, pass1_op, first),
+            what);
+
+        // 趟 2：折叠 B 个部分值。输入就是 partial，元素数恰好 B，截断恒等。
+        const tvv::cuda::ReduceAxis second{.outer = 1,
+                                .axis = kFlatReduceBlocks,
+                                .inner = 1,
+                                .numel = kFlatReduceBlocks,
+                                .mean_n = (op == tvv::cuda::kReduceMean) ? p.axis : 0};
+        tvv::cuda::check_cuda(
+            tvv::cuda::launch_reduce_axis(stream, partial_impl->data(), out_impl->data(),
+                                          out_type, out_type, op, second),
+            what);
+        return out;
+    }
+
     tvv::cuda::check_cuda(
-        tvv::cuda::launch_reduce_axis(static_cast<cudaStream_t>(ctx->stream()),
-                                      src.data(), out_impl->data(), src.dtype(),
-                                      out_type, op, layout.params),
+        tvv::cuda::launch_reduce_axis(stream, src.data(), out_impl->data(), src.dtype(),
+                                      out_type, op, p),
         what);
     return out;
 }

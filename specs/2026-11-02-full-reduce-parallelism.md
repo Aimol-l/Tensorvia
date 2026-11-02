@@ -1,8 +1,8 @@
 # Specification: 全归约的并行化——三个设备后端的两趟归约
 
 ## Metadata
-- **Version**: 1.0.0
-- **Status**: Draft
+- **Version**: 1.0.1
+- **Status**: Implemented
 - **Author**: Claude Code
 - **Created**: 2026-11-02
 - **Last Updated**: 2026-11-02
@@ -45,14 +45,14 @@ limit = min(axis, numel - base)        // base = outer_idx*axis*inner + inner_id
 `numel` 的来源按后端而异：
 
 - **CUDA / SYCL**：`ReduceAxis`（`cuda_launch.hpp` / `sycl_island.h`，后者经 `common.h` 被设备单元看到，接缝两侧同一份定义）增加 `int64_t numel`，语义为"输入缓冲区的真实元素数"。取 0 表示按几何 `outer*axis*inner` 推导，作为漏填时的兜底——直接信一个可能是 0 的字段会让 `limit` 变负、循环空转、静默算错。
-- **VULKAN**：着色器内以 `params.outer_dim * params.axis_dim` 推导（`outer_dim` 是输出总数，其乘积正是元素数），**不增加 push constant**。这与"给全部 40 份着色器加第 4 个字段"相比改动最小；代价是依赖 int32 算术，与既有 `axis_dim` / `uint base_offset` 的取值上限一致（>2^31 元素的张量本来就不被现有几何支持）。
+- **VULKAN**：宿主经 push constant 显式传入（`ReduceVecParams::numel`）。**不能在着色器内用 `outer_dim * axis_dim` 推导**——单趟路径下两者相等，但两趟趟 1 的几何是 `(B, ceil(N/B), 1)`，该乘积含补位、比真实元素数大，末段就不会被截断而越界读 buffer 之外（实施时正是这么错的：素数尺寸上 Prod 返回 0）。代价是 40 份着色器各加一个字段；换来的是不依赖"几何乘积恰好等于元素数"这个只在单趟下成立的隐含假设。
 
 ### Mean 的显式分母
 
 两趟路径中 `Mean` 的趟 1 必须用纯累加（不能先除以 `chunk`——末段短于 `chunk`，先除会少算），趟 2 才除，且分母是全归约的元素数 N 而不是趟 2 自己的 `axis`（=B）。
 
 - **CUDA / SYCL**：`ReduceAxis` 增加 `int64_t mean_n`；0 表示用 `axis`（既有单趟调用不变）。
-- **VULKAN**：`shader/mean/mean_*.comp` 8 份增加第 4 个 push constant `mean_n`（0 = 用 `axis_dim`），`registerOp(OpType::Mean, ...)` 的 push 尺寸随之更新。这是本次唯一新增的 push constant，仅 mean 一族需要；其余 4 个 op 不加。
+- **VULKAN**：`shader/mean/mean_*.comp` 8 份增加第 4 个 push constant `mean_n`（0 = 用 `axis_dim`），`registerOp(OpType::Mean, ...)` 的 push 尺寸随之更新。仅 mean 一族需要这个字段，其余 4 个 op 不加。
 
 ### 三处落点
 
@@ -82,12 +82,12 @@ Vulkan 的收敛是本次修复的前置条件：5 个入口目前的形状计�
 - **FR-1 两趟几何**：满足触发条件时后端必须走两趟（几何见上），不得以其他方式（如原子累加）替代——原子无法表达 `contract::min_contract` / `max_contract` 的 NaN 传播契约。
 - **FR-2 恒等截断**：轴循环上限按真实 `numel` 截断，且在正常布局下恒等；单趟路径数值结果不得改变。
 - **FR-3 显式分母**：`Mean` 两趟路径的趟 1 纯累加、趟 2 以 N 为分母；单趟路径行为不变。
-- **FR-4 零新增资产**：不新增内核或着色器文件；对既有 40 份 Vulkan 归约着色器的改动仅限"增加截断"与 mean 的 `mean_n` 字段。
+- **FR-4 零新增资产**：不新增内核或着色器文件；对既有 40 份 Vulkan 归约着色器的改动仅限"增加截断"、`numel` 字段与 mean 的 `mean_n` 字段。
 - **FR-5 Vulkan driver 收敛**：5 个归约入口收敛为单一 helper，public 入口为薄封装。
 
 ### Non-functional Requirements
 
-- **NFR-1 正确性不回归**：四条 lane 既有测试全绿；轴归约结果逐位不变；全归约因累加顺序改变产生的偏差在既有容差内（浮点输入的累加器本就行 `double`，相对偏差 ~1e-16）。
+- **NFR-1 正确性不回归**：四条 lane 既有测试全绿；轴归约结果逐位不变；全归约因累加顺序改变产生的偏差在既有容差内。**累加器宽度按后端而异，spec 不得笼统断言"double"**：CPU 的 `reduce_acc_t<float>` 是 double，而 CUDA / SYCL 的是 `promoted_t<T>`——float32 输入的归约在设备端用 float32 累加（只把窄整型与 16 位浮点加宽）。因此大 N 的跨后端浮点归约比对必须用相对容差：`Sum` 取 1e-5，`Prod` 取 5e-3（连乘的舍入误差随乘法复合而非相加，比 Sum 差两个量级）。加宽两趟的部分值 dtype 对此没有帮助——误差在每段的累加里，不在窄化里（实测仅改善 7.5e-7）。
 - **NFR-2 可标定**：常量初值入码并注释理由；实测后按 bench 调整，最终值与依据记入 `docs/performance.md`。
 - **NFR-3 维护预算**：FR-8 的度量指标"新增一个算子改动的文件数"不得因本次修复上升。
 
@@ -131,3 +131,25 @@ mcpp build --features cuda --accel "cuda13.3+{sm_89}" && ./build/*/benchmark/ben
 | 日期 | 版本 | 变更 | 作者 |
 |------|------|------|------|
 | 2026-11-02 | 1.0.0 | 初稿：两趟归约设计、恒等截断、Mean 显式分母、三后端落点与验收标准 | Claude Code |
+| 2026-11-02 | 1.0.1 | 实施后修订：NFR-1 改正累加器宽度的错误论断（CUDA/SYCL 浮点归约用 float32 累加，只有 CPU 是 double）；Vulkan 的 numel 由"着色器内推导"改为显式 push constant——推导式在两趟趟 1 拿到的是含补位的 B*chunk，末段不会截断而越界读；补记 float64 累加修复 | Claude Code |
+
+## 实施记录（2026-11-02）
+
+**落点**：CUDA `src/backend/cuda/device/reduce.cu`（`axis_reduce` 分岔 + 内核截断）、SYCL `src/backend/sycl/host/reduce.cpp` 与 `device/reduce.sycl`、Vulkan `src/backend/vulkan/reduce.cpp`（5 个同构入口收敛为 `axis_reduce_vk`）+ 40 份归约着色器。`ReduceAxis`（CUDA/SYCL 各一份）加 `numel` 与 `mean_n`；Vulkan 新增 `ReduceVecParams`。
+
+**常量**：`kFlatReduceBlocks = 1024`（三后端相同）；`kFlatReduceMinNumel` CUDA/SYCL `1<<16`、Vulkan `1<<18`（Vulkan 每次 submitCompute 要录命令并管 fence，固定开销更大）。
+
+**验收对照**：
+
+- **AC-1 达标** ✅。`sum f32 16M` 的 total：CUDA 521.782 → **1.761 ms**（296×，占同次 memcpy 6.3%，下限 1%）、SYCL 521.810 → **1.730 ms**（302×，113%，下限 15%）、VULKAN 526.871 → **2.442 ms**（216×，19.8%，下限 1%）。数据与采集口径见 `benchmark/baseline/2026-11-02-full-reduce-two-pass.md`。SYCL 的 113% 超过 100% 是因为归约只读一遍而 memcpy 读+写，分母口径偏保守。
+- **AC-2 新用例** ✅。`tests/device.cpp` 的 `DeviceOps.FullReduceOnLargeTensors`：1M 与素数 1'000'003 两个尺寸 × Sum/Min/Max/Mean/Prod，加 int8（dtype 提升）与 float64；三条设备 lane 真实执行。
+- **AC-3 全绿** ✅。四条 lane 全绿；两个 `--check` 与 24 项工具测试通过。
+- **AC-4 轴归约不变** ✅。既有轴归约用例全部通过（截断在正常布局下恒等）。
+- **AC-5 零新增资产** ✅。无新增 `.comp` 文件；对着色器的改动仅限截断、`numel`/`mean_n` 字段与 float64 累加。
+
+**过程中修掉的两个真 bug**（都不是预期内的设计，是实施时暴露的）：
+
+1. **Vulkan 的 numel 推导是错的**。原设计让着色器用 `outer_dim * axis_dim` 自己算元素数，但两趟趟 1 的几何是 `(B, ceil(N/B), 1)`，那个乘积含补位、比真实元素数大——末段因此不会被截断，越界读 buffer 之外（素数尺寸上 Prod 直接返回 0）。改为宿主显式传 `numel`，40 份着色器各加一个 push constant 字段。
+2. **Vulkan 的 float64 Sum/Mean 只有 float32 精度**（既有缺陷）：`sumvec_float64.comp` 与 `mean_float64.comp` 把 double 读成 `float` 再累加。本次新用例第一个测到，已改为 double 累加。
+
+**一条没有修的已知限制**：CUDA/SYCL 的浮点归约累加器是 float32（`reduction_acc_t` 只加宽窄整型与 16 位浮点），1M 个元素的 Prod 在 float32 下的偏差约 1e-3，两趟比单趟（7.7e-5）略差。加宽部分值 dtype 无效——误差在每段的累加里而不在窄化里（实测仅改善 7.5e-7）；要修得改 `reduction_acc_t`，那会影响所有归约，超出本次范围。

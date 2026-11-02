@@ -5,8 +5,11 @@ layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
 layout(push_constant) uniform Params {
     int axis_dim;
-    int outer_dim; // 实际上是numel
+    int outer_dim; // 输出总数（= outer*inner），派发边界
     int inner_dim;
+    int numel;     // 输入的真实元素数；两趟归约的末段按它截断
+    // 0 = 用 axis_dim（单趟路径）；两趟全归约的趟 2 传全归约的元素数 N。
+    int mean_n;
 } params;
 
 
@@ -28,24 +31,31 @@ void main() {
     uint outer_idx = idx / params.inner_dim;
     uint inner_idx = idx % params.inner_dim;
     uint base_offset = outer_idx * params.inner_dim * params.axis_dim + inner_idx;
+    // 轴循环按输入的真实元素数截断：两趟全归约的趟 1 末段会短于 axis_dim，不截断
+    // 就会越界读。单趟路径下 numel == outer_dim*axis_dim，截断恒等，不改变结果。
+    // numel 由宿主显式传入——不能在这里用 outer_dim*axis_dim 推导：趟 1 的几何是
+    // (B, ceil(N/B), 1)，那个乘积含补位，会比真实元素数大。
+    int numel = params.numel;
+    int rem = numel - int(base_offset);
+    int limit = params.axis_dim;
+    if (rem < limit) limit = rem;
 
     // 初始化共享内存
     double acc = 0.0f;
     // --- 主循环 (4-way 展开) ---
     uint i = 0;
-    for(; i + (UNROLL - 1) < params.axis_dim; i += UNROLL) {
-        float sum_f = float(src.data[base_offset + i * params.inner_dim])
-        + float(src.data[base_offset + (i + 1)* params.inner_dim])
-        + float(src.data[base_offset + (i + 2)* params.inner_dim])
-        + float(src.data[base_offset + (i + 3)* params.inner_dim]);
-        acc += double(sum_f);
+    for(; i + (UNROLL - 1) < limit; i += UNROLL) {
+        double sum_f = src.data[base_offset + i * params.inner_dim]
+        + src.data[base_offset + (i + 1)* params.inner_dim]
+        + src.data[base_offset + (i + 2)* params.inner_dim]
+        + src.data[base_offset + (i + 3)* params.inner_dim];
+        acc += sum_f;
     }
     
-    for(; i < params.axis_dim; ++i) {
-        float val_f = float(src.data[base_offset + i * params.inner_dim]);
-        acc += double(val_f);
+    for(; i < limit; ++i) {
+        acc += src.data[base_offset + i * params.inner_dim];
     }
 
-    dst.data[idx] = double(acc / double(params.axis_dim));
+    dst.data[idx] = double(acc / double((params.mean_n > 0 ? params.mean_n : params.axis_dim)));
 }
 

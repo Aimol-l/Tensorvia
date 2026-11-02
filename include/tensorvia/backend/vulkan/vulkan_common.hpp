@@ -65,6 +65,21 @@ struct SoftmaxParams {
     int32_t inner_dim;
 };
 
+// Mean 的 vec 着色器额外带一个显式分母：两趟全归约的趟 2 要对 B 个部分和求平均，
+// 分母是全归约的元素数 N 而不是趟 2 自己的 axis_dim（=B）。0 表示用 axis_dim
+// （单趟路径）。
+//
+// `numel` 是输入的真实元素数，轴循环按它截断。**不能由 outer_dim*axis_dim 推导**：
+// 单趟路径下两者相等，但两趟归约趟 1 的几何是 (outer=B, axis=ceil(N/B), inner=1)，
+// 那个乘积含补位、比真实元素数大，末段就不会被截断而越界读。
+struct ReduceVecParams {
+    int32_t axis_dim;
+    int32_t outer_dim;  // 输出总数（= outer*inner），派发边界
+    int32_t inner_dim;
+    int32_t numel;
+    int32_t mean_n;
+};
+
 struct Trans2DParams {
     uint32_t rows;
     uint32_t cols;

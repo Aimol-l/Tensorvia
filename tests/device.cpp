@@ -109,6 +109,104 @@ TEST_F(DeviceOps, ReductionAndSoftmax) {
     expect_close(host_values<float>(neg), axis_ref, "sum-axis-negative");
 }
 
+// 全归约的两趟路径。触发阈值是 64K 元素（Vulkan 256K），这里取 1M 与一个素数
+// 尺寸：素数尺寸是唯一能测出末段截断的形状——2 的幂尺寸下 B*chunk == N、末段长度
+// 为 0，截断写错了也发现不了。
+//
+// 容差一律用相对值：kEps 是绝对值，而 1M 个元素的和量级约 5e5，float32 输出的
+// 最终舍入就有 ~0.03，绝对容差下必然失败。Prod 放到 5e-3——CUDA/SYCL 的浮点归约
+// 累加器是 float32，1M 个元素连乘的偏差本就有一档，两趟比单趟略差；这个容差仍能
+// 抓住结构性错误（范围算错、漏末段、分母错都会给出 O(1) 偏差）。
+TEST_F(DeviceOps, FullReduceOnLargeTensors) {
+    const std::string_view dev_name = device_to_string(dev);
+    // 两组数据。A 组含负数与零，覆盖 Sum/Min/Max/Mean；B 组量级贴近 1，专供
+    // Prod——A 组 1M 个量级 ~8 的数连乘必然溢出（部分积变 ±Inf，再乘 0 得 NaN），
+    // 那种输入在任何累加顺序下都没有有意义的结果，不该用来测归约路径。
+    auto make_a = [](int64_t n) {
+        std::vector<float> v(static_cast<size_t>(n));
+        for (int64_t i = 0; i < n; ++i)
+            v[static_cast<size_t>(i)] = static_cast<float>(i % 97) * 0.25f - 8.0f;
+        return v;
+    };
+    auto make_b = [](int64_t n) {
+        std::vector<float> v(static_cast<size_t>(n));
+        for (int64_t i = 0; i < n; ++i)
+            v[static_cast<size_t>(i)] = 1.0f + static_cast<float>(i % 5 - 2) * 1e-6f;
+        return v;
+    };
+
+    for (const int64_t n : {int64_t{1} << 20, int64_t{1'000'003}}) {
+        std::vector<float> av = make_a(n);
+        const Tensor a_cpu(av, {n});
+        const Tensor a     = moved_to(a_cpu, dev);
+        const float sum_ref  = ops::Sum(a_cpu).item<float>();
+        const float mean_ref = ops::Mean(a_cpu).item<float>();
+        const float min_ref  = ops::Min(a_cpu).item<float>();
+        const float max_ref  = ops::Max(a_cpu).item<float>();
+
+        EXPECT_NEAR(ops::Sum(a).item<float>(), sum_ref, 1e-5 * std::abs(sum_ref))
+            << "sum full n=" << n << " on " << dev_name;
+        EXPECT_NEAR(ops::Mean(a).item<float>(), mean_ref, 1e-5 * std::abs(mean_ref))
+            << "mean full n=" << n << " on " << dev_name;
+        // min/max 与累加顺序无关，必须逐位一致。
+        EXPECT_EQ(ops::Min(a).item<float>(), min_ref) << "min full n=" << n << " on " << dev_name;
+        EXPECT_EQ(ops::Max(a).item<float>(), max_ref) << "max full n=" << n << " on " << dev_name;
+
+        std::vector<float> bv = make_b(n);
+        const Tensor b_cpu(bv, {n});
+        const Tensor b       = moved_to(b_cpu, dev);
+        const float prod_ref = ops::Prod(b_cpu).item<float>();
+        // 容差放到 5e-3：CUDA/SYCL 的浮点归约累加器是 float32（reduction_acc_t
+        // 只把窄整型与 16 位浮点加宽），1M 个元素连乘的 float32 偏差本就有一档，
+        // 两趟（1024 次/段）比单趟（1M 次）略差。这个容差仍能抓住结构性错误——
+        // 范围算错、漏掉末段、分母错都会给出 O(1) 的偏差。
+        EXPECT_NEAR(ops::Prod(b).item<float>(), prod_ref, 5e-3 * std::abs(prod_ref))
+            << "prod full n=" << n << " on " << dev_name;
+
+        // 全归约仍是 0-dim、留在原设备：两趟路径不改变这些契约。
+        const Tensor s = ops::Sum(a);
+        EXPECT_EQ(s.dims(), 0u) << "sum full dims n=" << n << " on " << dev_name;
+        EXPECT_EQ(s.device_id(), a.device_id());
+    }
+
+    // dtype 提升路径：int8 的全归约按 INT64 累加（趟 2 的输入 dtype 因此是
+    // int64，是一条独立的 pipeline 组合）。
+    {
+        const int64_t n = int64_t{1} << 18;
+        std::vector<int8_t> v(static_cast<size_t>(n));
+        for (int64_t i = 0; i < n; ++i)
+            v[static_cast<size_t>(i)] = static_cast<int8_t>((i % 5) - 2);
+        const Tensor cpu(v, {n});
+        const Tensor a = moved_to(cpu, dev);
+        const int64_t sum_ref = ops::Sum(cpu).item<int64_t>();
+        EXPECT_EQ(ops::Sum(a).item<int64_t>(), sum_ref)
+            << "sum int8 full n=" << n << " on " << dev_name;
+        EXPECT_EQ(ops::Sum(a).dtype(), DataType::INT64);
+    }
+
+    // float64：累加器本就是 double，两趟与单趟的相对偏差应在 1e-13 以内。
+    {
+        const int64_t n = int64_t{1} << 18;
+        std::vector<double> v(static_cast<size_t>(n));
+        for (int64_t i = 0; i < n; ++i)
+            v[static_cast<size_t>(i)] = static_cast<double>(i % 251) * 1e-3;
+        const Tensor cpu(v, {n});
+        const Tensor a = moved_to(cpu, dev);
+        const double sum_ref = ops::Sum(cpu).item<double>();
+        EXPECT_NEAR(ops::Sum(a).item<double>(), sum_ref, 1e-9 * std::abs(sum_ref))
+            << "sum f64 full n=" << n << " on " << dev_name;
+    }
+
+    // 阈值以下仍走单趟：小张量的结果必须与参考一致（截断恒等的另一面）。
+    {
+        std::vector<float> small{1, 2, 3, 4, 5};
+        const Tensor cpu(small, std::vector<int64_t>{5});
+        const Tensor a   = moved_to(cpu, dev);
+        EXPECT_NEAR(ops::Sum(a).item<float>(), 15.0f, kEps) << "sum small on " << dev_name;
+        EXPECT_NEAR(ops::Mean(a).item<float>(), 3.0f, kEps) << "mean small on " << dev_name;
+    }
+}
+
 TEST_F(DeviceOps, ComparisonTypecastConcat) {
     std::vector<float> av{1, 2, 3, 4, 5, 6};
     std::vector<float> bv{6, 5, 4, 3, 2, 1};

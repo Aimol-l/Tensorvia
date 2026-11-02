@@ -57,6 +57,9 @@ AxisLayout axis_layout(const Tensor& a, int axis, const char* what) {
     for (int i = axis + 1; i < dim; ++i) layout.params.inner *= a.shape(i);
     layout.params.outer = 1;
     for (int i = 0; i < axis; ++i) layout.params.outer *= a.shape(i);
+    // 输入的真实元素数：轴循环按它截断（见 reduce_axis_kernel）。正常布局下等于
+    // outer*axis*inner，填真值只是让恒等式显式。
+    layout.params.numel = static_cast<int64_t>(a.numel());
 
     for (int i = 0; i < dim; ++i) {
         if (i != axis) layout.shape.push_back(a.shape(i));
@@ -68,6 +71,23 @@ AxisLayout axis_layout(const Tensor& a, int axis, const char* what) {
     return layout;
 }
 
+// 全归约的两趟派发。
+//
+// 轴内核的几何是 outer x axis x inner，全归约展平后是 outer=inner=1、
+// axis=numel，于是 total=1：一个 work-group 里只有一个工作项在跑。改成先切成
+// kFlatReduceBlocks 段并行算部分值，再对这 B 个部分值折叠。段长取 ceil，末段
+// 短于段长，由内核按 numel 截断。
+//
+// B 取 1024 足以饱和常见设备；每段 N/1024 个元素（16M 时 64 个/工作项）仍是
+// 访存受限而非 launch 受限。阈值以下不划算：单工作项串行只有数十 µs，多一次
+// 提交加一次 scratch 分配回不来。
+constexpr int64_t kFlatReduceBlocks   = 1024;
+constexpr int64_t kFlatReduceMinNumel = 1 << 16;
+
+bool flat_reduce_applies(const tvv::sycl::ReduceAxis& p) {
+    return p.outer * p.inner == 1 && p.axis >= kFlatReduceMinNumel;
+}
+
 Tensor axis_reduce(const Tensor& a, int axis, DataType out_type, int op, const char* what) {
     const Tensor src = materialize(a);
     auto ctx = context_of(src, what);
@@ -75,10 +95,42 @@ Tensor axis_reduce(const Tensor& a, int axis, DataType out_type, int op, const c
 
     Tensor out(layout.shape, out_type, Device::SYCL);
     ctx->activate();
-    sycl_ufunc::check(::sycl_c_launch_reduce_axis(
-                          sycl_ufunc::handle_of(*ctx), src.data(), out.data(),
-                          static_cast<int>(src.dtype()), static_cast<int>(out_type),
-                          op, &layout.params),
+    const auto handle = sycl_ufunc::handle_of(*ctx);
+    const tvv::sycl::ReduceAxis& p = layout.params;
+
+    if (flat_reduce_applies(p)) {
+        const int64_t chunk = (p.axis + kFlatReduceBlocks - 1) / kFlatReduceBlocks;
+        Tensor partial({kFlatReduceBlocks}, out_type, Device::SYCL);
+
+        // 趟 1：Mean 先算纯部分和——末段短于 chunk，先除会少算，分母留到趟 2。
+        const int pass1_op = (op == tvv::sycl::kReduceMean) ? tvv::sycl::kReduceSum : op;
+        const tvv::sycl::ReduceAxis first{.outer = kFlatReduceBlocks,
+                                          .axis = chunk,
+                                          .inner = 1,
+                                          .numel = p.axis,
+                                          .mean_n = 0};
+        sycl_ufunc::check(::sycl_c_launch_reduce_axis(handle, src.data(), partial.data(),
+                                                     static_cast<int>(src.dtype()),
+                                                     static_cast<int>(out_type), pass1_op,
+                                                     &first),
+                          what);
+
+        // 趟 2：折叠 B 个部分值。输入就是 partial，元素数恰好 B，截断恒等。
+        const tvv::sycl::ReduceAxis second{.outer = 1,
+                                           .axis = kFlatReduceBlocks,
+                                           .inner = 1,
+                                           .numel = kFlatReduceBlocks,
+                                           .mean_n = (op == tvv::sycl::kReduceMean) ? p.axis : 0};
+        sycl_ufunc::check(::sycl_c_launch_reduce_axis(handle, partial.data(), out.data(),
+                                                      static_cast<int>(out_type),
+                                                      static_cast<int>(out_type), op, &second),
+                          what);
+        return out;
+    }
+
+    sycl_ufunc::check(::sycl_c_launch_reduce_axis(handle, src.data(), out.data(),
+                                                  static_cast<int>(src.dtype()),
+                                                  static_cast<int>(out_type), op, &p),
                       what);
     return out;
 }

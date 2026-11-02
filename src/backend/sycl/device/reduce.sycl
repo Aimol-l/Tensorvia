@@ -11,32 +11,38 @@ void reduce_axis_kernel(sycl::queue& q, const T* in, Out* out,
                         const tvv::sycl::ReduceAxis& p, int op) {
     using Acc = reduction_acc_t<T>;
     const int64_t total = p.outer * p.inner;
+    // 轴循环按真实元素数截断：正常布局下恒等，只有两趟全归约的趟 1 末段会短于
+    // axis。每个输出只多一次 min，不在内层循环里。
+    const int64_t numel = p.numel > 0 ? p.numel : p.outer * p.axis * p.inner;
     q.parallel_for(range_of(total), [=](sycl::id<1> idx) {
         const int64_t i = static_cast<int64_t>(idx[0]);
         const int64_t outer_idx = i / p.inner;
         const int64_t inner_idx = i % p.inner;
         const int64_t base = outer_idx * p.axis * p.inner + inner_idx;
+        const int64_t limit = sycl::min(p.axis, numel - base);
 
         Acc acc;
         if (op == tvv::sycl::kReduceSum || op == tvv::sycl::kReduceMean) {
             acc = Acc(0);
-            for (int64_t k = 0; k < p.axis; ++k)
+            for (int64_t k = 0; k < limit; ++k)
                 acc += static_cast<Acc>(to_compute<Acc>(in[base + k * p.inner]));
         } else if (op == tvv::sycl::kReduceProd) {
             acc = Acc(1);
-            for (int64_t k = 0; k < p.axis; ++k)
+            for (int64_t k = 0; k < limit; ++k)
                 acc *= static_cast<Acc>(to_compute<Acc>(in[base + k * p.inner]));
         } else if (op == tvv::sycl::kReduceMin) {
             acc = to_compute<Acc>(in[base]);
-            for (int64_t k = 1; k < p.axis; ++k)
+            for (int64_t k = 1; k < limit; ++k)
                 acc = contract::min_contract(acc, to_compute<Acc>(in[base + k * p.inner]));
         } else {
             acc = to_compute<Acc>(in[base]);
-            for (int64_t k = 1; k < p.axis; ++k)
+            for (int64_t k = 1; k < limit; ++k)
                 acc = contract::max_contract(acc, to_compute<Acc>(in[base + k * p.inner]));
         }
         if (op == tvv::sycl::kReduceMean) {
-            out[i] = store_as<Out>(static_cast<double>(acc) / static_cast<double>(p.axis));
+            const double denom =
+                p.mean_n > 0 ? static_cast<double>(p.mean_n) : static_cast<double>(p.axis);
+            out[i] = store_as<Out>(static_cast<double>(acc) / denom);
         } else {
             out[i] = store_as<Out>(acc);
         }

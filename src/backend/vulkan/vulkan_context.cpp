@@ -281,14 +281,14 @@ void VulkanContext::registerPipelines() {
     // FloatTypes 会让整型输入找不到流水线。
     registerOp(OpType::Softmax, AllTypes, 2, sizeof(SoftmaxParams));
 
-    registerOp(OpType::SumVec, AllTypes, 2, sizeof(SoftmaxParams));
+    registerOp(OpType::SumVec, AllTypes, 2, sizeof(ReduceVecParams));
 
-    registerOp(OpType::Mean, AllTypes, 2, sizeof(SoftmaxParams));
-    registerOp(OpType::ProdVec, AllTypes, 2, sizeof(SoftmaxParams));
-    registerOp(OpType::MinVec, AllTypes, 2, sizeof(SoftmaxParams));
+    registerOp(OpType::Mean, AllTypes, 2, sizeof(ReduceVecParams));
+    registerOp(OpType::ProdVec, AllTypes, 2, sizeof(ReduceVecParams));
+    registerOp(OpType::MinVec, AllTypes, 2, sizeof(ReduceVecParams));
     registerOp(OpType::Argmax, AllTypes, 2, sizeof(SoftmaxParams));
     registerOp(OpType::Argmin, AllTypes, 2, sizeof(SoftmaxParams));
-    registerOp(OpType::MaxVec, AllTypes, 2, sizeof(SoftmaxParams));
+    registerOp(OpType::MaxVec, AllTypes, 2, sizeof(ReduceVecParams));
 
     registerOp(OpType::All, AllTypes, 2, sizeof(ValueParams<float>));
     registerOp(OpType::Any, AllTypes, 2, sizeof(ValueParams<float>));

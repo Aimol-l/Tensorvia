@@ -97,10 +97,24 @@ struct Bcast {
 };
 
 // 单轴归约的几何形状：输入视为 outer x axis x inner。
+//
+// `numel` 是输入缓冲区的真实元素数，轴循环按它截断（limit = min(axis,
+// numel - base)）。正常布局下 base + axis*inner <= numel 恒成立，截断因此是
+// 恒等的；只有两趟全归约的趟 1（末段短于 axis）会真正用到它。取 0 表示按几何
+// outer*axis*inner 推导——直接信一个可能是 0 的字段会让 limit 变负、循环空转、
+// 静默算错，所以必须留这条兜底。
+//
+// `mean_n` 是 kReduceMean 的分母；0 表示用 axis。两趟全归约的趟 2 要把 B 个
+// 部分和平均成全归约的元素数 N，而不是趟 2 自己的 axis（=B）。
+//
+// 该结构经 extern "C" 接缝以指针传给设备单元；两侧同一份定义（设备单元的
+// common.h include 本文件），加字段是安全的。
 struct ReduceAxis {
-    int64_t outer = 0;
-    int64_t axis  = 0;
-    int64_t inner = 0;
+    int64_t outer  = 0;
+    int64_t axis   = 0;
+    int64_t inner  = 0;
+    int64_t numel  = 0;
+    int64_t mean_n = 0;
 };
 
 // sort / topk 的几何：输入视为 outer x n x inner，每个 (outer, inner) 列独立
