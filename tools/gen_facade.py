@@ -66,6 +66,9 @@ def parse(path: pathlib.Path) -> dict[str, list[str]]:
 # 总头（内部声明分区），tensorvia.hpp 自己只是 include 列表。
 PUBLIC_PARTITIONS = ("version", "types", "context", "tensor", "factory",
                      "cpu_context", "ops")
+# 分区头相对 include/tensorvia/ 的路径；未列出的分区与名字同目录同名。
+# cpu_context 在 backend/cpu/ 子目录（四个后端的分区头统一放 backend/<name>/）。
+PARTITION_REL = {"cpu_context": "backend/cpu/cpu_context.hpp"}
 STMT_PREFIXES = ("return", "if", "for", "while", "switch", "else", "using",
                  "static_assert", "friend", "typename", "template", "case",
                  "default", "do", "catch", "break", "continue", "goto",
@@ -82,7 +85,7 @@ def scan_public_names(iface_dir: pathlib.Path) -> set[tuple[str, str]]:
     patterns below."""
     names: set[tuple[str, str]] = set()
     for part in PUBLIC_PARTITIONS:
-        hpp = iface_dir / f"{part}.hpp"
+        hpp = iface_dir / PARTITION_REL.get(part, f"{part}.hpp")
         if not hpp.is_file():
             raise SystemExit(f"missing public partition header: {hpp}")
         # ---- pass 1: strip class bodies ----

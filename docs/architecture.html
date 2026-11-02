@@ -1,0 +1,882 @@
+<title>Tensorvia 架构图</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* 设计计划
+   色彩：冷灰底 + 墨色，单一赭色强调"派发路径"；四个后端各有一个低饱和标识色
+   字体：IBM Plex Sans（正文/标题）+ IBM Plex Mono（代码与结构名）；中文回退系统字体
+   布局：纵向分层图为主，三张机制图辅助，最后是后端对照表与构建路径
+*/
+:root{
+  --bg:#f5f7fa;
+  --surface:#ffffff;
+  --surface-2:#edf1f6;
+  --ink:#111820;
+  --ink-2:#4e5a68;
+  --ink-3:#78838f;
+  --line:#d7dee7;
+  --line-2:#bfc9d5;
+  --accent:#a3541c;
+  --accent-soft:rgba(163,84,28,.09);
+  --cpu:#5b6877;   --cpu-tint:#eef1f4;
+  --cuda:#2e7c52;  --cuda-tint:#e9f3ed;
+  --sycl:#2e6aac;  --sycl-tint:#e9f0f9;
+  --vk:#a34040;    --vk-tint:#f7eaea;
+  --font-sans:"IBM Plex Sans","PingFang SC","Hiragino Sans GB","Noto Sans CJK SC","Source Han Sans SC","Microsoft YaHei",system-ui,sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0d1116;
+    --surface:#141a21;
+    --surface-2:#1a212a;
+    --ink:#e8edf4;
+    --ink-2:#a6b1bf;
+    --ink-3:#7e8a99;
+    --line:#28313c;
+    --line-2:#3a4551;
+    --accent:#e0a35c;
+    --accent-soft:rgba(224,163,92,.11);
+    --cpu:#9dabc0;   --cpu-tint:rgba(157,171,192,.10);
+    --cuda:#63c08a;  --cuda-tint:rgba(99,192,138,.10);
+    --sycl:#7aa9e6;  --sycl-tint:rgba(122,169,230,.11);
+    --vk:#e08a8a;    --vk-tint:rgba(224,138,138,.10);
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0d1116;
+  --surface:#141a21;
+  --surface-2:#1a212a;
+  --ink:#e8edf4;
+  --ink-2:#a6b1bf;
+  --ink-3:#7e8a99;
+  --line:#28313c;
+  --line-2:#3a4551;
+  --accent:#e0a35c;
+  --accent-soft:rgba(224,163,92,.11);
+  --cpu:#9dabc0;   --cpu-tint:rgba(157,171,192,.10);
+  --cuda:#63c08a;  --cuda-tint:rgba(99,192,138,.10);
+  --sycl:#7aa9e6;  --sycl-tint:rgba(122,169,230,.11);
+  --vk:#e08a8a;    --vk-tint:rgba(224,138,138,.10);
+  color-scheme:dark;
+}
+
+body{
+  background:var(--bg);
+  color:var(--ink);
+  font-family:var(--font-sans);
+  padding-left:max(16px, env(safe-area-inset-left,0px));
+  padding-right:max(16px, env(safe-area-inset-right,0px));
+}
+.page{max-width:1180px;margin:0 auto;padding-block:44px 80px}
+
+/* ---------- 头部 ---------- */
+.eyebrow{
+  font-family:var(--font-mono);
+  font-size:12px;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  color:var(--ink-3);
+  margin:0 0 14px;
+}
+h1{
+  font-size:clamp(30px,4.6vw,46px);
+  line-height:1.1;
+  font-weight:600;
+  letter-spacing:-.02em;
+  margin:0 0 16px;
+  text-wrap:balance;
+}
+.lede{
+  font-size:16.5px;
+  line-height:1.75;
+  color:var(--ink-2);
+  max-width:64ch;
+  margin:0 0 22px;
+}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 8px;padding:0;list-style:none}
+.chips li{
+  font-family:var(--font-mono);
+  font-size:11.5px;
+  color:var(--ink-2);
+  border:1px solid var(--line);
+  border-radius:999px;
+  padding:4px 11px;
+  background:var(--surface);
+}
+
+/* ---------- 章节 ---------- */
+section{margin-block:56px 0}
+.sec-head{display:flex;align-items:baseline;gap:14px;margin:0 0 18px}
+.sec-num{
+  font-family:var(--font-mono);
+  font-size:12px;
+  color:var(--accent);
+  letter-spacing:.1em;
+}
+h2{
+  font-size:14px;
+  font-weight:600;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  color:var(--ink-2);
+  margin:0;
+}
+.sec-rule{flex:1;height:1px;background:var(--line);transform:translateY(-3px)}
+
+/* ---------- 图 ---------- */
+figure.fig{
+  margin:0;
+  background:var(--surface);
+  border:1px solid var(--line);
+  border-radius:14px;
+  overflow:hidden;
+}
+.fig-scroll{overflow-x:auto;padding:22px 22px 6px}
+.fig-scroll svg{display:block;width:100%;height:auto;min-width:880px}
+figcaption{
+  padding:0 22px 20px;
+  color:var(--ink-2);
+  font-size:13.5px;
+  line-height:1.7;
+  max-width:80ch;
+}
+
+/* SVG 内部文字 */
+.fig text{font-family:var(--font-sans)}
+.fig .mono{font-family:var(--font-mono)}
+.fig .t-title{font-size:13px;font-weight:600;fill:var(--ink)}
+.fig .t-body{font-size:11.5px;fill:var(--ink-2)}
+.fig .t-mono{font-family:var(--font-mono);font-size:11.5px;fill:var(--ink)}
+.fig .t-mono-s{font-family:var(--font-mono);font-size:10.5px;fill:var(--ink-2)}
+.fig .t-label{font-size:11px;fill:var(--ink-3);letter-spacing:.05em}
+.fig .box{fill:var(--surface-2);stroke:var(--line);stroke-width:1}
+.fig .box-plain{fill:var(--surface);stroke:var(--line);stroke-width:1}
+.fig .box-accent{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5}
+.fig .hair{stroke:var(--line);stroke-width:1}
+.fig .edge{stroke:var(--line-2);stroke-width:1.4;fill:none}
+.fig .flow{stroke:var(--accent);stroke-width:1.6;fill:none}
+.fig .flow-dash{stroke:var(--accent);stroke-width:1.4;stroke-dasharray:5 4;fill:none}
+.fig .c-cpu{stroke:var(--cpu);stroke-width:1.4;fill:none}
+.fig .c-cuda{stroke:var(--cuda);stroke-width:1.4;fill:none}
+.fig .c-sycl{stroke:var(--sycl);stroke-width:1.4;fill:none}
+.fig .c-vk{stroke:var(--vk);stroke-width:1.4;fill:none}
+.fig .fill-cpu{fill:var(--cpu-tint)}
+.fig .fill-cuda{fill:var(--cuda-tint)}
+.fig .fill-sycl{fill:var(--sycl-tint)}
+.fig .fill-vk{fill:var(--vk-tint)}
+.fig .stroke-cpu{stroke:var(--cpu)}
+.fig .stroke-cuda{stroke:var(--cuda)}
+.fig .stroke-sycl{stroke:var(--sycl)}
+.fig .stroke-vk{stroke:var(--vk)}
+.fig .ink-cpu{fill:var(--cpu)}
+.fig .ink-cuda{fill:var(--cuda)}
+.fig .ink-sycl{fill:var(--sycl)}
+.fig .ink-vk{fill:var(--vk)}
+
+/* ---------- 表格 ---------- */
+.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:14px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:760px;font-size:13px}
+th,td{text-align:left;vertical-align:top;padding:13px 16px;border-bottom:1px solid var(--line)}
+thead th{
+  font-family:var(--font-mono);
+  font-size:11px;
+  letter-spacing:.1em;
+  text-transform:uppercase;
+  color:var(--ink-3);
+  font-weight:500;
+  background:var(--surface-2);
+}
+tbody tr:last-child td{border-bottom:none}
+td:first-child{font-weight:600;white-space:nowrap}
+td code,th code{font-family:var(--font-mono);font-size:12px;color:var(--ink)}
+td{color:var(--ink-2);line-height:1.6}
+td.hl-cpu{color:var(--cpu)}
+td.hl-cuda{color:var(--cuda)}
+td.hl-sycl{color:var(--sycl)}
+td.hl-vk{color:var(--vk)}
+
+/* ---------- 构建卡片 ---------- */
+.cards{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr))}
+.card{
+  background:var(--surface);
+  border:1px solid var(--line);
+  border-radius:14px;
+  padding:20px 22px;
+  min-width:0;
+}
+.card h3{
+  margin:0 0 10px;
+  font-size:14px;
+  font-weight:600;
+  display:flex;
+  align-items:baseline;
+  gap:10px;
+}
+.card h3 .tag{
+  font-family:var(--font-mono);
+  font-size:10.5px;
+  font-weight:400;
+  color:var(--ink-3);
+  border:1px solid var(--line);
+  border-radius:5px;
+  padding:1px 7px;
+}
+.card p{margin:0 0 10px;color:var(--ink-2);font-size:13.5px;line-height:1.7}
+.card p:last-child{margin-bottom:0}
+.card code{font-family:var(--font-mono);font-size:12.5px;color:var(--ink);overflow-wrap:anywhere}
+
+/* ---------- 约束清单 ---------- */
+.invariants{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.invariants li{
+  display:grid;
+  grid-template-columns:auto 1fr;
+  gap:12px;
+  align-items:baseline;
+  padding:13px 16px;
+  background:var(--surface);
+  border:1px solid var(--line);
+  border-left:3px solid var(--accent);
+  border-radius:0 10px 10px 0;
+  font-size:13.5px;
+  line-height:1.65;
+  color:var(--ink-2);
+}
+.invariants strong{color:var(--ink);font-weight:600}
+.invariants .k{
+  font-family:var(--font-mono);
+  font-size:11px;
+  color:var(--accent);
+  letter-spacing:.06em;
+  white-space:nowrap;
+}
+
+footer{
+  margin-top:64px;
+  padding-top:20px;
+  border-top:1px solid var(--line);
+  color:var(--ink-3);
+  font-size:12.5px;
+  line-height:1.8;
+}
+footer code{font-family:var(--font-mono);font-size:12px}
+
+@media (max-width:620px){
+  .page{padding-block:28px 56px}
+  .lede{font-size:15.5px}
+  section{margin-block:44px 0}
+  .fig-scroll{padding:16px 12px 4px}
+  figcaption{padding:0 16px 16px}
+}
+</style>
+
+<div class="page">
+
+  <header>
+    <p class="eyebrow">C++23 · 推理张量库 · v0.3.0</p>
+    <h1>Tensorvia 架构图</h1>
+    <p class="lede">
+      头文件是唯一事实源；一次算子调用在编译期落到某个后端的模板特化上，
+      设备实例第一次被用到时才创建上下文并加载驱动；设备侧算子入队即返回，
+      只有文档列出的同步点才会等待；哪些后端支持哪些算子由源码生成矩阵、
+      CI 守漂移，不靠手写清单。
+    </p>
+    <ul class="chips">
+      <li>4 个后端</li>
+      <li>编译期派发</li>
+      <li>惰性初始化</li>
+      <li>每（线程, 设备）一条隐式流</li>
+      <li>无公开 Stream / Event</li>
+      <li>覆盖矩阵守门</li>
+      <li>连续输入一维内核</li>
+    </ul>
+  </header>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">01</span><h2>分层总览</h2><span class="sec-rule"></span></div>
+
+    <figure class="fig">
+      <div class="fig-scroll">
+        <svg viewBox="0 0 1140 800" role="img" aria-label="Tensorvia 分层架构：用户代码经公共 API 与派发层，落到 CPU、CUDA、SYCL、Vulkan 四个后端的张量实现、内核与资源管理">
+          <defs>
+            <marker id="f1-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 Z" style="fill:var(--ink-3)"/></marker>
+            <marker id="f1-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 Z" style="fill:var(--accent)"/></marker>
+            <marker id="f1-cpu" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 Z" style="fill:var(--cpu)"/></marker>
+            <marker id="f1-cuda" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 Z" style="fill:var(--cuda)"/></marker>
+            <marker id="f1-sycl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 Z" style="fill:var(--sycl)"/></marker>
+            <marker id="f1-vk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 Z" style="fill:var(--vk)"/></marker>
+          </defs>
+
+          <!-- 使用者 -->
+          <rect class="box" x="24" y="20" width="1092" height="62" rx="10"/>
+          <text x="44" y="46" class="t-title">用户代码</text>
+          <text x="112" y="46" class="t-body">tests / examples / benchmark</text>
+          <text x="1096" y="46" class="t-mono-s" text-anchor="end">C++23 · v0.3.0</text>
+          <text x="44" y="70" class="t-mono" style="font-size:12px">#include &lt;tensorvia.hpp&gt;</text>
+          <text x="330" y="70" class="t-mono-s">import tensorvia;（mcpp 模块门面）</text>
+
+          <line class="edge" x1="570" y1="82" x2="570" y2="104" marker-end="url(#f1-ink)"/>
+          <text x="582" y="98" class="t-body">调用</text>
+
+          <!-- 公共 API -->
+          <rect class="box" x="24" y="108" width="1092" height="92" rx="10"/>
+          <text x="44" y="130" class="t-label">公共 API · include/tensorvia/</text>
+
+          <text x="44" y="158" class="t-mono">Tensor</text>
+          <text x="44" y="180" class="t-body">元数据 + 共享实现；视图零拷贝</text>
+
+          <line class="hair" x1="296" y1="150" x2="296" y2="190"/>
+          <text x="324" y="158" class="t-mono">ops::Add / MatMul / Sum …</text>
+          <text x="324" y="180" class="t-body">算子自由函数，唯一入口</text>
+
+          <line class="hair" x1="576" y1="150" x2="576" y2="190"/>
+          <text x="604" y="158" class="t-mono">TensorOptions · DeviceId</text>
+          <text x="604" y="180" class="t-body">工厂与设备寻址</text>
+
+          <line class="hair" x1="856" y1="150" x2="856" y2="190"/>
+          <text x="884" y="158" class="t-mono" style="font-size:12px">synchronize() · empty_cache()</text>
+          <text x="884" y="180" class="t-body">设备级控制，覆盖所有实例</text>
+
+          <line class="flow" x1="570" y1="200" x2="570" y2="224" marker-end="url(#f1-accent)"/>
+          <text x="582" y="217" class="t-mono-s">ops::MatMul(a, b)</text>
+
+          <!-- 派发层 -->
+          <rect class="box-accent" x="24" y="228" width="1092" height="84" rx="10"/>
+          <text x="44" y="252" class="t-label">派发层 · src/core/ops.cpp</text>
+          <text x="1096" y="252" class="t-body" text-anchor="end">编译期选特化 · 概念校验 · DeviceGuard 切 current device</text>
+          <text x="570" y="291" class="t-mono" text-anchor="middle" style="font-size:13.5px">execute_on&lt;Impl&lt;Device&gt;&gt;(a.device_id(), a, b)</text>
+
+          <line class="flow" x1="150" y1="312" x2="150" y2="344" marker-end="url(#f1-accent)"/>
+          <line class="flow" x1="430" y1="312" x2="430" y2="344" marker-end="url(#f1-accent)"/>
+          <line class="flow" x1="710" y1="312" x2="710" y2="344" marker-end="url(#f1-accent)"/>
+          <line class="flow" x1="990" y1="312" x2="990" y2="344" marker-end="url(#f1-accent)"/>
+          <text x="560" y="336" class="t-body" text-anchor="middle">按 DeviceId{kind, index} 选一列</text>
+
+          <!-- 后端实现 -->
+          <rect class="fill-cpu stroke-cpu" x="24" y="348" width="252" height="104" rx="10" stroke-width="1.5"/>
+          <text x="42" y="380" class="t-title ink-cpu">CPUTensor · CPUContext</text>
+          <text x="42" y="406" class="t-mono-s">TensorImpl · ContextImpl</text>
+          <text x="42" y="430" class="t-body">宿主内存；data() 就是指针</text>
+
+          <rect class="fill-cuda stroke-cuda" x="304" y="348" width="252" height="104" rx="10" stroke-width="1.5"/>
+          <text x="322" y="380" class="t-title ink-cuda">CUDATensor · CUDAContext</text>
+          <text x="322" y="406" class="t-mono-s">TensorImpl · ContextImpl</text>
+          <text x="322" y="430" class="t-body">设备指针；buffer 记录所属流</text>
+
+          <rect class="fill-sycl stroke-sycl" x="584" y="348" width="252" height="104" rx="10" stroke-width="1.5"/>
+          <text x="602" y="380" class="t-title ink-sycl">SYCLTensor · SYCLContext</text>
+          <text x="602" y="406" class="t-mono-s">TensorImpl · ContextImpl</text>
+          <text x="602" y="430" class="t-body">USM 指针；队列藏在 pimpl 里</text>
+
+          <rect class="fill-vk stroke-vk" x="864" y="348" width="252" height="104" rx="10" stroke-width="1.5"/>
+          <text x="882" y="380" class="t-title ink-vk">VKTensor · VulkanContext</text>
+          <text x="882" y="406" class="t-mono-s">TensorImpl · ContextImpl</text>
+          <text x="882" y="430" class="t-body">data() 是 buffer 句柄，不是指针</text>
+
+          <!-- D -> E -->
+          <line class="c-cpu" x1="150" y1="452" x2="150" y2="472" marker-end="url(#f1-cpu)"/>
+          <line class="c-cuda" x1="430" y1="452" x2="430" y2="472" marker-end="url(#f1-cuda)"/>
+          <line class="c-sycl" x1="710" y1="452" x2="710" y2="472" marker-end="url(#f1-sycl)"/>
+          <line class="c-vk" x1="990" y1="452" x2="990" y2="472" marker-end="url(#f1-vk)"/>
+
+          <!-- 内核 -->
+          <rect class="box" x="24" y="474" width="252" height="108" rx="10"/>
+          <text x="42" y="504" class="t-mono ink-cpu" style="font-weight:500">src/backend/cpu/ops/*.cpp</text>
+          <text x="42" y="532" class="t-body">AVX2 SIMD（_simd_math.h）</text>
+          <text x="42" y="552" class="t-body">OpenMP 并行</text>
+
+          <rect class="box" x="304" y="474" width="252" height="108" rx="10"/>
+          <text x="322" y="504" class="t-mono ink-cuda" style="font-weight:500">src/backend/cuda/device/*.cu</text>
+          <text x="322" y="532" class="t-body">强类型启动契约</text>
+          <text x="322" y="552" class="t-body mono" style="font-family:var(--font-mono);font-size:11px">cuda_launch.hpp</text>
+
+          <rect class="box" x="584" y="474" width="252" height="108" rx="10"/>
+          <text x="602" y="504" class="t-mono ink-sycl" style="font-weight:500">device/*.sycl + host/*.cpp</text>
+          <text x="602" y="532" class="t-body">extern "C" 接缝</text>
+          <text x="602" y="552" class="t-body" style="font-family:var(--font-mono);font-size:11px">sycl_island.h</text>
+
+          <rect class="box" x="864" y="474" width="252" height="108" rx="10"/>
+          <text x="882" y="504" class="t-mono ink-vk" style="font-weight:500">shader/*.comp → SPIR-V</text>
+          <text x="882" y="532" class="t-body">描述符集 · push constant</text>
+          <text x="882" y="552" class="t-body">SPIR-V 从 vkspv 注册表加载</text>
+
+          <!-- E -> F -->
+          <line class="c-cpu" x1="150" y1="582" x2="150" y2="602" marker-end="url(#f1-cpu)"/>
+          <line class="c-cuda" x1="430" y1="582" x2="430" y2="602" marker-end="url(#f1-cuda)"/>
+          <line class="c-sycl" x1="710" y1="582" x2="710" y2="602" marker-end="url(#f1-sycl)"/>
+          <line class="c-vk" x1="990" y1="582" x2="990" y2="602" marker-end="url(#f1-vk)"/>
+
+          <!-- 资源 -->
+          <rect class="box" x="24" y="604" width="252" height="104" rx="10"/>
+          <text x="42" y="634" class="t-title ink-cpu">每线程 pmr 池</text>
+          <text x="42" y="660" class="t-body">分配 / 释放留在本线程</text>
+          <text x="42" y="680" class="t-body">无需任何同步</text>
+
+          <rect class="box" x="304" y="604" width="252" height="104" rx="10"/>
+          <text x="322" y="634" class="t-title ink-cuda">缓存分配器 · 按流分池</text>
+          <text x="322" y="660" class="t-body">每（线程, 卡）non-blocking 流</text>
+          <text x="322" y="680" class="t-body">同流按序 ⇒ 复用安全</text>
+
+          <rect class="box" x="584" y="604" width="252" height="104" rx="10"/>
+          <text x="602" y="634" class="t-title ink-sycl">USM · malloc_device</text>
+          <text x="602" y="660" class="t-body">每线程 in-order 队列保序</text>
+          <text x="602" y="680" class="t-body">释放经 host_task 排队</text>
+
+          <rect class="box" x="864" y="604" width="252" height="104" rx="10"/>
+          <text x="882" y="634" class="t-title ink-vk">VMA 子分配</text>
+          <text x="882" y="660" class="t-body">每线程提交通道 · fence 回收</text>
+          <text x="882" y="680" class="t-body">buffer 延迟销毁</text>
+
+          <text x="24" y="748" class="t-label">每列是一个后端：只有编译期开关（BACKEND_CPU / CUDA / SYCL / VULKAN）打开时该列才存在；关闭时不编译、不链接、不探测。</text>
+        </svg>
+      </div>
+      <figcaption>
+        上层只有一份，下层各自为政：公共 API 与派发层被四个后端共用，张量实现、内核载体与资源管理三行按后端分列。
+        图中的文件路径是仓库里的真实位置。
+      </figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">02</span><h2>张量如何被创建，后端如何启动</h2><span class="sec-rule"></span></div>
+
+    <figure class="fig">
+      <div class="fig-scroll">
+        <svg viewBox="0 0 1140 430" role="img" aria-label="注册表与惰性初始化：create_tensor_impl 查表命中工厂；未命中时先创建对应设备实例的上下文并注册实现，再加入查表">
+          <defs>
+            <marker id="f2-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 Z" style="fill:var(--accent)"/></marker>
+            <marker id="f2-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 Z" style="fill:var(--ink-3)"/></marker>
+          </defs>
+
+          <rect class="box" x="24" y="56" width="258" height="96" rx="10"/>
+          <text x="42" y="84" class="t-mono">create_tensor_impl(</text>
+          <text x="42" y="104" class="t-mono">&#160;&#160;numel, dtype, DeviceId)</text>
+          <text x="42" y="132" class="t-body">Tensor 构造与算子输出分配</text>
+
+          <line class="flow" x1="282" y1="104" x2="318" y2="104" marker-end="url(#f2-accent)"/>
+          <text x="300" y="94" class="t-body" text-anchor="middle">查表</text>
+
+          <rect class="box" x="322" y="28" width="486" height="156" rx="10"/>
+          <text x="342" y="54" class="t-title">注册表 · src/core/factory.cpp</text>
+
+          <text x="342" y="84" class="t-mono-s">device_probe[kind]</text>
+          <text x="530" y="84" class="t-body">设备数与默认索引</text>
+
+          <text x="342" y="110" class="t-mono-s">backend_initializer[kind]</text>
+          <text x="530" y="110" class="t-body">首次请求某实例时建 context</text>
+
+          <text x="342" y="136" class="t-mono-s">tensor_impl[DeviceId]</text>
+          <text x="530" y="136" class="t-body">造 TensorImpl 的工厂</text>
+
+          <text x="342" y="162" class="t-mono-s">device_control[DeviceId]</text>
+          <text x="530" y="162" class="t-body">synchronize / empty_cache</text>
+
+          <line class="flow" x1="808" y1="104" x2="844" y2="104" marker-end="url(#f2-accent)"/>
+          <text x="826" y="94" class="t-body" text-anchor="middle">命中</text>
+
+          <rect class="box-plain" x="848" y="56" width="268" height="96" rx="10"/>
+          <text x="866" y="84" class="t-title">张量实现</text>
+          <text x="866" y="108" class="t-mono-s">CUDATensor · VKTensor · …</text>
+          <text x="866" y="132" class="t-body">共享该实例的 context</text>
+
+          <line class="flow" x1="565" y1="184" x2="565" y2="218" marker-end="url(#f2-accent)"/>
+          <text x="577" y="206" class="t-body">未命中：该实例尚未初始化</text>
+
+          <rect class="box" x="322" y="222" width="486" height="116" rx="10"/>
+          <text x="342" y="248" class="t-title">惰性初始化 · register_backend_initializer</text>
+          <text x="342" y="274" class="t-body">initializer(index)：建 CUDAContext / SYCLContext / VulkanContext</text>
+          <text x="342" y="296" class="t-body">（此时才加载驱动）→ register_tensor_impl + register_device_control</text>
+          <text x="342" y="318" class="t-body">没有请求过的实例永远不初始化：纯 CPU 程序不加载任何加速器驱动</text>
+
+          <path class="flow-dash" d="M808 280 H828 V170 H812" marker-end="url(#f2-accent)"/>
+          <text x="836" y="232" class="t-label">注册后重试</text>
+
+          <rect class="box" x="24" y="360" width="1092" height="56" rx="10"/>
+          <text x="44" y="383" class="t-body">后端未编入或没有可用设备：device_probe 返回 {0, 0}，请求时抛 runtime_error，不静默回退到 CPU。</text>
+          <text x="44" y="404" class="t-body">裸 Device 字面量经线程局部 current device 解析成 DeviceId；DeviceGuard 只在派发期间临时切换。</text>
+        </svg>
+      </div>
+      <figcaption>
+        张量由注册表里的工厂创建。每个设备实例第一次被请求时才创建 context、注册实现与控制接口；
+        没被请求过的实例始终休眠。设备枚举（有几个实例、默认哪个）同样是惰性探测并缓存的结果。
+      </figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">03</span><h2>一次算子调用落到哪里</h2><span class="sec-rule"></span></div>
+
+    <figure class="fig">
+      <div class="fig-scroll">
+        <svg viewBox="0 0 1140 340" role="img" aria-label="一次 MatMul 调用的派发路径：入口、前置校验、execute_on 按 device 分支到四后端的模板特化、内核入队，未实现的组合在调用点报错">
+          <defs>
+            <marker id="f3-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 Z" style="fill:var(--accent)"/></marker>
+            <marker id="f3-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 Z" style="fill:var(--ink-3)"/></marker>
+          </defs>
+
+          <rect class="box-plain" x="24" y="44" width="196" height="112" rx="10"/>
+          <text x="42" y="78" class="t-mono">ops::MatMul(a, b)</text>
+          <text x="42" y="104" class="t-body">公开算子入口</text>
+          <text x="42" y="124" class="t-body">参数已带 DeviceId</text>
+
+          <line class="flow" x1="220" y1="100" x2="234" y2="100" marker-end="url(#f3-accent)"/>
+
+          <rect class="box-plain" x="238" y="44" width="180" height="112" rx="10"/>
+          <text x="256" y="78" class="t-title">前置校验</text>
+          <text x="256" y="102" class="t-body">device_id 一致</text>
+          <text x="256" y="122" class="t-body">BOOL 张量拒绝</text>
+          <text x="256" y="142" class="t-body">空张量短路</text>
+
+          <line class="flow" x1="418" y1="100" x2="432" y2="100" marker-end="url(#f3-accent)"/>
+
+          <rect class="box-accent" x="436" y="44" width="196" height="112" rx="10"/>
+          <text x="454" y="78" class="t-mono">execute_on&lt;Impl&gt;</text>
+          <text x="454" y="102" class="t-body">switch(device.kind)</text>
+          <text x="454" y="122" class="t-body">概念校验 has_*_impl</text>
+          <text x="454" y="142" class="t-body">DeviceGuard</text>
+
+          <line class="flow" x1="632" y1="100" x2="646" y2="100" marker-end="url(#f3-accent)"/>
+
+          <rect class="box" x="650" y="44" width="240" height="112" rx="10"/>
+          <text x="668" y="70" class="t-mono" style="font-size:11.5px">MatMulImpl&lt;Device&gt;::execute</text>
+          <rect class="fill-cpu stroke-cpu" x="668" y="82" width="104" height="24" rx="6" stroke-width="1.2"/>
+          <text x="720" y="98" class="t-mono-s" text-anchor="middle">CPU</text>
+          <rect class="fill-cuda stroke-cuda" x="780" y="82" width="92" height="24" rx="6" stroke-width="1.2"/>
+          <text x="826" y="98" class="t-mono-s" text-anchor="middle">CUDA</text>
+          <rect class="fill-sycl stroke-sycl" x="668" y="116" width="104" height="24" rx="6" stroke-width="1.2"/>
+          <text x="720" y="132" class="t-mono-s" text-anchor="middle">SYCL</text>
+          <rect class="fill-vk stroke-vk" x="780" y="116" width="92" height="24" rx="6" stroke-width="1.2"/>
+          <text x="826" y="132" class="t-mono-s" text-anchor="middle">Vulkan</text>
+
+          <line class="flow" x1="890" y1="100" x2="904" y2="100" marker-end="url(#f3-accent)"/>
+
+          <rect class="box-plain" x="908" y="44" width="208" height="112" rx="10"/>
+          <text x="926" y="70" class="t-title">内核入队 · 返回</text>
+          <text x="926" y="94" class="t-mono-s">CPU：直接计算</text>
+          <text x="926" y="114" class="t-mono-s">CUDA：写入 stream</text>
+          <text x="926" y="132" class="t-mono-s">SYCL：queue.submit</text>
+          <text x="926" y="150" class="t-mono-s">Vulkan：vkQueueSubmit</text>
+
+          <line class="flow" x1="534" y1="156" x2="534" y2="210" marker-end="url(#f3-ink)"/>
+          <text x="546" y="190" class="t-body">未实现的组合</text>
+
+          <rect class="box" x="238" y="214" width="376" height="72" rx="10"/>
+          <text x="256" y="240" class="t-title">未编入 / 未实现的组合</text>
+          <text x="256" y="262" class="t-body">调用点抛 runtime_error，不静默回退 CPU</text>
+          <text x="256" y="280" class="t-mono-s">not implemented on the CUDA backend</text>
+
+          <line class="flow" x1="1012" y1="156" x2="1012" y2="210" marker-end="url(#f3-accent)"/>
+          <rect class="box-accent" x="650" y="214" width="466" height="72" rx="10"/>
+          <text x="668" y="240" class="t-title">同步点才等待</text>
+          <text x="668" y="266" class="t-mono" style="font-size:11px">item&lt;T&gt;() · to_host() · ops::synchronize()</text>
+
+          <text x="24" y="316" class="t-label">返回值只代表“已入队”：设备侧结果在下一次同步点或宿主读取时才可见，期间宿主可以继续入队下一个算子。</text>
+        </svg>
+      </div>
+      <figcaption>
+        运行期用 DeviceId 选后端，编译期用模板特化选实现：四个后端各自的 <code>MatMulImpl&lt;Device::X&gt;</code>
+        是分离的特化，没写特化的组合由概念检查直接落到报错分支，而不是链接失败或静默换后端。
+      </figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">04</span><h2>数据通路：连续、广播与跨步</h2><span class="sec-rule"></span></div>
+
+    <figure class="fig">
+      <div class="fig-scroll">
+        <svg viewBox="0 0 1140 392" role="img" aria-label="二元逐元素算子的数据通路：统一迭代层从两个操作数推导广播 Layout，按 linearizable 判定走一维内核、广播 strided 内核或先物化再走一维">
+          <defs>
+            <marker id="f4a-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 Z" style="fill:var(--accent)"/></marker>
+            <marker id="f4a-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 Z" style="fill:var(--ink-3)"/></marker>
+          </defs>
+
+          <rect class="box-plain" x="24" y="44" width="196" height="92" rx="10"/>
+          <text x="42" y="76" class="t-mono" style="font-size:11.5px">ops::Add(a, b)</text>
+          <text x="42" y="100" class="t-body">二元逐元素入口</text>
+          <text x="42" y="120" class="t-body">dtype 提升后进迭代层</text>
+
+          <line class="flow" x1="220" y1="90" x2="252" y2="90" marker-end="url(#f4a-accent)"/>
+
+          <rect class="box" x="256" y="44" width="252" height="104" rx="10"/>
+          <text x="274" y="70" class="t-mono" style="font-size:11.5px">iter::build_binary</text>
+          <text x="274" y="88" class="t-mono-s">include/tensorvia/</text>
+          <text x="274" y="104" class="t-mono-s">tensor_iterator.hpp</text>
+          <text x="274" y="126" class="t-body">Layout：广播形状 + 每操作数</text>
+          <text x="274" y="142" class="t-body">strides 与视图 offset</text>
+
+          <line class="flow" x1="508" y1="90" x2="540" y2="90" marker-end="url(#f4a-accent)"/>
+
+          <rect class="box-accent" x="544" y="44" width="168" height="92" rx="10"/>
+          <text x="628" y="76" class="t-mono" text-anchor="middle" style="font-size:11.5px">linearizable</text>
+          <text x="628" y="96" class="t-mono" text-anchor="middle" style="font-size:11.5px">(lay) ?</text>
+          <text x="628" y="120" class="t-body" text-anchor="middle">同形 + 行主序连续</text>
+
+          <line class="flow" x1="712" y1="66" x2="772" y2="52" marker-end="url(#f4a-accent)"/>
+          <text x="722" y="44" class="t-label">是</text>
+          <line class="flow" x1="712" y1="90" x2="772" y2="122" marker-end="url(#f4a-accent)"/>
+          <text x="722" y="112" class="t-label">广播</text>
+          <line class="flow" x1="712" y1="114" x2="772" y2="192" marker-end="url(#f4a-accent)"/>
+          <text x="722" y="166" class="t-label">跨步</text>
+
+          <rect class="box" x="776" y="24" width="340" height="62" rx="10"/>
+          <text x="794" y="48" class="t-title" style="font-size:12px">一维内核</text>
+          <text x="794" y="68" class="t-body">宿主把参数 ndim 置 0；内核跳过每元素的 div/mod 解码</text>
+          <text x="794" y="82" class="t-mono-s">带 offset 的连续视图也走这条</text>
+
+          <rect class="box" x="776" y="96" width="340" height="62" rx="10"/>
+          <text x="794" y="120" class="t-title" style="font-size:12px">strided 内核</text>
+          <text x="794" y="140" class="t-body">有 stride-0 的广播维：重复读取比物化成整形状便宜</text>
+
+          <rect class="box" x="776" y="168" width="340" height="76" rx="10"/>
+          <text x="794" y="192" class="t-title" style="font-size:12px">物化一次，或保持 strided</text>
+          <text x="794" y="212" class="t-body">should_materialize：尾段 &lt; 4 且 ≥ 1024 元素才值得拷</text>
+          <text x="794" y="230" class="t-body">其余跨步视图直接进 strided 内核</text>
+
+          <line class="c-cpu" x1="628" y1="136" x2="628" y2="164" marker-end="url(#f4a-ink)"/>
+          <text x="638" y="156" class="t-label">CPU 后端</text>
+
+          <rect class="box" x="544" y="168" width="168" height="76" rx="10"/>
+          <text x="562" y="192" class="t-body">同一份 Layout 驱动</text>
+          <text x="562" y="210" class="t-body">分段循环（iter::drive）</text>
+          <text x="562" y="230" class="t-body">物化策略全库唯一</text>
+
+          <rect class="box" x="24" y="272" width="1092" height="96" rx="10"/>
+          <text x="44" y="298" class="t-title" style="font-size:12px">三个设备后端各自把 Layout 翻译成内核参数，判定只有一份</text>
+          <text x="44" y="322" class="t-mono-s">CUDA：tv::cuda::Bcast（src/backend/cuda/ufunc_detail.hpp）</text>
+          <text x="44" y="340" class="t-mono-s">SYCL：tv::sycl::Bcast（backend/sycl/sycl_ufunc.hpp）</text>
+          <text x="44" y="358" class="t-mono-s">Vulkan：BcastVecParams（backend/vulkan/vulkan_ufunc.hpp）</text>
+        </svg>
+      </div>
+      <figcaption>
+        连续输入不再为 strided 解码付代价：<code>linearizable</code> 为真时主机端把参数的 <code>ndim</code> 置 0，
+        三个后端的内核都据此走一维分支；广播与跨步才进通用路径。一致性由
+        <code>tests/p1.cpp</code> 的 <code>ContiguousAndStridedPathsAgree</code> 逐元素锁定，
+        收益分后端（SYCL 约 6×、Vulkan +9~15%、CUDA 持平——该尺寸受内存限制）。
+      </figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">05</span><h2>覆盖矩阵：支持性是被守门的</h2><span class="sec-rule"></span></div>
+
+    <figure class="fig">
+      <div class="fig-scroll">
+        <svg viewBox="0 0 1140 396" role="img" aria-label="覆盖矩阵的生成与守门：ops.hpp 与四份后端 ops 头的 Impl 特化加人工标注，经 coverage_matrix.py 生成入库的 coverage.md，CI 的 --check 对漂移失败并指名算子与后端">
+          <defs>
+            <marker id="f5a-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 Z" style="fill:var(--accent)"/></marker>
+          </defs>
+
+          <text x="24" y="36" class="t-label">源码事实</text>
+          <rect class="box" x="24" y="46" width="296" height="76" rx="10"/>
+          <text x="42" y="70" class="t-mono" style="font-size:11.5px">include/tensorvia/ops.hpp</text>
+          <text x="42" y="90" class="t-body">公开算子名（重载按名字收敛）</text>
+          <text x="42" y="110" class="t-body">多行声明 / 模板函数 / 结果类型都要解析到</text>
+
+          <rect class="box" x="24" y="138" width="296" height="104" rx="10"/>
+          <text x="42" y="162" class="t-mono" style="font-size:11.5px">四份后端 ops 头</text>
+          <text x="42" y="180" class="t-mono-s">backend/{cpu,cuda,sycl,vulkan}/*_ops.hpp</text>
+          <text x="42" y="200" class="t-body">template &lt;&gt; struct XxxImpl&lt;Device::X&gt;</text>
+          <text x="42" y="220" class="t-body">注释掉的不算；偏特化直接报错</text>
+          <text x="42" y="238" class="t-body">（不满足派发概念）</text>
+
+          <line class="flow" x1="320" y1="84" x2="392" y2="96" marker-end="url(#f5a-accent)"/>
+          <line class="flow" x1="320" y1="190" x2="392" y2="140" marker-end="url(#f5a-accent)"/>
+
+          <text x="24" y="286" class="t-label">人工标注（唯一来源，不靠猜）</text>
+          <rect class="box" x="24" y="296" width="296" height="76" rx="10"/>
+          <text x="42" y="320" class="t-mono" style="font-size:11.5px">tools/coverage_overrides.toml</text>
+          <text x="42" y="340" class="t-body">组合实现（parts 可校验）· 显式拒绝</text>
+          <text x="42" y="360" class="t-body">（附 file:line 证据）· 异步状态</text>
+
+          <line class="flow" x1="320" y1="334" x2="392" y2="212" marker-end="url(#f5a-accent)"/>
+
+          <rect class="box-accent" x="396" y="96" width="264" height="140" rx="10"/>
+          <text x="414" y="124" class="t-mono" style="font-size:12px">tools/coverage_matrix.py</text>
+          <text x="414" y="146" class="t-body">解析 → 生成 → --check</text>
+          <text x="414" y="166" class="t-body">一格既无 Impl 又无标注</text>
+          <text x="414" y="184" class="t-body">⇒ 报错，指名算子与后端</text>
+          <text x="414" y="204" class="t-body">与 native 格冲突的标注 ⇒ 报错</text>
+          <text x="414" y="226" class="t-mono-s">算子 × 4 后端 = 77 × 4 格</text>
+
+          <line class="flow" x1="660" y1="166" x2="712" y2="166" marker-end="url(#f5a-accent)"/>
+
+          <rect class="box" x="716" y="60" width="400" height="110" rx="10"/>
+          <text x="734" y="84" class="t-mono" style="font-size:12px">docs/coverage.md（入库）</text>
+          <text x="734" y="106" class="t-body">矩阵 + 每后端支持率 + 异步状态</text>
+          <text x="734" y="128" class="t-mono-s">CPU 100% · 设备端各 51 native</text>
+          <text x="734" y="146" class="t-mono-s">+ 21 emulated + 5 unsupported</text>
+          <text x="734" y="164" class="t-mono-s">= 93.5%</text>
+
+          <rect class="box" x="716" y="196" width="400" height="110" rx="10"/>
+          <text x="734" y="220" class="t-mono" style="font-size:12px">CI · coverage job</text>
+          <text x="734" y="242" class="t-body">python3 -I tools/coverage_matrix.py --check</text>
+          <text x="734" y="264" class="t-body">漂移即失败；README 不再维护第二份清单</text>
+          <text x="734" y="286" class="t-body">标注为支持的组合，测试在对应 lane 真实执行</text>
+
+          <rect class="box" x="716" y="330" width="400" height="46" rx="10"/>
+          <text x="734" y="358" class="t-body">删掉一个后端特化再跑：失败信息指名该算子与该后端</text>
+        </svg>
+      </div>
+      <figcaption>
+        覆盖矩阵是 FR-1 的守门人：事实源只有两个——源码里的 <code>Impl</code> 特化与
+        <code>coverage_overrides.toml</code> 的人工标注；矩阵文档由生成器产出、入库、被 CI 校验。
+        组合实现与“不支持”必须显式标注（附证据行），推不出来的格子直接让构建失败。
+      </figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">06</span><h2>异步执行的时间线</h2><span class="sec-rule"></span></div>
+
+    <figure class="fig">
+      <div class="fig-scroll">
+        <svg viewBox="0 0 1140 300" role="img" aria-label="异步执行时间线：宿主连续入队四个算子后调用 synchronize 阻塞；设备在宿主排队期间已按序开始执行，同步点只等残余工作">
+          <defs>
+            <marker id="f4-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 Z" style="fill:var(--accent)"/></marker>
+            <marker id="f4-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 Z" style="fill:var(--ink-3)"/></marker>
+          </defs>
+
+          <text x="196" y="40" class="t-body">入队四次：宿主只付提交开销</text>
+          <text x="1096" y="40" class="t-label" text-anchor="end">同机实测 submit（benchmark/baseline）：CUDA 约 2 µs，Vulkan 约 0.25 ms</text>
+
+          <line class="edge" x1="496" y1="52" x2="496" y2="246" stroke-dasharray="5 4" stroke="var(--accent)" stroke-width="1.4"/>
+          <text x="502" y="62" class="t-body" style="fill:var(--accent)">同步点</text>
+
+          <text x="24" y="102" class="t-title">宿主线程</text>
+          <text x="24" y="122" class="t-body">调用算子的线程</text>
+
+          <rect class="box" x="196" y="80" width="64" height="36" rx="7"/>
+          <text x="228" y="103" class="t-mono-s" text-anchor="middle">op1</text>
+          <rect class="box" x="268" y="80" width="64" height="36" rx="7"/>
+          <text x="300" y="103" class="t-mono-s" text-anchor="middle">op2</text>
+          <rect class="box" x="340" y="80" width="64" height="36" rx="7"/>
+          <text x="372" y="103" class="t-mono-s" text-anchor="middle">op3</text>
+          <rect class="box" x="412" y="80" width="64" height="36" rx="7"/>
+          <text x="444" y="103" class="t-mono-s" text-anchor="middle">op4</text>
+          <rect class="box-accent" x="496" y="80" width="240" height="36" rx="7"/>
+          <text x="616" y="103" class="t-mono" text-anchor="middle" style="font-size:11px">ops::synchronize() 阻塞</text>
+
+          <text x="24" y="192" class="t-title">设备</text>
+          <text x="24" y="212" class="t-body">同一条流 / 队列</text>
+
+          <rect class="fill-cuda stroke-cuda" x="204" y="170" width="120" height="36" rx="7" stroke-width="1.2"/>
+          <text x="264" y="193" class="t-mono-s" text-anchor="middle">kernel 1</text>
+          <rect class="fill-cuda stroke-cuda" x="328" y="170" width="120" height="36" rx="7" stroke-width="1.2"/>
+          <text x="388" y="193" class="t-mono-s" text-anchor="middle">kernel 2</text>
+          <rect class="fill-cuda stroke-cuda" x="452" y="170" width="120" height="36" rx="7" stroke-width="1.2"/>
+          <text x="512" y="193" class="t-mono-s" text-anchor="middle">kernel 3</text>
+          <rect class="fill-cuda stroke-cuda" x="576" y="170" width="120" height="36" rx="7" stroke-width="1.2"/>
+          <text x="636" y="193" class="t-mono-s" text-anchor="middle">kernel 4</text>
+
+          <text x="196" y="252" class="t-body">设备在宿主排队期间已经在执行：同步点等的是残余工作，而不是把等待挪到了下一个算子。</text>
+
+          <line x1="180" y1="278" x2="1076" y2="278" class="edge" marker-end="url(#f4-ink)"/>
+          <text x="1096" y="282" class="t-label" text-anchor="end">时间</text>
+        </svg>
+      </div>
+      <figcaption>
+        算子入队立即返回，三个加速后端都按“每条（线程, 设备实例）一条流 / 队列”保序。显式同步点四个：
+        <code>item&lt;T&gt;()</code>、<code>to_host()</code>、<code>ops::synchronize()</code> 与跨设备拷贝
+        （<code>to_device</code> 经宿主中转）。“提交阶段零等待”不是计时断言，而是可观测计数器的断言：
+        每次宿主真正等待设备就记一次（<code>include/_sync_counters.h</code>），
+        <code>tests/async_contract.cpp</code> 在四条 lane 上断言提交阶段为 0、显式点各计一次；
+        清单与理由见 <code>docs/async-semantics.md</code>。张量是线程亲和的，跨线程移交前必须显式同步。
+      </figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">07</span><h2>后端对照</h2><span class="sec-rule"></span></div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>后端</th><th>张量实现</th><th>上下文</th><th>内核载体</th><th>内存</th><th>设备同步</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="hl-cpu">CPU</td>
+            <td><code>CPUTensor</code></td>
+            <td><code>CPUContext</code>（核数 / 型号 / 内存）</td>
+            <td><code>src/backend/cpu/ops/*.cpp</code>：AVX2 + OpenMP</td>
+            <td><code>std::pmr</code> 每线程池</td>
+            <td>no-op</td>
+          </tr>
+          <tr>
+            <td class="hl-cuda">CUDA</td>
+            <td><code>CUDATensor</code></td>
+            <td><code>CUDAContext</code>，每张卡一个</td>
+            <td><code>device/*.cu</code>，<code>cuda_launch.hpp</code> 强类型契约</td>
+            <td>缓存分配器，按流分池</td>
+            <td><code>synchronize_all()</code>：所有线程的流</td>
+          </tr>
+          <tr>
+            <td class="hl-sycl">SYCL</td>
+            <td><code>SYCLTensor</code></td>
+            <td><code>SYCLContext</code>，pimpl 持有 <code>sycl::context</code> 与每线程队列</td>
+            <td><code>device/*.sycl</code> + host 驱动，<code>sycl_island.h</code> 接缝</td>
+            <td>USM <code>malloc_device</code>，释放排在所属队列之后</td>
+            <td>所有线程队列的 <code>wait_and_throw()</code></td>
+          </tr>
+          <tr>
+            <td class="hl-vk">Vulkan</td>
+            <td><code>VKTensor</code></td>
+            <td><code>VulkanContext</code>（instance / device / VMA / 提交通道池）</td>
+            <td><code>shader/*.comp</code> → SPIR-V，描述符集 + push constant</td>
+            <td>VMA 子分配，释放排在所属通道之后</td>
+            <td>等所有通道的队首 fence；资源回收时顺带释放</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">08</span><h2>两条构建路径</h2><span class="sec-rule"></span></div>
+    <div class="cards">
+      <div class="card">
+        <h3>mcpp<span class="tag">import tensorvia;</span></h3>
+        <p>模块门面 <code>src/interface/tensorvia.ixx</code> 由 <code>tools/gen_facade.py</code> 从
+          <code>facade_exports.def</code> 生成，全局模块片段里 <code>#include</code> 头文件事实源，只做导出。</p>
+        <p>后端按 <code>--features cpu|cuda|sycl|vulkan</code> 打开；<code>.cu</code>、<code>.sycl</code>、
+          <code>.comp</code> 分别由 rules-cuda、rules-sycl、rules-spirv 路由，SPIR-V 在构建期嵌入注册表。</p>
+        <p>测试：<code>mcpp test --features … --accel …</code>，<code>tests/</code> 下一个文件一个二进制；
+          <code>benchmark/bench.cpp</code> 同路径被发现，输出 submit / sync / total 三段与冷启动。</p>
+        <p>CI 的 coverage job 跑 <code>tools/coverage_matrix.py --check</code> 与该工具自己的 unittest——
+          只跑 Python，不构建。</p>
+      </div>
+      <div class="card">
+        <h3>CMake<span class="tag">#include &lt;tensorvia.hpp&gt;</span></h3>
+        <p>直接构建头文件形态：模块扫描关闭，消费方只需普通的 <code>include</code> 与链接，
+          不要求工具链支持模块。</p>
+        <p>Vulkan 着色器由 <code>glslangValidator</code> 编译为 SPIR-V，并生成 <code>spv_registry.cpp</code>；
+          后端由 <code>-DBACKEND_CUDA=ON</code> 等开关选择。</p>
+        <p>两条路径跑的是同一份头文件、同一个 SYCL 接缝与同一套着色器。</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">09</span><h2>贯穿全库的约束</h2><span class="sec-rule"></span></div>
+    <ul class="invariants">
+      <li><span class="k">dispatch</span><span><strong>派发在编译期决定。</strong>没编入的后端不参与链接、不探测硬件、不加载驱动；请求它创建张量会直接报错。</span></li>
+      <li><span class="k">errors</span><span><strong>不支持就是报错。</strong>未实现的算子与组合在调用点抛 <code>runtime_error</code>，错误信息点明后端，绝不静默回退 CPU。</span></li>
+      <li><span class="k">coverage</span><span><strong>支持性有单一事实源。</strong>算子 × 后端的矩阵由源码生成、CI 守漂移；一格推不出来就让构建失败，组合实现与显式拒绝必须带标注与证据。</span></li>
+      <li><span class="k">async</span><span><strong>同步只发生在显式点。</strong>提交阶段零等待由计数器断言，不靠计时；四个显式点与理由写在 <code>docs/async-semantics.md</code>。</span></li>
+      <li><span class="k">threads</span><span><strong>张量线程亲和。</strong>张量归创建它的线程所有；跨线程移交前必须先在原线程 <code>ops::synchronize()</code>，库不检测这种误用。</span></li>
+      <li><span class="k">memory</span><span><strong>按流分池。</strong>缓存块只在释放它的流上复用；没有 <code>record_stream</code>，也没有公开的 Stream / Event 抽象。</span></li>
+    </ul>
+  </section>
+
+  <footer>
+    依据仓库当前 HEAD（<code>main</code>，多后端成熟度 P0/P1 已合入）整理。图中的路径、类型名与
+    注册接口都能在 <code>include/tensorvia/</code>、<code>src/core/</code>、<code>src/backend/</code> 与
+    <code>specs/2026-11-01-multi-backend-maturity.md</code> 里找到对应实现。三份同步维护的文档：
+    覆盖矩阵 <code>docs/coverage.md</code>（生成物）、同步语义 <code>docs/async-semantics.md</code>、
+    性能下限与基线 <code>docs/performance.md</code> 与 <code>benchmark/baseline/</code>。
+  </footer>
+
+</div>

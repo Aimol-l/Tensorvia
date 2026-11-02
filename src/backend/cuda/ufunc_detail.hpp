@@ -14,7 +14,7 @@
 #include <string>
 #include <vector>
 
-#include "tensorvia/cpu_ops.hpp"
+#include "tensorvia/backend/cpu/cpu_ops.hpp"
 #include "tensorvia/tensor_iterator.hpp"
 #include "tensorvia/backend/cuda/cuda_context.hpp"
 #include "tensorvia/backend/cuda/cuda_tensor.hpp"

@@ -13,7 +13,7 @@
 // 而不是链接失败。
 #include "tensorvia/types.hpp"
 #include "tensorvia/tensor.hpp"
-#include "tensorvia/cpu_ops.hpp"
+#include "tensorvia/backend/cpu/cpu_ops.hpp"
 
 namespace ops {
 

@@ -14,7 +14,7 @@
 
 #include <cuda_runtime.h>
 
-#include "tensorvia/cpu_ops.hpp"  // ops::Conv2dShape：卷积的几何契约
+#include "tensorvia/backend/cpu/cpu_ops.hpp"  // ops::Conv2dShape：卷积的几何契约
 #include "tensorvia/tensor.hpp"
 #include "tensorvia/types.hpp"
 

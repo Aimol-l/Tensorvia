@@ -20,7 +20,7 @@
 
 #include "tensorvia.hpp"
 #include "tensorvia/context.hpp"
-#include "tensorvia/cpu_context.hpp"
+#include "tensorvia/backend/cpu/cpu_context.hpp"
 
 namespace {
 

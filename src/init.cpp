@@ -4,8 +4,8 @@
 #include "tensorvia.hpp"
 #include "tensorvia/types.hpp"
 #include "tensorvia/factory.hpp"
-#include "tensorvia/cpu_tensor.hpp"
-#include "tensorvia/cpu_context.hpp"
+#include "tensorvia/backend/cpu/cpu_tensor.hpp"
+#include "tensorvia/backend/cpu/cpu_context.hpp"
 
 namespace {
 struct CPURegistrar {

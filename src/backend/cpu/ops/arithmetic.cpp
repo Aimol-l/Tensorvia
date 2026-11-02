@@ -11,7 +11,7 @@
 #include "tensorvia.hpp"
 #include "tensorvia/types.hpp"
 #include "tensorvia/tensor.hpp"
-#include "tensorvia/cpu_ops.hpp"
+#include "tensorvia/backend/cpu/cpu_ops.hpp"
 #include "tensorvia/ops.hpp"
 
 

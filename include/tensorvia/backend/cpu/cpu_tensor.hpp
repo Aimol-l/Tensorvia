@@ -7,7 +7,7 @@
 #include "tensorvia/types.hpp"
 #include "tensorvia/tensor.hpp"
 #include "tensorvia/context.hpp"
-#include "tensorvia/cpu_context.hpp"
+#include "tensorvia/backend/cpu/cpu_context.hpp"
 
 namespace cpu_tensor_detail {
 // 带状态的 deleter：携带字节数，池才知道该把块还回哪个 size-class 的空闲链表。

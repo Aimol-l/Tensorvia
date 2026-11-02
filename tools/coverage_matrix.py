@@ -37,7 +37,7 @@ OPS_HPP_REL = "include/tensorvia/ops.hpp"
 OVERRIDES_REL = "tools/coverage_overrides.toml"
 DOC_REL = "docs/coverage.md"
 IMPL_HEADER_REL = {
-    "CPU": "include/tensorvia/cpu_ops.hpp",
+    "CPU": "include/tensorvia/backend/cpu/cpu_ops.hpp",
     "CUDA": "include/tensorvia/backend/cuda/cuda_ops.hpp",
     "SYCL": "include/tensorvia/backend/sycl/sycl_ops.hpp",
     "VULKAN": "include/tensorvia/backend/vulkan/vulkan_ops.hpp",

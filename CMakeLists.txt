@@ -350,16 +350,23 @@ install(TARGETS tensorvia
 # every internal include resolves the same way in both. Install explicit
 # files, never a directory, so a CPU package cannot ship Vulkan headers. The
 # backend/{cuda,sycl} partition headers stay internal: nothing in the installed
-# surface includes them. _platform.h / _simd_math.h stay out as well.
+# surface includes them. backend/cpu is installed (tensorvia.hpp includes
+# backend/cpu/cpu_context.hpp — CPU is the baseline backend), and it must go in
+# with install(DIRECTORY): install(FILES) flattens, and the umbrella header
+# references the backend/cpu/ subpath, so a flattened install would not
+# resolve. backend/vulkan gets the same treatment when enabled. _platform.h /
+# _simd_math.h stay out as well.
 set(TVV_IFACE_DIR "${PROJECT_SOURCE_DIR}/include/tensorvia")
 file(GLOB TVV_PUBLIC_PARTITION_HEADERS CONFIGURE_DEPENDS
     "${TVV_IFACE_DIR}/*.hpp"
 )
+install(DIRECTORY "${TVV_IFACE_DIR}/backend/cpu/"
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/tensorvia/backend/cpu
+        FILES_MATCHING PATTERN "*.hpp")
 if(BACKEND_VULKAN)
-    file(GLOB TVV_VULKAN_PARTITION_HEADERS CONFIGURE_DEPENDS
-        "${TVV_IFACE_DIR}/backend/vulkan/*.hpp"
-    )
-    list(APPEND TVV_PUBLIC_PARTITION_HEADERS ${TVV_VULKAN_PARTITION_HEADERS})
+    install(DIRECTORY "${TVV_IFACE_DIR}/backend/vulkan/"
+            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/tensorvia/backend/vulkan
+            FILES_MATCHING PATTERN "*.hpp")
 endif()
 
 install(FILES "${PROJECT_SOURCE_DIR}/include/tensorvia.hpp"

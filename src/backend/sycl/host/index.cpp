@@ -15,7 +15,7 @@
 #include "tensorvia/types.hpp"
 #include "tensorvia/tensor.hpp"
 #include "tensorvia/ops.hpp"
-#include "tensorvia/cpu_ops.hpp"
+#include "tensorvia/backend/cpu/cpu_ops.hpp"
 #include "tensorvia/tensor_iterator.hpp"
 #include "tensorvia/backend/sycl/sycl_ops.hpp"
 #include "tensorvia/backend/sycl/sycl_ufunc.hpp"
