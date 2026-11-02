@@ -229,11 +229,6 @@ cudaError_t launch_softmax(cudaStream_t stream, const void* in, void* out,
                            DataType in_dtype, DataType out_dtype,
                            const ReduceAxis& p);
 
-// 全归约：`out` 存放一个 out_dtype 元素。
-cudaError_t launch_reduce_all(cudaStream_t stream, const void* in, void* out,
-                              int64_t numel, DataType in_dtype, DataType out_dtype,
-                              int op);
-
 // 单轴归约：`out` 为 outer * inner 个 out_dtype 元素。
 cudaError_t launch_reduce_axis(cudaStream_t stream, const void* in, void* out,
                                DataType in_dtype, DataType out_dtype, int op,

@@ -221,35 +221,27 @@ template <> struct RmsNormImpl<Device::CPU> {
 };
 
 template <> struct SumImpl<Device::CPU> {
-    static float execute(const Tensor& a);
     static Tensor execute(const Tensor& a, int axis);
 };
 template <> struct MinImpl<Device::CPU> {
-    static float execute(const Tensor& a);
     static Tensor execute(const Tensor& a, int axis);
 };
 template <> struct MaxImpl<Device::CPU> {
-    static float execute(const Tensor& a);
     static Tensor execute(const Tensor& a, int axis);
 };
 template <> struct MeanImpl<Device::CPU> {
-    static float execute(const Tensor& a);
     static Tensor execute(const Tensor& a, int axis);
 };
 template <> struct ProdImpl<Device::CPU> {
-    static float execute(const Tensor& a);
     static Tensor execute(const Tensor& a, int axis);
 };
 template <> struct VarImpl<Device::CPU> {
-    static float execute(const Tensor& a);
     static Tensor execute(const Tensor& a, int axis);
 };
 template <> struct StdImpl<Device::CPU> {
-    static float execute(const Tensor& a);
     static Tensor execute(const Tensor& a, int axis);
 };
 template <> struct NormImpl<Device::CPU> {
-    static float execute(const Tensor& a, float p);
     static Tensor execute(const Tensor& a, float p, int axis);
 };
 template <> struct CumsumImpl<Device::CPU> {

@@ -1,5 +1,5 @@
-// 归约内核——全局与单轴的 sum/min/max/mean、argmax/argmin、all/any 以及
-// NonZero 计数——外加定义相应 Device::CUDA 实现的宿主驱动。
+// 归约内核——单轴的 sum/min/max/mean、argmax/argmin、all/any 以及 NonZero
+// 计数——外加定义相应 Device::CUDA 实现的宿主驱动。
 #include "common.cuh"
 
 #include <cstdint>
@@ -19,47 +19,6 @@
 
 namespace tvv::cuda {
 namespace {
-
-// 一个 block 归约整个 buffer。该 block 遍历输入，然后在共享内存中折叠各线程的
-// 部分和。
-template <class T, class Out>
-__global__ void reduce_all_kernel(const T* in, Out* out, int64_t numel, int op) {
-    using Acc = contract::reduction_acc_t<T>;
-    __shared__ Acc sdata[kThreads];
-    const int64_t idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-    const int64_t stride = static_cast<int64_t>(gridDim.x) * blockDim.x;
-
-    Acc acc;
-    if (op == kReduceSum) {
-        acc = Acc(0);
-        for (int64_t i = idx; i < numel; i += stride) acc += static_cast<Acc>(to_compute<Acc>(in[i]));
-    } else if (op == kReduceProd) {
-        acc = Acc(1);
-        for (int64_t i = idx; i < numel; i += stride) acc *= static_cast<Acc>(to_compute<Acc>(in[i]));
-    } else if (op == kReduceMin) {
-        acc = max_finite<Acc>();
-        for (int64_t i = idx; i < numel; i += stride)
-            acc = contract::min_contract(acc, to_compute<Acc>(in[i]));
-    } else {
-        acc = lowest_finite<Acc>();
-        for (int64_t i = idx; i < numel; i += stride)
-            acc = contract::max_contract(acc, to_compute<Acc>(in[i]));
-    }
-    sdata[threadIdx.x] = acc;
-    __syncthreads();
-    for (unsigned s = blockDim.x / 2; s > 0; s >>= 1) {
-        if (threadIdx.x < s) {
-            Acc a = sdata[threadIdx.x];
-            const Acc b = sdata[threadIdx.x + s];
-            if (op == kReduceSum) sdata[threadIdx.x] = a + b;
-            else if (op == kReduceProd) sdata[threadIdx.x] = a * b;
-            else if (op == kReduceMin) sdata[threadIdx.x] = contract::min_contract(a, b);
-            else sdata[threadIdx.x] = contract::max_contract(a, b);
-        }
-        __syncthreads();
-    }
-    if (threadIdx.x == 0) out[blockIdx.x] = store_as<Out>(sdata[0]);
-}
 
 // 每个 (outer, inner) 对一个线程，沿被归约的轴行走。
 template <class T, class Out>
@@ -163,24 +122,6 @@ __global__ void nonzero_count_kernel(const T* in, unsigned long long* out, int64
 }
 
 }  // namespace
-
-cudaError_t launch_reduce_all(cudaStream_t stream, const void* in, void* out,
-                              int64_t numel, DataType in_dtype, DataType out_dtype,
-                              int op) {
-    if (in == nullptr || out == nullptr) return cudaErrorInvalidValue;
-    cudaError_t status = cudaErrorNotSupported;
-    // 只用单个 block，所以部分和 buffer 恰好一个元素。
-    tvv::cuda::dispatch_dtype(in_dtype, [&](auto src_tag) {
-        using T = typename decltype(src_tag)::type;
-        tvv::cuda::dispatch_dtype(out_dtype, [&](auto dst_tag) {
-            using Out = typename decltype(dst_tag)::type;
-            reduce_all_kernel<T, Out><<<1, kThreads, 0, stream>>>(
-                static_cast<const T*>(in), static_cast<Out*>(out), numel, op);
-            status = launch_status();
-        });
-    });
-    return status;
-}
 
 cudaError_t launch_reduce_axis(cudaStream_t stream, const void* in, void* out,
                                DataType in_dtype, DataType out_dtype, int op,
@@ -303,28 +244,6 @@ AxisLayout axis_layout(const Tensor& a, int axis, const char* what) {
     return layout;
 }
 
-// 全局归约在设备上折叠为一个 FLOAT64 元素，再在宿主收窄为 float——这正是 API
-// 的返回类型。
-double reduce_all_value(const Tensor& a, int op, const char* what) {
-    const Tensor src = materialize(a);
-    auto ctx = context_of(src, what);
-    Tensor out({1}, DataType::FLOAT64, Device::CUDA);
-    const auto out_impl = std::dynamic_pointer_cast<CUDATensor>(out.get_impl());
-    if (!out_impl)
-        throw std::runtime_error(std::string("cuda ") + what + ": failed to allocate the result");
-
-    ctx->activate();
-    tvv::cuda::check_cuda(
-        tvv::cuda::launch_reduce_all(static_cast<cudaStream_t>(ctx->stream()),
-                                     src.data(), out_impl->data(),
-                                     static_cast<int64_t>(src.numel()), src.dtype(),
-                                     DataType::FLOAT64, op),
-        what);
-
-    out.to_host();
-    return static_cast<const double*>(out.data())[0];
-}
-
 Tensor axis_reduce(const Tensor& a, int axis, DataType out_type, int op, const char* what) {
     const Tensor src = materialize(a);
     auto ctx = context_of(src, what);
@@ -385,36 +304,18 @@ bool all_any_value(const Tensor& a, float value, bool is_all, const char* what) 
 
 }  // namespace
 
-float SumImpl<Device::CUDA>::execute(const Tensor& a) {
-    return static_cast<float>(reduce_all_value(a, tvv::cuda::kReduceSum, "Sum"));
-}
-
 Tensor SumImpl<Device::CUDA>::execute(const Tensor& a, int axis) {
 // Sum 把窄整型与 16 位浮点拓宽到真正的累加类型；所有后端遵循同一条
 // reduction_type 规则。
     return axis_reduce(a, axis, reduction_type(a.dtype()), tvv::cuda::kReduceSum, "Sum");
 }
 
-float MinImpl<Device::CUDA>::execute(const Tensor& a) {
-    return static_cast<float>(reduce_all_value(a, tvv::cuda::kReduceMin, "Min"));
-}
-
 Tensor MinImpl<Device::CUDA>::execute(const Tensor& a, int axis) {
     return axis_reduce(a, axis, a.dtype(), tvv::cuda::kReduceMin, "Min");
 }
 
-float MaxImpl<Device::CUDA>::execute(const Tensor& a) {
-    return static_cast<float>(reduce_all_value(a, tvv::cuda::kReduceMax, "Max"));
-}
-
 Tensor MaxImpl<Device::CUDA>::execute(const Tensor& a, int axis) {
     return axis_reduce(a, axis, a.dtype(), tvv::cuda::kReduceMax, "Max");
-}
-
-float MeanImpl<Device::CUDA>::execute(const Tensor& a) {
-    // 用 double 做除法：超过 2^24 后 float 除数不再精确。
-    const double sum = reduce_all_value(a, tvv::cuda::kReduceSum, "Mean");
-    return static_cast<float>(sum / static_cast<double>(a.numel()));
 }
 
 Tensor ProdImpl<Device::CUDA>::execute(const Tensor& a, int axis) {

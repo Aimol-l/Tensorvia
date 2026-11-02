@@ -1,65 +1,10 @@
-// 归约：全局与单轴的 sum/min/max/mean、argmax/argmin、all/any 以及 NonZero
-// 计数。
+// 归约：单轴 sum/min/max/mean、argmax/argmin、all/any 以及 NonZero 计数。
 #include "common.h"
 
 using namespace tvv::sycl_dev;
 namespace contract = tvv::sycl_dev::contract;
 
 namespace {
-
-template <class T, class Out>
-void reduce_all_kernel(sycl::queue& q, const T* in, Out* out, int64_t numel, int op) {
-    using Acc = reduction_acc_t<T>;
-    const size_t n = kWorkGroup;
-    q.submit([&](sycl::handler& h) {
-        sycl::local_accessor<Acc, 1> sdata(sycl::range<1>(n), h);
-        h.parallel_for(sycl::nd_range<1>(sycl::range<1>(n), sycl::range<1>(n)),
-                       [=](sycl::nd_item<1> item) {
-                           const size_t lid = item.get_local_id(0);
-                           Acc acc;
-                           if (op == tvv::sycl::kReduceSum) {
-                               acc = Acc(0);
-                               for (int64_t i = static_cast<int64_t>(lid); i < numel;
-                                    i += static_cast<int64_t>(n))
-                                   acc += static_cast<Acc>(to_compute<Acc>(in[i]));
-                           } else if (op == tvv::sycl::kReduceProd) {
-                               acc = Acc(1);
-                               for (int64_t i = static_cast<int64_t>(lid); i < numel;
-                                    i += static_cast<int64_t>(n))
-                                   acc *= static_cast<Acc>(to_compute<Acc>(in[i]));
-                           } else if (op == tvv::sycl::kReduceMin) {
-                               acc = max_finite<Acc>();
-                               for (int64_t i = static_cast<int64_t>(lid); i < numel;
-                                    i += static_cast<int64_t>(n))
-                                   acc = contract::min_contract(acc, to_compute<Acc>(in[i]));
-                           } else {
-                               acc = lowest_finite<Acc>();
-                               for (int64_t i = static_cast<int64_t>(lid); i < numel;
-                                    i += static_cast<int64_t>(n))
-                                   acc = contract::max_contract(acc, to_compute<Acc>(in[i]));
-                           }
-
-                           sdata[lid] = acc;
-                           item.barrier(sycl::access::fence_space::local_space);
-                           for (size_t s = n / 2; s > 0; s >>= 1) {
-                               if (lid < s) {
-                                   const Acc a = sdata[lid];
-                                   const Acc b = sdata[lid + s];
-                                   if (op == tvv::sycl::kReduceSum)
-                                       sdata[lid] = static_cast<Acc>(a + b);
-                                   else if (op == tvv::sycl::kReduceProd)
-                                       sdata[lid] = static_cast<Acc>(a * b);
-                                   else if (op == tvv::sycl::kReduceMin)
-                                       sdata[lid] = contract::min_contract(a, b);
-                                   else
-                                       sdata[lid] = contract::max_contract(a, b);
-                               }
-                               item.barrier(sycl::access::fence_space::local_space);
-                           }
-                           if (lid == 0) out[0] = store_as<Out>(sdata[0]);
-                       });
-    });
-}
 
 template <class T, class Out>
 void reduce_axis_kernel(sycl::queue& q, const T* in, Out* out,
@@ -193,28 +138,6 @@ void nonzero_count_kernel(sycl::queue& q, const T* in, unsigned int* out, int64_
 }  // namespace
 
 extern "C" {
-
-int sycl_c_launch_reduce_all(void* ctx, const void* in, void* out, int64_t numel,
-                             int in_dtype, int out_dtype, int op) {
-    if (ctx == nullptr || in == nullptr || out == nullptr)
-        return tvv::sycl::kSyclInvalid;
-    try {
-        auto& q = queue_of(ctx);
-        return dispatch_dtype(in_dtype, [&](auto src_tag) -> int {
-            using T = typename decltype(src_tag)::type;
-            return dispatch_dtype(out_dtype, [&](auto dst_tag) -> int {
-                using Out = typename decltype(dst_tag)::type;
-                reduce_all_kernel<T, Out>(q, static_cast<const T*>(in),
-                                          static_cast<Out*>(out), numel, op);
-                return tvv::sycl::kSyclOk;
-            });
-        });
-    } catch (const std::exception& e) {
-        return record_failure(e);
-    } catch (...) {
-        return record_failure();
-    }
-}
 
 int sycl_c_launch_reduce_axis(void* ctx, const void* in, void* out,
                               int in_dtype, int out_dtype, int op,

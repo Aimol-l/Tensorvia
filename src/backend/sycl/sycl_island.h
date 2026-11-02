@@ -289,8 +289,6 @@ int sycl_c_launch_softmax(void* ctx, const void* in, void* out,
                           int in_dtype, int out_dtype,
                           const tvv::sycl::ReduceAxis* p);
 
-int sycl_c_launch_reduce_all(void* ctx, const void* in, void* out, int64_t numel,
-                             int in_dtype, int out_dtype, int op);
 int sycl_c_launch_reduce_axis(void* ctx, const void* in, void* out,
                               int in_dtype, int out_dtype, int op,
                               const tvv::sycl::ReduceAxis* p);

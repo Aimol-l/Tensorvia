@@ -34,11 +34,11 @@ template <template <Device> class Impl>
 concept has_sycl_impl = requires { sizeof(Impl<Device::SYCL>); };
 
 // 后端派发：Impl<Device::X> 的全特化存在就走它，否则抛"该后端未实现"。
-// 注意：这条通用抛错**不带算子名**（spec Test Steps 4 要求带算子名）。新增
-// CPU-only 算子请用 require_cpu(t, "op_name") 显式拒绝（消息含算子名与后端），
-// 不要依赖这里的通用消息；现有的 Sort/Topk 等已按此办理。
+// op 是算子名（公共同款 API 里的 snake_case 名字），只用于报错——spec Test
+// Steps 4 要求派发失败的消息同时带算子名与后端。CPU-only 的新算子请用
+// require_cpu(t, "op_name") 显式拒绝（消息含算子名与后端），不要依赖这里。
 template <template <Device> class Impl, typename... Args>
-decltype(auto) execute_on(DeviceId device, Args&&... args) {
+decltype(auto) execute_on(DeviceId device, std::string_view op, Args&&... args) {
     ops::DeviceGuard guard(device);
     switch (device.kind) {
     case Device::CPU:
@@ -48,7 +48,8 @@ decltype(auto) execute_on(DeviceId device, Args&&... args) {
         if constexpr (has_vulkan_impl<Impl>) {
             return Impl<Device::VULKAN>::execute(std::forward<Args>(args)...);
         } else {
-            throw std::runtime_error("this operation is not implemented on the VULKAN backend");
+            throw std::runtime_error(
+                std::format("{}: not implemented on the VULKAN backend", op));
         }
 #endif
 #if defined(BACKEND_CUDA)
@@ -56,7 +57,8 @@ decltype(auto) execute_on(DeviceId device, Args&&... args) {
         if constexpr (has_cuda_impl<Impl>) {
             return Impl<Device::CUDA>::execute(std::forward<Args>(args)...);
         } else {
-            throw std::runtime_error("this operation is not implemented on the CUDA backend");
+            throw std::runtime_error(
+                std::format("{}: not implemented on the CUDA backend", op));
         }
 #endif
 #if defined(BACKEND_SYCL)
@@ -64,7 +66,8 @@ decltype(auto) execute_on(DeviceId device, Args&&... args) {
         if constexpr (has_sycl_impl<Impl>) {
             return Impl<Device::SYCL>::execute(std::forward<Args>(args)...);
         } else {
-            throw std::runtime_error("this operation is not implemented on the SYCL backend");
+            throw std::runtime_error(
+                std::format("{}: not implemented on the SYCL backend", op));
         }
 #endif
     default:
@@ -257,7 +260,7 @@ Tensor empty_on(const Tensor& like, std::span<const int64_t> shape, DataType dty
 Tensor filled_on(const Tensor& like, std::span<const int64_t> shape, DataType dtype,
                  float value) {
     std::vector<int64_t> s(shape.begin(), shape.end());
-    return execute_on<ops::FillImpl>(like.device_id(), s, dtype, value);
+    return execute_on<ops::FillImpl>(like.device_id(), "fill", s, dtype, value);
 }
 
 // 对应 ufunc 框架的 result_type 契约，供没有实例化 Op 结构体的空路径使用：恒等类
@@ -379,61 +382,61 @@ void export_csv(Tensor&& a, const std::string& path) {
 }
 
 Tensor Ones(const std::vector<int64_t>& shape, DataType dtype, Device device) {
-    return execute_on<OnesImpl>(current_id(device), shape, dtype);
+    return execute_on<OnesImpl>(current_id(device), "ones", shape, dtype);
 }
 
 // TensorOptions / DeviceId 形式直接解析实例、不做线程私有查找，因此任何线程都能
 // 命名 CUDA:1（FR-7）。
 Tensor Ones(const std::vector<int64_t>& shape, const TensorOptions& options) {
-    return execute_on<OnesImpl>(options.resolved_id(), shape, options.dtype);
+    return execute_on<OnesImpl>(options.resolved_id(), "ones", shape, options.dtype);
 }
 Tensor Zeros(const std::vector<int64_t>& shape, const TensorOptions& options) {
-    return execute_on<ZerosImpl>(options.resolved_id(), shape, options.dtype);
+    return execute_on<ZerosImpl>(options.resolved_id(), "zeros", shape, options.dtype);
 }
 Tensor Fill(const std::vector<int64_t>& shape, float val, const TensorOptions& options) {
-    return execute_on<FillImpl>(options.resolved_id(), shape, options.dtype, val);
+    return execute_on<FillImpl>(options.resolved_id(), "fill", shape, options.dtype, val);
 }
 Tensor Random(const std::vector<int64_t>& shape, float min, float max, const TensorOptions& options) {
     if (is_bool_dtype(options.dtype))
         throw std::runtime_error("random: BOOL is not supported; use a comparison or cast instead");
-    return execute_on<RandomImpl>(options.resolved_id(), shape, options.dtype, min, max);
+    return execute_on<RandomImpl>(options.resolved_id(), "random", shape, options.dtype, min, max);
 }
 Tensor Randn(const std::vector<int64_t>& shape, float mean, float std, const TensorOptions& options) {
     if (is_bool_dtype(options.dtype))
         throw std::runtime_error("randn: BOOL is not supported; use a comparison or cast instead");
     if (std < 0.0f) throw std::runtime_error("randn: std must be non-negative");
     // RNG 只保留一处：在宿主抽样，再把整块交给目标设备。同一 seed 在各后端取值相同。
-    Tensor t = execute_on<RandnImpl>(DeviceId{Device::CPU, 0}, shape, options.dtype, mean, std);
+    Tensor t = execute_on<RandnImpl>(DeviceId{Device::CPU, 0}, "randn", shape, options.dtype, mean, std);
     t.to_device(options.resolved_id());
     return t;
 }
 Tensor Ones(const std::vector<int64_t>& shape, DataType dtype, DeviceId device) {
-    return execute_on<OnesImpl>(device, shape, dtype);
+    return execute_on<OnesImpl>(device, "ones", shape, dtype);
 }
 Tensor Zeros(const std::vector<int64_t>& shape, DataType dtype, DeviceId device) {
-    return execute_on<ZerosImpl>(device, shape, dtype);
+    return execute_on<ZerosImpl>(device, "zeros", shape, dtype);
 }
 Tensor Fill(const std::vector<int64_t>& shape, DataType dtype, float val, DeviceId device) {
-    return execute_on<FillImpl>(device, shape, dtype, val);
+    return execute_on<FillImpl>(device, "fill", shape, dtype, val);
 }
 Tensor Random(const std::vector<int64_t>& shape, DataType dtype, float min, float max, DeviceId device) {
     if (is_bool_dtype(dtype))
         throw std::runtime_error("random: BOOL is not supported; use a comparison or cast instead");
-    return execute_on<RandomImpl>(device, shape, dtype, min, max);
+    return execute_on<RandomImpl>(device, "random", shape, dtype, min, max);
 }
 
 Tensor Zeros(const std::vector<int64_t>& shape, DataType dtype, Device device) {
-    return execute_on<ZerosImpl>(current_id(device), shape, dtype);
+    return execute_on<ZerosImpl>(current_id(device), "zeros", shape, dtype);
 }
 
 Tensor Fill(const std::vector<int64_t>& shape, DataType dtype, float val, Device device) {
-    return execute_on<FillImpl>(current_id(device), shape, dtype, val);
+    return execute_on<FillImpl>(current_id(device), "fill", shape, dtype, val);
 }
 
 Tensor Random(const std::vector<int64_t>& shape, DataType dtype, float min, float max, Device device) {
     if (is_bool_dtype(dtype))
         throw std::runtime_error("random: BOOL is not supported; use a comparison or cast instead");
-    return execute_on<RandomImpl>(current_id(device), shape, dtype, min, max);
+    return execute_on<RandomImpl>(current_id(device), "random", shape, dtype, min, max);
 }
 
 Tensor Randn(const std::vector<int64_t>& shape, DataType dtype, float mean, float std, Device device) {
@@ -441,7 +444,7 @@ Tensor Randn(const std::vector<int64_t>& shape, DataType dtype, float mean, floa
         throw std::runtime_error("randn: BOOL is not supported; use a comparison or cast instead");
     if (std < 0.0f) throw std::runtime_error("randn: std must be non-negative");
     const DeviceId target = current_id(device);
-    Tensor t = execute_on<RandnImpl>(DeviceId{Device::CPU, 0}, shape, dtype, mean, std);
+    Tensor t = execute_on<RandnImpl>(DeviceId{Device::CPU, 0}, "randn", shape, dtype, mean, std);
     t.to_device(target);
     return t;
 }
@@ -505,54 +508,54 @@ Tensor Slice(const Tensor& t, const std::vector<std::pair<int64_t, int64_t>>& ra
         if (ranges[i].second > t.shape(i))
             throw std::runtime_error(std::format("second must be less than {}", t.shape(i)));
     }
-    return execute_on<SliceImpl>(t.device_id(), t, ranges);
+    return execute_on<SliceImpl>(t.device_id(), "slice", t, ranges);
 }
 
 void Add(Tensor& a, float b) {
     require_inplace_scalar_dtype(a, "add");
     if (a.numel() == 0 || b == 0.0f) return;
-    execute_on<AddImpl>(a.device_id(), a, b);
+    execute_on<AddImpl>(a.device_id(), "add", a, b);
 }
 void Sub(Tensor& a, float b) {
     require_inplace_scalar_dtype(a, "sub");
     if (a.numel() == 0 || b == 0.0f) return;
-    execute_on<SubImpl>(a.device_id(), a, b);
+    execute_on<SubImpl>(a.device_id(), "sub", a, b);
 }
 void Mul(Tensor& a, float b) {
     require_inplace_scalar_dtype(a, "mul");
     if (a.numel() == 0 || b == 1.0f) return;
-    execute_on<MulImpl>(a.device_id(), a, b);
+    execute_on<MulImpl>(a.device_id(), "mul", a, b);
 }
 void Div(Tensor& a, float b) {
     require_inplace_scalar_dtype(a, "div");
     if (a.numel() == 0 || b == 1.0f) return;
     if (b == 0.0f) throw std::runtime_error("div: Cann't division by zero");
-    execute_on<DivImpl>(a.device_id(), a, b);
+    execute_on<DivImpl>(a.device_id(), "div", a, b);
 }
 
 Tensor Add(const Tensor& a, float b) {
     return scalar_arith_promote(a, b, [](const Tensor& x, float v) {
         if (x.numel() == 0 || v == 0.0f) return x.clone();
-        return execute_on<AddImpl>(x.device_id(), x, v);
+        return execute_on<AddImpl>(x.device_id(), "add", x, v);
     });
 }
 Tensor Sub(const Tensor& a, float b) {
     return scalar_arith_promote(a, b, [](const Tensor& x, float v) {
         if (x.numel() == 0 || v == 0.0f) return x.clone();
-        return execute_on<SubImpl>(x.device_id(), x, v);
+        return execute_on<SubImpl>(x.device_id(), "sub", x, v);
     });
 }
 Tensor Mul(const Tensor& a, float b) {
     return scalar_arith_promote(a, b, [](const Tensor& x, float v) {
         if (x.numel() == 0 || v == 1.0f) return x.clone();
-        return execute_on<MulImpl>(x.device_id(), x, v);
+        return execute_on<MulImpl>(x.device_id(), "mul", x, v);
     });
 }
 Tensor Div(const Tensor& a, float b) {
     if (b == 0.0f) throw std::runtime_error("Division by zero");
     return scalar_arith_promote(a, b, [](const Tensor& x, float v) {
         if (x.numel() == 0 || v == 1.0f) return x.clone();
-        return execute_on<DivImpl>(x.device_id(), x, v);
+        return execute_on<DivImpl>(x.device_id(), "div", x, v);
     });
 }
 
@@ -563,7 +566,7 @@ Tensor Add(const Tensor& a, const Tensor& b) {
     if (empty_binary_result(a, b, "add", out)) return out;
 
     // shape 校验由 ufunc 框架的广播规则处理
-    return execute_on<AddImpl>(a.device_id(), a, b);
+    return execute_on<AddImpl>(a.device_id(), "add", a, b);
 }
 Tensor Sub(const Tensor& a, const Tensor& b) {
     if (a.device_id() != b.device_id()) throw std::runtime_error("Tensor Device mismatch!");
@@ -572,7 +575,7 @@ Tensor Sub(const Tensor& a, const Tensor& b) {
     if (empty_binary_result(a, b, "sub", out)) return out;
 
     // shape 校验由 ufunc 框架的广播规则处理
-    return execute_on<SubImpl>(a.device_id(), a, b);
+    return execute_on<SubImpl>(a.device_id(), "sub", a, b);
 }
 Tensor Mul(const Tensor& a, const Tensor& b) {
     if (a.device_id() != b.device_id()) throw std::runtime_error("Tensor Device mismatch!");
@@ -581,7 +584,7 @@ Tensor Mul(const Tensor& a, const Tensor& b) {
     if (empty_binary_result(a, b, "mul", out)) return out;
 
     // shape 校验由 ufunc 框架的广播规则处理
-    return execute_on<MulImpl>(a.device_id(), a, b);
+    return execute_on<MulImpl>(a.device_id(), "mul", a, b);
 }
 Tensor Div(const Tensor& a, const Tensor& b) {
     if (a.device_id() != b.device_id()) throw std::runtime_error("Device mismatch!");
@@ -590,7 +593,7 @@ Tensor Div(const Tensor& a, const Tensor& b) {
     if (empty_binary_result(a, b, "div", out)) return out;
 
     // shape 校验由 ufunc 框架的广播规则处理
-    return execute_on<DivImpl>(a.device_id(), a, b);
+    return execute_on<DivImpl>(a.device_id(), "div", a, b);
 }
 
 void Add(const Tensor& a, const Tensor& b, Tensor& dst) {
@@ -604,7 +607,7 @@ void Add(const Tensor& a, const Tensor& b, Tensor& dst) {
     }
 
     // dst 形状须等于广播结果，由 ufunc 框架校验
-    execute_on<AddImpl>(a.device_id(), a, b, dst);
+    execute_on<AddImpl>(a.device_id(), "add", a, b, dst);
 }
 void Sub(const Tensor& a, const Tensor& b, Tensor& dst) {
     if (a.device_id() != b.device_id() || dst.device_id() != a.device_id() || dst.device_id() != b.device_id())
@@ -617,7 +620,7 @@ void Sub(const Tensor& a, const Tensor& b, Tensor& dst) {
     }
 
     // dst 形状须等于广播结果，由 ufunc 框架校验
-    execute_on<SubImpl>(a.device_id(), a, b, dst);
+    execute_on<SubImpl>(a.device_id(), "sub", a, b, dst);
 }
 void Mul(const Tensor& a, const Tensor& b, Tensor& dst) {
     if (a.device_id() != b.device_id() || dst.device_id() != a.device_id() || dst.device_id() != b.device_id())
@@ -630,7 +633,7 @@ void Mul(const Tensor& a, const Tensor& b, Tensor& dst) {
     }
 
     // dst 形状须等于广播结果，由 ufunc 框架校验
-    execute_on<MulImpl>(a.device_id(), a, b, dst);
+    execute_on<MulImpl>(a.device_id(), "mul", a, b, dst);
 }
 void Div(const Tensor& a, const Tensor& b, Tensor& dst) {
     if (a.device_id() != b.device_id() || dst.device_id() != a.device_id() || dst.device_id() != b.device_id())
@@ -643,7 +646,7 @@ void Div(const Tensor& a, const Tensor& b, Tensor& dst) {
     }
 
     // dst 形状须等于广播结果，由 ufunc 框架校验
-    execute_on<DivImpl>(a.device_id(), a, b, dst);
+    execute_on<DivImpl>(a.device_id(), "div", a, b, dst);
 }
 
 // ===== FR-9：matmul =====
@@ -738,7 +741,7 @@ Tensor MatMul(const Tensor& a, const Tensor& b) {
 
     const Tensor A = matmul_operand(a, d.batch, d.rows, d.inner);
     const Tensor B = matmul_operand(b, d.batch, d.inner, d.cols);
-    Tensor out = execute_on<MatMulImpl>(A.device_id(), A, B);
+    Tensor out = execute_on<MatMulImpl>(A.device_id(), "matmul", A, B);
     // 内核按 [batch, rows, cols] 作答；只需去掉被提升的向量维。
     if (out.shape().size() != out_shape.size() ||
         !std::equal(out_shape.begin(), out_shape.end(), out.shape().begin()))
@@ -867,7 +870,7 @@ Tensor conv2d_forward(const Tensor& input, const Tensor& weight, const Tensor* b
         }
     }
 
-    Tensor out = execute_on<Conv2dImpl>(src.device_id(), src, w, bias_arg, shape);
+    Tensor out = execute_on<Conv2dImpl>(src.device_id(), "conv2d", src, w, bias_arg, shape);
     if (in_rank == 3) out = out.reshape({out_ch, out_h, out_w});
     return out;
 }
@@ -887,68 +890,68 @@ Tensor Abs(const Tensor& a) {
     require_live(a);
     require_not_bool(a, "abs");
     if (is_empty(a)) return empty_on(a, a.shape(), elementwise_result_type(a.dtype(), true));
-    return execute_on<AbsImpl>(a.device_id(), a);
+    return execute_on<AbsImpl>(a.device_id(), "abs", a);
 }
 Tensor Sin(const Tensor& a) {
     require_live(a);
     require_not_bool(a, "sin");
     if (is_empty(a)) return empty_on(a, a.shape(), elementwise_result_type(a.dtype(), false));
-    return execute_on<SinImpl>(a.device_id(), a);
+    return execute_on<SinImpl>(a.device_id(), "sin", a);
 }
 Tensor Cos(const Tensor& a) {
     require_live(a);
     require_not_bool(a, "cos");
     if (is_empty(a)) return empty_on(a, a.shape(), elementwise_result_type(a.dtype(), false));
-    return execute_on<CosImpl>(a.device_id(), a);
+    return execute_on<CosImpl>(a.device_id(), "cos", a);
 }
 Tensor Tan(const Tensor& a) {
     require_live(a);
     require_not_bool(a, "tan");
     if (is_empty(a)) return empty_on(a, a.shape(), elementwise_result_type(a.dtype(), false));
-    return execute_on<TanImpl>(a.device_id(), a);
+    return execute_on<TanImpl>(a.device_id(), "tan", a);
 }
 Tensor Exp(const Tensor& a) {
     require_live(a);
     require_not_bool(a, "exp");
     if (is_empty(a)) return empty_on(a, a.shape(), elementwise_result_type(a.dtype(), false));
-    return execute_on<ExpImpl>(a.device_id(), a);
+    return execute_on<ExpImpl>(a.device_id(), "exp", a);
 }
 Tensor Relu(const Tensor& a) {
     require_live(a);
     require_not_bool(a, "relu");
     if (is_empty(a)) return empty_on(a, a.shape(), elementwise_result_type(a.dtype(), true));
-    return execute_on<ReluImpl>(a.device_id(), a);
+    return execute_on<ReluImpl>(a.device_id(), "relu", a);
 }
 Tensor Silu(const Tensor& a) {
     require_live(a);
     require_not_bool(a, "silu");
     if (is_empty(a)) return empty_on(a, a.shape(), elementwise_result_type(a.dtype(), false));
-    return execute_on<SiluImpl>(a.device_id(), a);
+    return execute_on<SiluImpl>(a.device_id(), "silu", a);
 }
 Tensor Tanh(const Tensor& a) {
     require_live(a);
     require_not_bool(a, "tanh");
     if (is_empty(a)) return empty_on(a, a.shape(), elementwise_result_type(a.dtype(), false));
-    return execute_on<TanhImpl>(a.device_id(), a);
+    return execute_on<TanhImpl>(a.device_id(), "tanh", a);
 }
 Tensor Sqrt(const Tensor& a) {
     require_live(a);
     require_not_bool(a, "sqrt");
     if (is_empty(a)) return empty_on(a, a.shape(), elementwise_result_type(a.dtype(), false));
     if (ops::Any((a < 0), 1)) throw std::runtime_error("tensor must be non-negative");
-    return execute_on<SqrtImpl>(a.device_id(), a);
+    return execute_on<SqrtImpl>(a.device_id(), "sqrt", a);
 }
 Tensor Sigmoid(const Tensor& a) {
     require_live(a);
     require_not_bool(a, "sigmoid");
     if (is_empty(a)) return empty_on(a, a.shape(), elementwise_result_type(a.dtype(), false));
-    return execute_on<SigmoidImpl>(a.device_id(), a);
+    return execute_on<SigmoidImpl>(a.device_id(), "sigmoid", a);
 }
 Tensor Pow(const Tensor& a, float val) {
     require_live(a);
     require_not_bool(a, "pow");
     if (is_empty(a)) return empty_on(a, a.shape(), elementwise_result_type(a.dtype(), false));
-    return execute_on<PowImpl>(a.device_id(), a, val);
+    return execute_on<PowImpl>(a.device_id(), "pow", a, val);
 }
 Tensor Log(const Tensor& a, float val) {
     if (val < 0 || val == 1) throw std::runtime_error("The base cannot be less than or equal to 0, and it cannot be 1");
@@ -956,7 +959,7 @@ Tensor Log(const Tensor& a, float val) {
     require_not_bool(a, "log");
     if (is_empty(a)) return empty_on(a, a.shape(), elementwise_result_type(a.dtype(), false));
     if (ops::Any((a < 0), 1)) throw std::runtime_error("log: tensor must be non-negative");
-    return execute_on<LogImpl>(a.device_id(), a, val);
+    return execute_on<LogImpl>(a.device_id(), "log", a, val);
 }
 Tensor Softmax(const Tensor& a, int axis) {
     require_live(a);
@@ -965,7 +968,7 @@ Tensor Softmax(const Tensor& a, int axis) {
     if (is_empty(a)) return empty_on(a, a.shape(), elementwise_result_type(a.dtype(), false));
     Tensor storage;
     const Tensor& A = linearize(a, storage);
-    return execute_on<SoftmaxImpl>(A.device_id(), A, axis);
+    return execute_on<SoftmaxImpl>(A.device_id(), "softmax", A, axis);
 }
 // ===== FR-10：用组合实现设备覆盖 =====
 namespace {
@@ -1035,7 +1038,7 @@ Tensor Erf(const Tensor& a) {
     require_live(a);
     require_not_bool(a, "erf");
     if (is_empty(a)) return empty_on(a, a.shape(), elementwise_result_type(a.dtype(), false));
-    return execute_on<ErfImpl>(a.device_id(), a);
+    return execute_on<ErfImpl>(a.device_id(), "erf", a);
 }
 Tensor LayerNorm(const Tensor& a, const Tensor& weight, const Tensor& bias, int axis, float eps) {
     require_live(a);
@@ -1099,7 +1102,7 @@ Tensor Clamp(const Tensor& a, float min, float max) {
     require_not_bool(a, "clamp");
     if (min > max) throw std::runtime_error("min must be less than max");
     if (is_empty(a)) return empty_on(a, a.shape(), elementwise_result_type(a.dtype(), true));
-    return execute_on<ClampImpl>(a.device_id(), a, min, max);
+    return execute_on<ClampImpl>(a.device_id(), "clamp", a, min, max);
 }
 
 void Zeros(Tensor& a) {
@@ -1107,7 +1110,7 @@ void Zeros(Tensor& a) {
     require_live(a);
     if (is_empty(a)) return;
     if (a.device() != Device::CPU) {
-        execute_on<FillImpl>(a.device_id(), a, 0.0f);
+        execute_on<FillImpl>(a.device_id(), "fill", a, 0.0f);
         return;
     }
     // 所有支持 dtype（int / float / float16 / bfloat16）的零表示都是全零 bit pattern，
@@ -1120,7 +1123,7 @@ void Fill(Tensor& a, float value) {
     require_live(a);
     if (is_empty(a)) return;
     if (a.device() != Device::CPU) {
-        execute_on<FillImpl>(a.device_id(), a, value);
+        execute_on<FillImpl>(a.device_id(), "fill", a, value);
         return;
     }
     dispatch_dtype(a.dtype(), [&](auto type_id) {
@@ -1145,7 +1148,7 @@ void Abs(Tensor& a) {
     require_contiguous(a, "abs_");
     require_not_bool(a, "abs_");
     if (is_empty(a)) return;
-    execute_on<AbsImpl>(a.device_id(), a);
+    execute_on<AbsImpl>(a.device_id(), "abs", a);
 }
 void Sin(Tensor& a) {
     require_live(a);
@@ -1154,7 +1157,7 @@ void Sin(Tensor& a) {
     if (is_integral_dtype(a.dtype()))
         throw std::runtime_error(std::format("{} of tensor a is not supported", dtype_to_string(a.dtype())));
     if (is_empty(a)) return;
-    execute_on<SinImpl>(a.device_id(), a);
+    execute_on<SinImpl>(a.device_id(), "sin", a);
 }
 void Cos(Tensor& a) {
     require_live(a);
@@ -1163,7 +1166,7 @@ void Cos(Tensor& a) {
     if (is_integral_dtype(a.dtype()))
         throw std::runtime_error(std::format("{} of tensor a is not supported", dtype_to_string(a.dtype())));
     if (is_empty(a)) return;
-    execute_on<CosImpl>(a.device_id(), a);
+    execute_on<CosImpl>(a.device_id(), "cos", a);
 }
 void Tan(Tensor& a) {
     require_live(a);
@@ -1172,14 +1175,14 @@ void Tan(Tensor& a) {
     if (is_integral_dtype(a.dtype()))
         throw std::runtime_error(std::format("{} of tensor a is not supported", dtype_to_string(a.dtype())));
     if (is_empty(a)) return;
-    execute_on<TanImpl>(a.device_id(), a);
+    execute_on<TanImpl>(a.device_id(), "tan", a);
 }
 void Relu(Tensor& a) {
     require_live(a);
     require_contiguous(a, "relu_");
     require_not_bool(a, "relu_");
     if (is_empty(a)) return;
-    execute_on<ReluImpl>(a.device_id(), a);
+    execute_on<ReluImpl>(a.device_id(), "relu", a);
 }
 void Silu(Tensor& a) {
     require_live(a);
@@ -1188,7 +1191,7 @@ void Silu(Tensor& a) {
     if (is_integral_dtype(a.dtype()))
         throw std::runtime_error(std::format("{} of tensor a is not supported", dtype_to_string(a.dtype())));
     if (is_empty(a)) return;
-    execute_on<SiluImpl>(a.device_id(), a);
+    execute_on<SiluImpl>(a.device_id(), "silu", a);
 }
 void Tanh(Tensor& a) {
     require_live(a);
@@ -1197,14 +1200,14 @@ void Tanh(Tensor& a) {
     if (is_integral_dtype(a.dtype()))
         throw std::runtime_error(std::format("{} of tensor a is not supported", dtype_to_string(a.dtype())));
     if (is_empty(a)) return;
-    execute_on<TanhImpl>(a.device_id(), a);
+    execute_on<TanhImpl>(a.device_id(), "tanh", a);
 }
 void Pow(Tensor& a, float val) {
     require_live(a);
     require_contiguous(a, "pow_");
     require_not_bool(a, "pow_");
     if (is_empty(a)) return;
-    execute_on<PowImpl>(a.device_id(), a, val);
+    execute_on<PowImpl>(a.device_id(), "pow", a, val);
 }
 void Sigmoid(Tensor& a) {
     require_live(a);
@@ -1213,7 +1216,7 @@ void Sigmoid(Tensor& a) {
     if (is_integral_dtype(a.dtype()))
         throw std::runtime_error(std::format("{} of tensor a is not supported", dtype_to_string(a.dtype())));
     if (is_empty(a)) return;
-    execute_on<SigmoidImpl>(a.device_id(), a);
+    execute_on<SigmoidImpl>(a.device_id(), "sigmoid", a);
 }
 void Clamp(Tensor& a, float min, float max) {
     require_live(a);
@@ -1221,7 +1224,7 @@ void Clamp(Tensor& a, float min, float max) {
     require_not_bool(a, "clamp_");
     if (min > max) throw std::runtime_error("min must be less than max");
     if (is_empty(a)) return;
-    execute_on<ClampImpl>(a.device_id(), a, min, max);
+    execute_on<ClampImpl>(a.device_id(), "clamp", a, min, max);
 }
 
 Tensor Sum(const Tensor& a) {
@@ -1296,7 +1299,7 @@ Tensor Sum(const Tensor& a, int axis, bool keepdim) {
     if (numel_of(out_shape) == 0) return empty_on(a, out_shape, out_type);
     Tensor storage;
     const Tensor& A = prepare_reduce_input(a, storage, axis);
-    return with_reduced_shape(execute_on<SumImpl>(A.device_id(), A, axis), a.shape(), axis, keepdim);
+    return with_reduced_shape(execute_on<SumImpl>(A.device_id(), "sum", A, axis), a.shape(), axis, keepdim);
 }
 Tensor Min(const Tensor& a, int axis, bool keepdim) {
     require_live(a);
@@ -1309,7 +1312,7 @@ Tensor Min(const Tensor& a, int axis, bool keepdim) {
     if (numel_of(out_shape) == 0) return empty_on(a, out_shape, a.dtype());
     Tensor storage;
     const Tensor& A = prepare_reduce_input(a, storage, axis);
-    return with_reduced_shape(execute_on<MinImpl>(A.device_id(), A, axis), a.shape(), axis, keepdim);
+    return with_reduced_shape(execute_on<MinImpl>(A.device_id(), "min", A, axis), a.shape(), axis, keepdim);
 }
 Tensor Max(const Tensor& a, int axis, bool keepdim) {
     require_live(a);
@@ -1322,7 +1325,7 @@ Tensor Max(const Tensor& a, int axis, bool keepdim) {
     if (numel_of(out_shape) == 0) return empty_on(a, out_shape, a.dtype());
     Tensor storage;
     const Tensor& A = prepare_reduce_input(a, storage, axis);
-    return with_reduced_shape(execute_on<MaxImpl>(A.device_id(), A, axis), a.shape(), axis, keepdim);
+    return with_reduced_shape(execute_on<MaxImpl>(A.device_id(), "max", A, axis), a.shape(), axis, keepdim);
 }
 Tensor Mean(const Tensor& a, int axis, bool keepdim) {
     require_live(a);
@@ -1335,7 +1338,7 @@ Tensor Mean(const Tensor& a, int axis, bool keepdim) {
     if (numel_of(out_shape) == 0) return empty_on(a, out_shape, out_type);
     Tensor storage;
     const Tensor& A = prepare_reduce_input(a, storage, axis);
-    return with_reduced_shape(execute_on<MeanImpl>(A.device_id(), A, axis), a.shape(), axis, keepdim);
+    return with_reduced_shape(execute_on<MeanImpl>(A.device_id(), "mean", A, axis), a.shape(), axis, keepdim);
 }
 Tensor Prod(const Tensor& a, int axis, bool keepdim) {
     require_live(a);
@@ -1347,7 +1350,7 @@ Tensor Prod(const Tensor& a, int axis, bool keepdim) {
     if (numel_of(out_shape) == 0) return empty_on(a, out_shape, out_type);
     Tensor storage;
     const Tensor& A = prepare_reduce_input(a, storage, axis);
-    return with_reduced_shape(execute_on<ProdImpl>(A.device_id(), A, axis), a.shape(), axis, keepdim);
+    return with_reduced_shape(execute_on<ProdImpl>(A.device_id(), "prod", A, axis), a.shape(), axis, keepdim);
 }
 Tensor Var(const Tensor& a, int axis, bool keepdim) {
     require_live(a);
@@ -1396,7 +1399,7 @@ Tensor Cumsum(const Tensor& a, int axis) {
     if (is_empty(a)) return empty_on(a, a.shape(), a.dtype());
     Tensor storage;
     const Tensor& A = linearize(a, storage);
-    return execute_on<CumsumImpl>(A.device_id(), A, axis);
+    return execute_on<CumsumImpl>(A.device_id(), "cumsum", A, axis);
 }
 
 namespace {
@@ -1654,7 +1657,7 @@ void Typecast(Tensor& a, DataType dst_type) {
         a.set_impl(create_tensor_impl(0, dst_type, a.device_id()), dst_type);
         return;
     }
-    execute_on<TypecastImpl>(a.device_id(), a, dst_type);
+    execute_on<TypecastImpl>(a.device_id(), "typecast", a, dst_type);
 }
 Tensor Typecast(const Tensor& a, DataType dst_type) {
     require_live(a);
@@ -1664,7 +1667,7 @@ Tensor Typecast(const Tensor& a, DataType dst_type) {
     if (is_empty(a)) return empty_on(a, a.shape(), dst_type);
     Tensor storage;
     const Tensor& A = linearize(a, storage);
-    return execute_on<TypecastImpl>(A.device_id(), A, dst_type);
+    return execute_on<TypecastImpl>(A.device_id(), "typecast", A, dst_type);
 }
 
 Tensor Concat(const std::vector<Tensor>& tensors, int dim) {
@@ -1710,7 +1713,7 @@ Tensor Concat(const std::vector<Tensor>& tensors, int dim) {
         }
     }
     if (inputs->empty()) throw std::runtime_error("Concat: input list is empty");
-    return execute_on<ConcatImpl>((*inputs)[0].device_id(), *inputs, dim);
+    return execute_on<ConcatImpl>((*inputs)[0].device_id(), "concat", *inputs, dim);
 }
 
 void Transpose(Tensor& a) {
@@ -1718,7 +1721,7 @@ void Transpose(Tensor& a) {
     require_live(a);
     if (a.shape().size() != 2) throw std::runtime_error("transpose only support 2D tensor");
     if (is_empty(a)) return;
-    execute_on<TransposeImpl>(a.device_id(), a);
+    execute_on<TransposeImpl>(a.device_id(), "transpose", a);
 }
 void Transpose(const Tensor& a, Tensor& dst, std::initializer_list<int64_t> axes) {
     if (a.shape().empty()) throw std::runtime_error("Input tensor must be not null.");
@@ -1727,7 +1730,7 @@ void Transpose(const Tensor& a, Tensor& dst, std::initializer_list<int64_t> axes
     if (is_empty(a)) return;
     Tensor storage;
     const Tensor& A = linearize(a, storage);
-    execute_on<TransposeImpl>(A.device_id(), A, dst, axes);
+    execute_on<TransposeImpl>(A.device_id(), "transpose", A, dst, axes);
 }
 Tensor Transpose(const Tensor& a, std::initializer_list<int64_t> axes) {
     if (a.shape().empty()) throw std::runtime_error("Input tensor must be not null.");
@@ -1740,7 +1743,7 @@ Tensor Transpose(const Tensor& a, std::initializer_list<int64_t> axes) {
     }
     Tensor storage;
     const Tensor& A = linearize(a, storage);
-    return execute_on<TransposeImpl>(A.device_id(), A, axes);
+    return execute_on<TransposeImpl>(A.device_id(), "transpose", A, axes);
 }
 
 Tensor Equal(const Tensor& a, const Tensor& b) {
@@ -1751,7 +1754,7 @@ Tensor Equal(const Tensor& a, const Tensor& b) {
     }
 
     // 形状由 ufunc 框架的广播规则校验
-    return as_bool(execute_on<EqualImpl>(a.device_id(), a, b));
+    return as_bool(execute_on<EqualImpl>(a.device_id(), "equal", a, b));
 }
 Tensor NotEqual(const Tensor& a, const Tensor& b) {
     if (a.device_id() != b.device_id()) throw std::runtime_error("Tensors a and b device mismatch!");
@@ -1761,7 +1764,7 @@ Tensor NotEqual(const Tensor& a, const Tensor& b) {
     }
 
     // 形状由 ufunc 框架的广播规则校验
-    return as_bool(execute_on<NotEqualImpl>(a.device_id(), a, b));
+    return as_bool(execute_on<NotEqualImpl>(a.device_id(), "not_equal", a, b));
 }
 Tensor Greater(const Tensor& a, const Tensor& b) {
     if (a.device_id() != b.device_id()) throw std::runtime_error("Tensors a and b device mismatch!");
@@ -1771,7 +1774,7 @@ Tensor Greater(const Tensor& a, const Tensor& b) {
     }
 
     // 形状由 ufunc 框架的广播规则校验
-    return as_bool(execute_on<GreaterImpl>(a.device_id(), a, b));
+    return as_bool(execute_on<GreaterImpl>(a.device_id(), "greater", a, b));
 }
 Tensor Less(const Tensor& a, const Tensor& b) {
     if (a.device_id() != b.device_id()) throw std::runtime_error("Tensors a and b device mismatch!");
@@ -1781,7 +1784,7 @@ Tensor Less(const Tensor& a, const Tensor& b) {
     }
 
     // 形状由 ufunc 框架的广播规则校验
-    return as_bool(execute_on<LessImpl>(a.device_id(), a, b));
+    return as_bool(execute_on<LessImpl>(a.device_id(), "less", a, b));
 }
 Tensor GreaterEqual(const Tensor& a, const Tensor& b) {
     if (a.device_id() != b.device_id()) throw std::runtime_error("Tensors a and b device mismatch!");
@@ -1791,7 +1794,7 @@ Tensor GreaterEqual(const Tensor& a, const Tensor& b) {
     }
 
     // 形状由 ufunc 框架的广播规则校验
-    return as_bool(execute_on<GreaterEqualImpl>(a.device_id(), a, b));
+    return as_bool(execute_on<GreaterEqualImpl>(a.device_id(), "greater_equal", a, b));
 }
 Tensor LessEqual(const Tensor& a, const Tensor& b) {
     if (a.device_id() != b.device_id()) throw std::runtime_error("Tensors a and b device mismatch!");
@@ -1801,38 +1804,38 @@ Tensor LessEqual(const Tensor& a, const Tensor& b) {
     }
 
     // 形状由 ufunc 框架的广播规则校验
-    return as_bool(execute_on<LessEqualImpl>(a.device_id(), a, b));
+    return as_bool(execute_on<LessEqualImpl>(a.device_id(), "less_equal", a, b));
 }
 
 Tensor Equal(const Tensor& a, float val) {
     require_live(a);
     if (is_empty(a)) return empty_on(a, a.shape(), DataType::BOOL);
-    return as_bool(execute_on<EqualImpl>(a.device_id(), a, val));
+    return as_bool(execute_on<EqualImpl>(a.device_id(), "equal", a, val));
 }
 Tensor NotEqual(const Tensor& a, float val) {
     require_live(a);
     if (is_empty(a)) return empty_on(a, a.shape(), DataType::BOOL);
-    return as_bool(execute_on<NotEqualImpl>(a.device_id(), a, val));
+    return as_bool(execute_on<NotEqualImpl>(a.device_id(), "not_equal", a, val));
 }
 Tensor Greater(const Tensor& a, float val) {
     require_live(a);
     if (is_empty(a)) return empty_on(a, a.shape(), DataType::BOOL);
-    return as_bool(execute_on<GreaterImpl>(a.device_id(), a, val));
+    return as_bool(execute_on<GreaterImpl>(a.device_id(), "greater", a, val));
 }
 Tensor Less(const Tensor& a, float val) {
     require_live(a);
     if (is_empty(a)) return empty_on(a, a.shape(), DataType::BOOL);
-    return as_bool(execute_on<LessImpl>(a.device_id(), a, val));
+    return as_bool(execute_on<LessImpl>(a.device_id(), "less", a, val));
 }
 Tensor GreaterEqual(const Tensor& a, float val) {
     require_live(a);
     if (is_empty(a)) return empty_on(a, a.shape(), DataType::BOOL);
-    return as_bool(execute_on<GreaterEqualImpl>(a.device_id(), a, val));
+    return as_bool(execute_on<GreaterEqualImpl>(a.device_id(), "greater_equal", a, val));
 }
 Tensor LessEqual(const Tensor& a, float val) {
     require_live(a);
     if (is_empty(a)) return empty_on(a, a.shape(), DataType::BOOL);
-    return as_bool(execute_on<LessEqualImpl>(a.device_id(), a, val));
+    return as_bool(execute_on<LessEqualImpl>(a.device_id(), "less_equal", a, val));
 }
 
 Tensor Where(const Tensor& cond, const Tensor& a, const Tensor& b) {
@@ -1842,7 +1845,7 @@ Tensor Where(const Tensor& cond, const Tensor& a, const Tensor& b) {
         const DimArray out = broadcast_shape_or_throw(cond, a, b, "where");
         return empty_on(cond, out, compute_type(a.dtype(), b.dtype()));
     }
-    return execute_on<WhereImpl>(cond.device_id(), cond, a, b);
+    return execute_on<WhereImpl>(cond.device_id(), "where", cond, a, b);
 }
 Tensor Where(const Tensor& cond, const Tensor& a, float b) {
     if (cond.device_id() != a.device_id())
@@ -1851,7 +1854,7 @@ Tensor Where(const Tensor& cond, const Tensor& a, float b) {
         const DimArray out = broadcast_shape_or_throw(cond, a, "where");
         return empty_on(cond, out, scalar_promote_type(a.dtype()));
     }
-    return execute_on<WhereImpl>(cond.device_id(), cond, a, b);
+    return execute_on<WhereImpl>(cond.device_id(), "where", cond, a, b);
 }
 Tensor Where(const Tensor& cond, float a, const Tensor& b) {
     if (cond.device_id() != b.device_id())
@@ -1860,7 +1863,7 @@ Tensor Where(const Tensor& cond, float a, const Tensor& b) {
         const DimArray out = broadcast_shape_or_throw(cond, b, "where");
         return empty_on(cond, out, scalar_promote_type(b.dtype()));
     }
-    return execute_on<WhereImpl>(cond.device_id(), cond, a, b);
+    return execute_on<WhereImpl>(cond.device_id(), "where", cond, a, b);
 }
 
 bool All(const Tensor& a, float val) {
@@ -1869,7 +1872,7 @@ bool All(const Tensor& a, float val) {
     if (is_bool_dtype(a.dtype())) return All(Typecast(a, DataType::INT8), val);
     Tensor storage;
     const Tensor& A = linearize(a, storage);
-    return execute_on<AllImpl>(A.device_id(), A, val);
+    return execute_on<AllImpl>(A.device_id(), "all", A, val);
 }
 bool Any(const Tensor& a, float val) {
     require_live(a);
@@ -1877,7 +1880,7 @@ bool Any(const Tensor& a, float val) {
     if (is_bool_dtype(a.dtype())) return Any(Typecast(a, DataType::INT8), val);
     Tensor storage;
     const Tensor& A = linearize(a, storage);
-    return execute_on<AnyImpl>(A.device_id(), A, val);
+    return execute_on<AnyImpl>(A.device_id(), "any", A, val);
 }
 size_t CountNonzero(const Tensor& a) {
     require_live(a);
@@ -1885,7 +1888,7 @@ size_t CountNonzero(const Tensor& a) {
     if (is_bool_dtype(a.dtype())) return CountNonzero(Typecast(a, DataType::INT8));
     Tensor storage;
     const Tensor& A = linearize(a, storage);
-    return execute_on<NonZeroImpl>(A.device_id(), A);
+    return execute_on<NonZeroImpl>(A.device_id(), "nonzero", A);
 }
 
 // 对全部元素做 all/any，返回输入设备上的 0-dim BOOL 张量。真值判定是“非零即真”
@@ -1894,7 +1897,7 @@ size_t CountNonzero(const Tensor& a) {
 Tensor All(const Tensor& a) {
     require_live(a);
     const DeviceId id = a.device_id();
-    if (is_empty(a)) return execute_on<ops::FillImpl>(id, std::vector<int64_t>{}, DataType::BOOL, 1.0f);
+    if (is_empty(a)) return execute_on<ops::FillImpl>(id, "fill", std::vector<int64_t>{}, DataType::BOOL, 1.0f);
     const Tensor mask = NotEqual(a, 0.0f);    // 输入设备上的 BOOL 张量
     Tensor folded = Min(Typecast(mask, DataType::INT8));
     if (folded.device_id() != id) folded.to_device(id);
@@ -1904,7 +1907,7 @@ Tensor All(const Tensor& a) {
 Tensor Any(const Tensor& a) {
     require_live(a);
     const DeviceId id = a.device_id();
-    if (is_empty(a)) return execute_on<ops::FillImpl>(id, std::vector<int64_t>{}, DataType::BOOL, 0.0f);
+    if (is_empty(a)) return execute_on<ops::FillImpl>(id, "fill", std::vector<int64_t>{}, DataType::BOOL, 0.0f);
     const Tensor mask = NotEqual(a, 0.0f);
     Tensor folded = Max(Typecast(mask, DataType::INT8));
     if (folded.device_id() != id) folded.to_device(id);
@@ -2211,7 +2214,7 @@ SortResult Sort(const Tensor& t, int64_t dim, bool descending) {
     const int d = normalize_axis(static_cast<int>(dim), t.dims(), "sort");
     Tensor storage;
     const Tensor& A = linearize(t, storage);
-    return execute_on<SortImpl>(A.device_id(), A, d, descending);
+    return execute_on<SortImpl>(A.device_id(), "sort", A, d, descending);
 }
 
 TopkResult Topk(const Tensor& t, int64_t k, int64_t dim, bool largest) {
@@ -2221,7 +2224,7 @@ TopkResult Topk(const Tensor& t, int64_t k, int64_t dim, bool largest) {
     const int d = normalize_axis(static_cast<int>(dim), t.dims(), "topk");
     Tensor storage;
     const Tensor& A = linearize(t, storage);
-    return execute_on<TopkImpl>(A.device_id(), A, k, d, largest);
+    return execute_on<TopkImpl>(A.device_id(), "topk", A, k, d, largest);
 }
 
 Tensor Argmax(const Tensor& a, int axis, bool keepdim) {
@@ -2234,7 +2237,7 @@ Tensor Argmax(const Tensor& a, int axis, bool keepdim) {
     if (numel_of(out_shape) == 0) return empty_on(a, out_shape, DataType::INT64);
     Tensor storage;
     const Tensor& A = prepare_reduce_input(a, storage, axis);
-    Tensor result = execute_on<ArgMaxImpl>(A.device_id(), A, axis);
+    Tensor result = execute_on<ArgMaxImpl>(A.device_id(), "argmax", A, axis);
     // 即使后端原生索引内核是 INT32，契约输出仍是 INT64。
     if (result.dtype() != DataType::INT64) result = result.to_type(DataType::INT64);
     return with_reduced_shape(std::move(result), a.shape(), axis, keepdim);
@@ -2249,7 +2252,7 @@ Tensor Argmin(const Tensor& a, int axis, bool keepdim) {
     if (numel_of(out_shape) == 0) return empty_on(a, out_shape, DataType::INT64);
     Tensor storage;
     const Tensor& A = prepare_reduce_input(a, storage, axis);
-    Tensor result = execute_on<ArgMinImpl>(A.device_id(), A, axis);
+    Tensor result = execute_on<ArgMinImpl>(A.device_id(), "argmin", A, axis);
     if (result.dtype() != DataType::INT64) result = result.to_type(DataType::INT64);
     return with_reduced_shape(std::move(result), a.shape(), axis, keepdim);
 }
@@ -2269,7 +2272,7 @@ Tensor IndexSelect(const Tensor& input, int dim, const Tensor& index) {
         out_shape[dim] = 0;
         return empty_on(input, out_shape, input.dtype());
     }
-    return execute_on<IndexSelectImpl>(input.device_id(), input, dim, index);
+    return execute_on<IndexSelectImpl>(input.device_id(), "index_select", input, dim, index);
 }
 
 Tensor Gather(const Tensor& input, int dim, const Tensor& index) {
@@ -2288,7 +2291,7 @@ Tensor Gather(const Tensor& input, int dim, const Tensor& index) {
         if (static_cast<int>(d) != dim && index.shape(d) > input.shape(d))
             throw std::runtime_error("gather: index size exceeds input along non-dim axes");
     if (index.numel() == 0) return empty_on(input, index.shape(), input.dtype());
-    return execute_on<GatherImpl>(input.device_id(), input, dim, index);
+    return execute_on<GatherImpl>(input.device_id(), "gather", input, dim, index);
 }
 
 namespace {

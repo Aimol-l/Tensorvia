@@ -59,7 +59,7 @@
 - `dtype=` 限定：先按算子自身的 dtype 规则归约，再把结果 cast 到指定 dtype；`BOOL` 作为归约输出 dtype 被显式拒绝（`Sum/Prod/Mean/Var/Std/Norm` 上无意义）。
 - `All/Any` 返回 0-dim `BOOL` 张量：真值判定为“非零即真”（`NotEqual(x, 0)` → `INT8` → `Min/Max` 折叠 → cast 回 `BOOL`），全程在输入设备上，`item<bool>()` 仍是唯一同步点；空张量 `All=true`、`Any=false`。
 - `Nonzero` 返回索引张量 `(count, dims)` INT64（1-D 输入为 `(count)`，空输入为 `(0, dims)`）；旧计数语义改名为 `CountNonzero`。索引由 CPU 侧循环生成，设备张量先回拷一次。
-- 未做（本切片外）：`out=` 输出参数、`MseLoss/NllLoss/CrossEntropyLoss` 返回张量、后端 `{1}` 兜底与已无调用的“整体归约返回宿主标量”后端实现（`XxxImpl::execute(const Tensor&)`）的清理。
+- 未做（本切片外）：`out=` 输出参数、`MseLoss/NllLoss/CrossEntropyLoss` 返回张量、后端 `{1}` 兜底的清理。（“整体归约返回宿主标量”的后端实现 `XxxImpl::execute(const Tensor&)` 已于 2026-11-02 删除：公共同款 API 的全归约改走 axis-0 轴归约后它们再无调用者，随同孤立的基础设施——CUDA/SYCL 的 `reduce_all` 内核与启动入口、Vulkan 的 `OpType::Sum/Min/Max` 注册与 24 份着色器、CPU 侧 7 个单参内核——一并移除。）
 
 **FR-4 落地说明**（2026-10-31）：
 
@@ -95,7 +95,7 @@
 
 - 契约违例的错误信息包含算子名与关键上下文：轴越界报 `"sum: axis is out of range for a 3D tensor"`，dtype 违例报 `"mean: BOOL is not supported; cast the tensor to a numeric dtype first"`，设备违例报 `"prod: only the CPU backend implements this op (tensor is on CUDA)"`。
 - 跨设备操作数、设备类型不匹配、mask 广播过大、重复/越界轴、`BOOL` 算术与 `BOOL` 归约输出都有独立错误路径。
-- 未实现的后端组合由 `execute_on` 的编译期分派统一抛出 `"this operation is not implemented on the <BACKEND> backend"`，没有静默回退到 CPU。
+- 未实现的后端组合由 `execute_on` 的编译期分派统一抛出，消息带算子名与后端（`"erf: not implemented on the CUDA backend"`，算子名由调用点以 `std::string_view` 传入），没有静默回退到 CPU。
 
 
 **FR-1 落地说明**（2026-10-31）：

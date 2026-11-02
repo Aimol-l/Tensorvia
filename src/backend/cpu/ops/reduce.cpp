@@ -145,44 +145,6 @@ void argmin_kernel(const T *src_ptr, int32_t *res_ptr, int outer_size, int inner
     }
 }
 
-template <typename T>
-float sum_kernel(const T *ptr, size_t size) {
-    float sum = 0.0f;
-    #pragma omp parallel for simd reduction(+:sum) schedule(static)
-    for (size_t i = 0; i < size; ++i) {
-        sum += static_cast<float>(ptr[i]);
-    }
-    return sum;
-}
-
-template <typename T>
-float mean_kernel(const Tensor& src) {
-    float total = sum_kernel<T>(static_cast<const T*>(src.data()), src.numel());  // 复用 sum_kernel
-    return total / static_cast<float>(src.numel());
-}
-
-template <typename T>
-float min_kernel(const T *ptr, size_t size) {
-    float min_val = std::numeric_limits<float>::max();
-    #pragma omp parallel for simd reduction(min:min_val) schedule(static)
-    for (size_t i = 0; i < size; ++i) {
-        float val = static_cast<float>(ptr[i]);
-        min_val = std::min(min_val, val);
-    }
-    return min_val;
-}
-
-template <typename T>
-float max_kernel(const T *ptr, size_t size) {
-    float max_val = std::numeric_limits<float>::lowest();
-    #pragma omp parallel for simd reduction(max:max_val) schedule(static)
-    for (size_t i = 0; i < size; ++i) {
-        float val = static_cast<float>(ptr[i]);
-        max_val = std::max(max_val, val);
-    }
-    return max_val;
-}
-
 // 累加类型：整型输入在 int64 里精确累加，浮点输入用 double；float32 的连续轴
 // 仍走 float 的 SIMD 快路径。
 template <typename T>
@@ -349,15 +311,6 @@ void max_kernel(const T *src_ptr, T *res_ptr, size_t outer_size, size_t inner_si
     }
 }
 
-template <typename T>
-float prod_kernel(const T* ptr, size_t size) {
-    float prod = 1.0f;
-    #pragma omp parallel for simd reduction(*:prod) schedule(static)
-    for (size_t i = 0; i < size; ++i)
-        prod *= static_cast<float>(ptr[i]);
-    return prod;
-}
-
 template <typename T, typename R>
 void prod_kernel(const T* src_ptr, R* res_ptr, int outer_size, int inner_size, int axis_size) {
     const size_t n_outer = static_cast<size_t>(outer_size);
@@ -389,20 +342,6 @@ void prod_kernel(const T* src_ptr, R* res_ptr, int outer_size, int inner_size, i
     }
 }
 
-// 总体（ddof=0）方差 / 标准差：两遍求和，先算均值再算离差平方和，避免 E[x²]-E[x]² 的相消。
-template <typename T, bool Std>
-float var_std_full(const T* src, size_t n) {
-    const float mean = sum_kernel<T>(src, n) / static_cast<float>(n);
-    float ss = 0.0f;
-    #pragma omp parallel for simd reduction(+:ss) schedule(static)
-    for (size_t i = 0; i < n; ++i) {
-        const float d = static_cast<float>(src[i]) - mean;
-        ss += d * d;
-    }
-    const float v = ss / static_cast<float>(n);
-    return Std ? std::sqrt(v) : v;
-}
-
 template <typename T, typename R, bool Std>
 void var_std_kernel(const T* src_ptr, R* res_ptr, int outer_size, int inner_size, int axis_size) {
     const size_t n_outer = static_cast<size_t>(outer_size);
@@ -427,23 +366,6 @@ void var_std_kernel(const T* src_ptr, R* res_ptr, int outer_size, int inner_size
         const Acc v = ss * inv;
         res_ptr[task] = static_cast<R>(Std ? std::sqrt(v) : v);
     }
-}
-
-template <typename T>
-float norm_full(const T* src, size_t n, float p) {
-    float acc = 0.0f;
-    if (p == 1.0f) {
-        #pragma omp parallel for reduction(+:acc) schedule(static)
-        for (size_t i = 0; i < n; ++i) acc += std::abs(static_cast<float>(src[i]));
-    } else {
-        #pragma omp parallel for reduction(+:acc) schedule(static)
-        for (size_t i = 0; i < n; ++i) {
-            const float v = static_cast<float>(src[i]);
-            acc += v * v;
-        }
-        acc = std::sqrt(acc);
-    }
-    return acc;
 }
 
 template <typename T, typename R>
@@ -554,41 +476,6 @@ bool any_kernel(const T *ptr, float val, size_t n) {
 }
 
 // ================================================================
-float SumImpl<Device::CPU>::execute(const Tensor& a) {
-    float sum = 0;
-    dispatch_dtype(a.dtype(), [&](auto type_id) {
-        using T = typename decltype(type_id)::type;
-        const T* a_ptr = static_cast<const T*>(a.data());
-        sum = sum_kernel<T>(a_ptr,a.numel());
-    });
-    return sum;
-}
-float MinImpl<Device::CPU>::execute(const Tensor& a) {
-    float min = 0;
-    dispatch_dtype(a.dtype(), [&](auto type_id) {
-        using T = typename decltype(type_id)::type;
-        const T* a_ptr = static_cast<const T*>(a.data());
-        min = min_kernel<T>(a_ptr,a.numel());
-    });
-    return min;
-}
-float MaxImpl<Device::CPU>::execute(const Tensor& a) {
-    float max = 0;
-    dispatch_dtype(a.dtype(), [&](auto type_id) {
-        using T = typename decltype(type_id)::type;
-        const T* a_ptr = static_cast<const T*>(a.data());
-        max = max_kernel<T>(a_ptr,a.numel());
-    });
-    return max;
-}
-float MeanImpl<Device::CPU>::execute(const Tensor& a) {
-    float mean = 0;
-    dispatch_dtype(a.dtype(), [&](auto type_id) {
-        using T = typename decltype(type_id)::type;
-        mean = mean_kernel<T>(a);
-    });
-    return mean;
-}
 // ================================================================
 // 跨步单轴归约。
 //
@@ -846,14 +733,6 @@ Tensor ArgMinImpl<Device::CPU>::execute(const Tensor &a, int axis) {
     return result;
 }
 // ================================================================
-float ProdImpl<Device::CPU>::execute(const Tensor& a) {
-    float prod = 0;
-    dispatch_dtype(a.dtype(), [&](auto type_id) {
-        using T = typename decltype(type_id)::type;
-        prod = prod_kernel<T>(static_cast<const T*>(a.data()), a.numel());
-    });
-    return prod;
-}
 Tensor ProdImpl<Device::CPU>::execute(const Tensor& a, int axis) {
     auto a_shape = a.shape();
     int dim = a_shape.size();
@@ -884,14 +763,6 @@ Tensor ProdImpl<Device::CPU>::execute(const Tensor& a, int axis) {
     return result;
 }
 // ================================================================
-float VarImpl<Device::CPU>::execute(const Tensor& a) {
-    float var = 0;
-    dispatch_dtype(a.dtype(), [&](auto type_id) {
-        using T = typename decltype(type_id)::type;
-        var = var_std_full<T, false>(static_cast<const T*>(a.data()), a.numel());
-    });
-    return var;
-}
 Tensor VarImpl<Device::CPU>::execute(const Tensor& a, int axis) {
     auto a_shape = a.shape();
     int dim = a_shape.size();
@@ -923,14 +794,6 @@ Tensor VarImpl<Device::CPU>::execute(const Tensor& a, int axis) {
     return result;
 }
 // ================================================================
-float StdImpl<Device::CPU>::execute(const Tensor& a) {
-    float std_ = 0;
-    dispatch_dtype(a.dtype(), [&](auto type_id) {
-        using T = typename decltype(type_id)::type;
-        std_ = var_std_full<T, true>(static_cast<const T*>(a.data()), a.numel());
-    });
-    return std_;
-}
 Tensor StdImpl<Device::CPU>::execute(const Tensor& a, int axis) {
     auto a_shape = a.shape();
     int dim = a_shape.size();
@@ -962,14 +825,6 @@ Tensor StdImpl<Device::CPU>::execute(const Tensor& a, int axis) {
     return result;
 }
 // ================================================================
-float NormImpl<Device::CPU>::execute(const Tensor& a, float p) {
-    float norm = 0;
-    dispatch_dtype(a.dtype(), [&](auto type_id) {
-        using T = typename decltype(type_id)::type;
-        norm = norm_full<T>(static_cast<const T*>(a.data()), a.numel(), p);
-    });
-    return norm;
-}
 Tensor NormImpl<Device::CPU>::execute(const Tensor& a, float p, int axis) {
     auto a_shape = a.shape();
     int dim = a_shape.size();

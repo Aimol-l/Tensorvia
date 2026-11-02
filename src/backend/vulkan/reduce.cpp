@@ -1,5 +1,4 @@
 #include <cstdint>
-#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -18,66 +17,11 @@ namespace ops {
 
 namespace {
 
-// 传播 NaN 的折叠契约：朴素的 `v < a ? v : a` 会把 NaN 吞掉。
-inline bool contract_is_nan(double v) { return v != v; }
-inline double min_contract(double a, double b) {
-    if (contract_is_nan(a)) return a;
-    if (contract_is_nan(b)) return b;
-    return b < a ? b : a;
-}
-inline double max_contract(double a, double b) {
-    if (contract_is_nan(a)) return a;
-    if (contract_is_nan(b)) return b;
-    return b > a ? b : a;
-}
-
-struct FoldOp {
-    double init;
-    double (*apply)(double, double);
-};
-
-/// 在宿主上折叠各工作组的部分和。
-///
-/// scratch 张量每个工作组一个槽位（着色器写 dst.data[gl_WorkGroupID.x]），所以
-/// 其大小为 (numel+255)/256 而非固定的 256：块数偏大会越界写，偏小则会读到从未
-/// 写过的槽位。读取按 scratch 的 dtype 进行，因为 scratch 用的是提升后的累加
-/// dtype，而不是 a.dtype()。
-double fold_partials(Tensor& scratch, int64_t blocks, FoldOp op) {
-    scratch.to_host();
-    double acc = op.init;
-    dispatch_dtype(scratch.dtype(), [&](auto type_id) {
-        using T       = typename decltype(type_id)::type;
-        const T* p    = static_cast<const T*>(scratch.data());
-        for (int64_t i = 0; i < blocks; ++i) acc = op.apply(acc, static_cast<double>(p[i]));
-    });
-    return acc;
-}
-
 inline void check_vk(const std::shared_ptr<TensorImpl>& impl, const char* what) {
     if (!impl) throw std::runtime_error(std::string("vulkan ") + what + ": expected a VKTensor");
 }
 
 }  // namespace
-
-float SumImpl<Device::VULKAN>::execute(const Tensor& a) {
-    auto src_impl = std::dynamic_pointer_cast<VKTensor>(a.get_impl());
-    check_vk(src_impl, "Sum");
-    auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
-    if (!ctx_impl) throw std::runtime_error("vulkan Sum: missing VulkanContext");
-
-    const int64_t numel  = a.numel();
-    const int64_t blocks = (numel + 255) / 256;
-    // scratch 使用累加 dtype：着色器会把块内和提升（int8/int16 -> int32，
-    // int32/int64 -> int64，f16/bf16 -> float）。
-    Tensor res({blocks > 0 ? blocks : 1}, reduction_type(a.dtype()), Device::VULKAN);
-    auto res_impl = std::dynamic_pointer_cast<VKTensor>(res.get_impl());
-    check_vk(res_impl, "Sum");
-
-    ctx_impl->submitCompute(OpType::Sum, a.dtype(), {src_impl->buffer(), res_impl->buffer()},
-                            static_cast<uint32_t>(blocks), 1, 1, &numel, sizeof(int64_t));
-    return static_cast<float>(
-        fold_partials(res, blocks, {0.0, [](double x, double v) { return x + v; }}));
-}
 
 Tensor SumImpl<Device::VULKAN>::execute(const Tensor& a, int axis) {
     auto src_impl = std::dynamic_pointer_cast<VKTensor>(a.get_impl());
@@ -153,14 +97,6 @@ Tensor ProdImpl<Device::VULKAN>::execute(const Tensor& a, int axis) {
     return result;
 }
 
-float MeanImpl<Device::VULKAN>::execute(const Tensor& a) {
-    const int64_t numel = a.numel();
-    if (numel == 0) return 0.0f;
-    // 用 double 做除法：超过 2^24 后 float 除数不再精确。
-    return static_cast<float>(SumImpl<Device::VULKAN>::execute(a) /
-                              static_cast<double>(numel));
-}
-
 Tensor MeanImpl<Device::VULKAN>::execute(const Tensor& a, int axis) {
     auto src_impl = std::dynamic_pointer_cast<VKTensor>(a.get_impl());
     check_vk(src_impl, "Mean");
@@ -190,24 +126,6 @@ Tensor MeanImpl<Device::VULKAN>::execute(const Tensor& a, int axis) {
                             static_cast<uint32_t>(((outer_dim * inner_dim) + 255) / 256), 1, 1,
                             &params, sizeof(SoftmaxParams));
     return result;
-}
-
-float MinImpl<Device::VULKAN>::execute(const Tensor& a) {
-    auto src_impl = std::dynamic_pointer_cast<VKTensor>(a.get_impl());
-    check_vk(src_impl, "Min");
-    auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
-    if (!ctx_impl) throw std::runtime_error("vulkan Min: missing VulkanContext");
-
-    const int64_t numel  = a.numel();
-    const int64_t blocks = (numel + 255) / 256;
-    Tensor res({blocks > 0 ? blocks : 1}, a.dtype(), Device::VULKAN);
-    auto res_impl = std::dynamic_pointer_cast<VKTensor>(res.get_impl());
-    check_vk(res_impl, "Min");
-
-    ctx_impl->submitCompute(OpType::Min, a.dtype(), {src_impl->buffer(), res_impl->buffer()},
-                            static_cast<uint32_t>(blocks), 1, 1, &numel, sizeof(int64_t));
-    return static_cast<float>(
-        fold_partials(res, blocks, {std::numeric_limits<double>::infinity(), &min_contract}));
 }
 
 Tensor MinImpl<Device::VULKAN>::execute(const Tensor& a, int axis) {
@@ -241,24 +159,6 @@ Tensor MinImpl<Device::VULKAN>::execute(const Tensor& a, int axis) {
                             static_cast<uint32_t>(((outer_dim * inner_dim) + 255) / 256), 1, 1,
                             &params, sizeof(SoftmaxParams));
     return result;
-}
-
-float MaxImpl<Device::VULKAN>::execute(const Tensor& a) {
-    auto src_impl = std::dynamic_pointer_cast<VKTensor>(a.get_impl());
-    check_vk(src_impl, "Max");
-    auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
-    if (!ctx_impl) throw std::runtime_error("vulkan Max: missing VulkanContext");
-
-    const int64_t numel  = a.numel();
-    const int64_t blocks = (numel + 255) / 256;
-    Tensor res({blocks > 0 ? blocks : 1}, a.dtype(), Device::VULKAN);
-    auto res_impl = std::dynamic_pointer_cast<VKTensor>(res.get_impl());
-    check_vk(res_impl, "Max");
-
-    ctx_impl->submitCompute(OpType::Max, a.dtype(), {src_impl->buffer(), res_impl->buffer()},
-                            static_cast<uint32_t>(blocks), 1, 1, &numel, sizeof(int64_t));
-    return static_cast<float>(
-        fold_partials(res, blocks, {-std::numeric_limits<double>::infinity(), &max_contract}));
 }
 
 Tensor MaxImpl<Device::VULKAN>::execute(const Tensor& a, int axis) {

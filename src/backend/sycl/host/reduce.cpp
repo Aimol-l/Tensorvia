@@ -1,4 +1,4 @@
-// 全局与单轴的 sum/min/max/mean、argmax/argmin、all/any 以及 NonZero 计数
+// 单轴的 sum/min/max/mean、argmax/argmin、all/any 以及 NonZero 计数
 // ——Device::SYCL 宿主驱动。
 //
 // 内核索引扁平行主序 buffer，所以视图在这里一次性物化。传下去的是
@@ -68,25 +68,6 @@ AxisLayout axis_layout(const Tensor& a, int axis, const char* what) {
     return layout;
 }
 
-// 全局归约在设备上折叠为一个 FLOAT64 元素，再在宿主收窄为 float——这正是 API
-// 的返回类型。
-double reduce_all_value(const Tensor& a, int op, const char* what) {
-    const Tensor src = materialize(a);
-    auto ctx = context_of(src, what);
-    Tensor out({1}, DataType::FLOAT64, Device::SYCL);
-
-    ctx->activate();
-    sycl_ufunc::check(::sycl_c_launch_reduce_all(
-                          sycl_ufunc::handle_of(*ctx), src.data(), out.data(),
-                          static_cast<int64_t>(src.numel()),
-                          static_cast<int>(src.dtype()),
-                          static_cast<int>(DataType::FLOAT64), op),
-                      what);
-
-    out.to_host();
-    return static_cast<const double*>(out.data())[0];
-}
-
 Tensor axis_reduce(const Tensor& a, int axis, DataType out_type, int op, const char* what) {
     const Tensor src = materialize(a);
     auto ctx = context_of(src, what);
@@ -137,36 +118,18 @@ bool all_any_value(const Tensor& a, float value, bool is_all, const char* what) 
 
 }  // namespace
 
-float SumImpl<Device::SYCL>::execute(const Tensor& a) {
-    return static_cast<float>(reduce_all_value(a, tvv::sycl::kReduceSum, "Sum"));
-}
-
 Tensor SumImpl<Device::SYCL>::execute(const Tensor& a, int axis) {
     // Sum 把窄整型与 16 位浮点拓宽到真正的累加类型；所有后端遵循同一条
     // reduction_type 规则。
     return axis_reduce(a, axis, reduction_type(a.dtype()), tvv::sycl::kReduceSum, "Sum");
 }
 
-float MinImpl<Device::SYCL>::execute(const Tensor& a) {
-    return static_cast<float>(reduce_all_value(a, tvv::sycl::kReduceMin, "Min"));
-}
-
 Tensor MinImpl<Device::SYCL>::execute(const Tensor& a, int axis) {
     return axis_reduce(a, axis, a.dtype(), tvv::sycl::kReduceMin, "Min");
 }
 
-float MaxImpl<Device::SYCL>::execute(const Tensor& a) {
-    return static_cast<float>(reduce_all_value(a, tvv::sycl::kReduceMax, "Max"));
-}
-
 Tensor MaxImpl<Device::SYCL>::execute(const Tensor& a, int axis) {
     return axis_reduce(a, axis, a.dtype(), tvv::sycl::kReduceMax, "Max");
-}
-
-float MeanImpl<Device::SYCL>::execute(const Tensor& a) {
-    // 用 double 做除法：超过 2^24 后 float 除数不再精确。
-    const double sum = reduce_all_value(a, tvv::sycl::kReduceSum, "Mean");
-    return static_cast<float>(sum / static_cast<double>(a.numel()));
 }
 
 Tensor ProdImpl<Device::SYCL>::execute(const Tensor& a, int axis) {

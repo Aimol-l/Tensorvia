@@ -112,19 +112,15 @@ template <> struct SoftmaxImpl<Device::VULKAN> {
 };
 
 template <> struct SumImpl<Device::VULKAN> {
-    static float execute(const Tensor& a);
     static Tensor execute(const Tensor& a, int axis);
 };
 template <> struct MinImpl<Device::VULKAN> {
-    static float execute(const Tensor& a);
     static Tensor execute(const Tensor& a, int axis);
 };
 template <> struct MaxImpl<Device::VULKAN> {
-    static float execute(const Tensor& a);
     static Tensor execute(const Tensor& a, int axis);
 };
 template <> struct MeanImpl<Device::VULKAN> {
-    static float execute(const Tensor& a);
     static Tensor execute(const Tensor& a, int axis);
 };
 template <> struct ProdImpl<Device::VULKAN> {

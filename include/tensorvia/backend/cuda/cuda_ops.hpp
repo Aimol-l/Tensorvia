@@ -126,19 +126,15 @@ template <> struct SoftmaxImpl<Device::CUDA> {
 // 归约。
 // ---------------------------------------------------------------------------
 template <> struct SumImpl<Device::CUDA> {
-    static float execute(const Tensor& a);
     static Tensor execute(const Tensor& a, int axis);
 };
 template <> struct MinImpl<Device::CUDA> {
-    static float execute(const Tensor& a);
     static Tensor execute(const Tensor& a, int axis);
 };
 template <> struct MaxImpl<Device::CUDA> {
-    static float execute(const Tensor& a);
     static Tensor execute(const Tensor& a, int axis);
 };
 template <> struct MeanImpl<Device::CUDA> {
-    static float execute(const Tensor& a);
     static Tensor execute(const Tensor& a, int axis);
 };
 template <> struct ProdImpl<Device::CUDA> {
