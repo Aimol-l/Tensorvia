@@ -1,8 +1,3 @@
-// 全局与单轴的 sort / topk ——Device::SYCL 宿主驱动。
-//
-// 与 CUDA 后端同一套契约：排序键是 (值, 原始下标) 对（天然稳定），轴长上限
-// 1024（超过显式抛错）。非连续视图在宿主侧一次性物化；传下去的是
-// Tensor::data()（已含视图 offset），带 offset 的连续视图读的是自己的元素。
 #include <cstdint>
 #include <memory>
 #include <stdexcept>

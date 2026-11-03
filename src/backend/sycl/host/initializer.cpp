@@ -1,7 +1,3 @@
-// Device::SYCL 的填充 / 随机初始化。
-//
-// Random 在设备单元中使用基于计数器的哈希（以元素下标作键的 splitmix64），因此
-// 无需分配或同步任何生成器状态。种子始终来自宿主。
 #include <cstdint>
 #include <memory>
 #include <random>

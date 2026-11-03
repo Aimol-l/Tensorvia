@@ -1,7 +1,3 @@
-// 逐元素算术：广播二元、原地标量与一元运算。
-//
-// 宿主总会在调用前把两个操作数（以及输出）提升到公共 dtype，所以每次启动只派发
-// 一种标量类型。
 #include "common.h"
 
 using namespace tvv::sycl_dev;

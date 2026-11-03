@@ -1,4 +1,3 @@
-// 逐元素 dtype 转换。
 #include "common.h"
 
 using namespace tvv::sycl_dev;

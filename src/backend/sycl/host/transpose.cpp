@@ -1,5 +1,3 @@
-// 通用 N 维置换，输出连续，用于 Device::SYCL。二维转置就是 {1,0} 的情形；同一
-// 个内核也覆盖 batch 与更高秩。
 #include <cstdint>
 #include <initializer_list>
 #include <memory>

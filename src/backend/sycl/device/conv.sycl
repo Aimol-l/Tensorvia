@@ -1,7 +1,3 @@
-// 2-D 卷积的设备实现：一个工作组项算一个输出元素。
-//
-// 与 CUDA 同一套下标算术：输出是连续 NCHW，扁平下标解码成 (n, oc, oy, ox)，
-// 每个输出独立。累加器取提升后的计算类型，半精度输入不在半精度里累积。
 #include "common.h"
 
 using namespace tvv::sycl_dev;

@@ -1,7 +1,3 @@
-// Device::SYCL 的 where / index_select / gather / cumsum。
-//
-// 几何形状与 CPU 实现逐项对齐：输入视为 outer x axis x inner，gather 用输出扁平
-// 下标解码坐标。跨步视图在这里物化成连续布局，设备内核只做线性寻址。
 #include <cstdint>
 #include <memory>
 #include <span>

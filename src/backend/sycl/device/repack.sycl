@@ -1,5 +1,3 @@
-// 跨步视图重排：把任意 (offset, strides) 视图物化为连续 buffer。供
-// clone_as_contiguous / to_host 使用。
 #include "common.h"
 
 using namespace tvv::sycl_dev;

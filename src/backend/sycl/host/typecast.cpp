@@ -1,4 +1,3 @@
-// Device::SYCL 的逐元素 dtype 转换。
 #include <cstdint>
 #include <memory>
 #include <stdexcept>

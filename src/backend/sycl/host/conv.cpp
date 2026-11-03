@@ -1,7 +1,3 @@
-// Device::SYCL 的 2-D 卷积。
-//
-// 几何形状与 CPU 实现逐项对齐：输入/输出都是连续 NCHW，设备内核按扁平输出下标
-// 解码 (n, oc, oy, ox)。跨步视图在这里物化成连续布局。
 #include <cstdint>
 #include <memory>
 #include <vector>

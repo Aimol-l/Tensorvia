@@ -1,13 +1,6 @@
-// 上下文、USM 分配、宿主传输与队列同步。
-//
-// 每条（线程, 上下文）一条 in-order 队列，首次使用时惰性创建；同一上下文内的
-// 所有队列共享一个 sycl::context，USM 分配才能跨队列使用。in-order 特性让同步式
-// 宿主驱动天然正确，同时保留跨线程并行的可能（对齐 CUDA 的每线程流语义）。
 #include "common.h"
 
-// rules-sycl 的设备单元编译不继承 include_dirs（CUDA 规则继承），内部头用相对
-// 路径引入：src/backend/sycl/device -> 仓库根 -> include/。
-#include "../../../../include/_sync_counters.h"
+#include "_sync_counters.h"
 
 #include <atomic>
 #include <cstring>

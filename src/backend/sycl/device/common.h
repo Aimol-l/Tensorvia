@@ -1,10 +1,4 @@
-// SYCL 设备单元共享的词汇表。
-//
-// 这些单元由 DPC++ 编译器编译，而非项目的宿主编译器，它们只能看到
-// sycl_island.h。此处不会跨接缝分配内存或抛异常：启动入口捕获设备侧失败，并
-// 报告 island 头文件中定义的状态码。
-#ifndef TVV_SYCL_DEVICE_COMMON_H
-#define TVV_SYCL_DEVICE_COMMON_H
+#pragma once
 
 #include <cstddef>
 #include <cstdint>
@@ -424,5 +418,3 @@ inline ::sycl::range<1> range_of(int64_t n) {
 }
 
 }  // namespace tvv::sycl_dev
-
-#endif  // TVV_SYCL_DEVICE_COMMON_H

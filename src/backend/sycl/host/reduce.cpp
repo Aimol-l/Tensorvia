@@ -1,9 +1,3 @@
-// 单轴的 sum/min/max/mean、argmax/argmin、all/any 以及 NonZero 计数
-// ——Device::SYCL 宿主驱动。
-//
-// 内核索引扁平行主序 buffer，所以视图在这里一次性物化。传下去的是
-// Tensor::data()（而不是 impl 的基址指针），因此带非零 offset 的连续视图读取的是
-// 自己的元素。
 #include <cstdint>
 #include <memory>
 #include <stdexcept>

@@ -9,13 +9,6 @@
 
 #include "sycl_island.h"
 
-// SYCL 的宿主侧 ufunc 驱动：dtype 提升 + NumPy 广播。
-//
-// 广播布局由 :cpu_ops 里与设备无关的助手推导；strides 与视图 offset 通过
-// tvv::sycl::Bcast 传给内核，所以非连续视图不必物化。
-//
-// 这个分区是唯一接触 seam 的宿主代码。下面全是普通宿主函数；.sycl 单元活在另一个
-// 编译器的实体宇宙里，因此约定用 int 状态码 / void* 接口。
 #include "tensorvia/types.hpp"
 #include "tensorvia/tensor.hpp"
 #include "tensorvia/ops.hpp"

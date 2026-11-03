@@ -1,4 +1,3 @@
-// 归约：单轴 sum/min/max/mean、argmax/argmin、all/any 以及 NonZero 计数。
 #include "common.h"
 
 using namespace tvv::sycl_dev;

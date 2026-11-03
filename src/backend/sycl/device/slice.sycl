@@ -1,4 +1,3 @@
-// 跨步输入的起止切片，输出连续。
 #include "common.h"
 
 using namespace tvv::sycl_dev;

@@ -1,7 +1,3 @@
-// SYCL 运行时：队列生命周期、USM 分配、宿主传输以及 SYCLTensor 的 buffer 管理。
-//
-// 队列本身位于设备单元（runtime.sycl）；本文件只是转发到接缝并把状态码翻译成
-// 异常。
 #include <algorithm>
 #include <cstddef>
 #include <memory>

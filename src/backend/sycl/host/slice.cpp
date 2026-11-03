@@ -1,5 +1,3 @@
-// 跨步输入的起止切片，输出连续，用于 Device::SYCL。每一维都携带起始偏移
-// （未切片的维为 0）。
 #include <cstdint>
 #include <memory>
 #include <stdexcept>

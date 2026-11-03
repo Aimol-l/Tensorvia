@@ -25,13 +25,13 @@
 namespace {
 
 template <template <Device> class Impl>
-concept has_vulkan_impl = requires { sizeof(Impl<Device::VULKAN>); };
+concept has_sycl_impl = requires { sizeof(Impl<Device::SYCL>); };
 
 template <template <Device> class Impl>
 concept has_cuda_impl = requires { sizeof(Impl<Device::CUDA>); };
 
 template <template <Device> class Impl>
-concept has_sycl_impl = requires { sizeof(Impl<Device::SYCL>); };
+concept has_vulkan_impl = requires { sizeof(Impl<Device::VULKAN>); };
 
 // 后端派发：Impl<Device::X> 的全特化存在就走它，否则抛"该后端未实现"。
 // op 是算子名（公共同款 API 里的 snake_case 名字），只用于报错——spec Test
@@ -404,8 +404,8 @@ Tensor Random(const std::vector<int64_t>& shape, float min, float max, const Ten
 Tensor Randn(const std::vector<int64_t>& shape, float mean, float std, const TensorOptions& options) {
     if (is_bool_dtype(options.dtype))
         throw std::runtime_error("randn: BOOL is not supported; use a comparison or cast instead");
-    if (std < 0.0f) throw std::runtime_error("randn: std must be non-negative");
-    // RNG 只保留一处：在宿主抽样，再把整块交给目标设备。同一 seed 在各后端取值相同。
+    if (std < 0.0f) 
+        throw std::runtime_error("randn: std must be non-negative");
     Tensor t = execute_on<RandnImpl>(DeviceId{Device::CPU, 0}, "randn", shape, options.dtype, mean, std);
     t.to_device(options.resolved_id());
     return t;

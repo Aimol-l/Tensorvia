@@ -1,4 +1,3 @@
-// bfloat16.hpp - 软件模拟的 Brain Float 16（不依赖原生 __bf16）
 #pragma once
 
 #include <bit>

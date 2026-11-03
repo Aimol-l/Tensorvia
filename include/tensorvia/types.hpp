@@ -15,11 +15,6 @@
 #include <variant>
 #include <vector>
 
-// CUDA lane 钉软件类型：nvcc 的 C++20 前端没有 std::float16_t，而 host TU
-// 可能是 C++23 且有。`float16`/`bfloat16` 在 BACKEND_CUDA 构建里（host 与
-// 设备单元共享本头）统一为 ops::float16_t/ops::bfloat16_t，保一个 ABI。
-// `<stdfloat>` 只在编译器预定义特性宏时声明类型（GCC 会，clang 不会），
-// 所以光靠 __has_include 判断不够。
 #if defined(BACKEND_CUDA)
     #include "float16.hpp"
     #include "bfloat16.hpp"

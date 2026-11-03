@@ -11,9 +11,7 @@
 #include "tensorvia/backend/cuda/cuda_tensor.hpp"
 
 namespace {
-// 每个已启动 GPU 一条记录。它存在的唯一目的是给下面的退出钩子一个可达的句柄：
-// 若从工厂自身的静态拆卸中调用 cudaFree，会发生在 CUDA 运行时卸载之后并静默失败，
-// 把分配器缓存的块留成上报的内存泄漏。
+    
 std::mutex                                  g_contexts_mtx;
 std::vector<std::shared_ptr<CUDAContext>>   g_contexts;
 

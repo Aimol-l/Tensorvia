@@ -5,12 +5,6 @@
 #include <utility>
 #include <vector>
 
-// 只有声明：这个分区不包含任何 CUDA 头，纯 CPU 构建里也会编译。实现体在
-// src/backend/cuda/*.cpp，只有定义 BACKEND_CUDA 时才加入构建。
-//
-// 只声明 island 内核已存在的算子。未声明的特化会让 execute_on 的 `has_cuda_impl`
-// 概念为假，从而得到 "not implemented on the CUDA backend" 运行期错误，
-// 而不是链接失败。
 #include "tensorvia/types.hpp"
 #include "tensorvia/tensor.hpp"
 #include "tensorvia/backend/cpu/cpu_ops.hpp"

@@ -1,18 +1,5 @@
 #pragma once
 
-// ================================================================
-// FR-18 / FR-19：统一 strided 迭代层。
-//
-// 这一层只做后端无关的三件事：
-//   1. 广播规则（broadcast_shapes / broadcast_strides）—— 全库唯一一份；
-//   2. Layout：广播后每个操作数的元素级 stride、视图 offset 与总元素数。
-//      CPU 用它驱动分段循环，设备后端把它翻译成内核参数结构体；
-//   3. launch_binary<Backend>：二元逐元素算子的发射流程（形状推导 → dst 校验
-//      → 输出分配 → impl/context 取用 → 后端 launch）。
-//
-// 内核仍然只认识 typed pointer + stride：这一层不碰内核，也不决定内核怎么循环。
-// 三个设备后端各自只剩一个策略类型 + 一个把 Layout 填进参数结构体的函数。
-
 #include <algorithm>
 #include <array>
 #include <cstddef>

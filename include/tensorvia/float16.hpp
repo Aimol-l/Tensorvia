@@ -1,4 +1,3 @@
-// float16.hpp - 软件模拟的 IEEE 754 binary16（不依赖原生 _Float16）
 #pragma once
 
 #include <bit>

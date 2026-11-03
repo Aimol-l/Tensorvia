@@ -1,8 +1,3 @@
-// Device::SYCL 的分块矩阵乘法。
-//
-// A 视为 [batch, rows, k]，B 视为 [batch, k, cols]；二维调用就是 batch=1 的情形。
-// 宿主把两个操作数和目标提升到公共 dtype 并物化为连续 buffer，所以这里每次启动只
-// 需一种标量类型。
 #include <cstdint>
 #include <memory>
 #include <stdexcept>

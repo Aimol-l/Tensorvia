@@ -1,8 +1,3 @@
-// 为 Device::SYCL 定义 AddImpl/SubImpl/MulImpl/DivImpl/AbsImpl/... 的宿主驱动。
-//
-// 设备侧每次启动都与 dtype 无关：宿主在调用前把两个操作数（以及输出）提升到公共
-// dtype，所以每次接缝调用只派发一种标量类型。混合 dtype 会被拒绝，而不是静默
-// 收窄。
 #include <cstdint>
 #include <memory>
 #include <stdexcept>

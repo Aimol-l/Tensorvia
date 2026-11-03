@@ -46,7 +46,7 @@ bool add_library_sources(const std::string& root, bool vulkan_lane,
                          bool sycl_lane, bool cuda_lane) {
     for (const auto& path : files_with_extension(join(root, "src/core"), ".cpp"))
         mcpp::source(path.c_str());
-    mcpp::source(join(root, "src/init.cpp").c_str());
+    mcpp::source(join(root, "src/init_cpu.cpp").c_str());
     for (const auto& path : files_with_extension(join(root, "src/backend/cpu"), ".cpp"))
         mcpp::source(path.c_str());
 

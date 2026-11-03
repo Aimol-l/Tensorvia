@@ -1,9 +1,3 @@
-// Softmax（唯一沿轴归约的激活）以及 Device::SYCL 上
-// Relu/Silu/Tanh/Sigmoid/Softmax 的宿主驱动。
-//
-// Relu/Silu/Tanh/Sigmoid 复用 :sycl_ufunc 中的逐元素一元路径；Softmax 需要
-// outer x axis x inner 几何形状，因此填一个 ReduceAxis。
-#include <cstdint>
 #include <memory>
 #include <stdexcept>
 

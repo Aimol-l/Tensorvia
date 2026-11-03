@@ -5,41 +5,17 @@
 # file must not change depending on which command ran last.
 version = 2
 
-[package."compat.opencl"]
+[package."compat.cuda-driver"]
 namespace = "compat"
-version = "2026.09.11"
-source  = "index+compat@2026.09.11"
-hash    = "fnv1a:5c2451f4d12da7f3"
-
-[package."compat.opencl-headers"]
-namespace = "compat"
-version = "2026.05.29"
-source  = "index+compat@2026.05.29"
-hash    = "fnv1a:8166a2d98d525bdd"
-
-[package."compat.opencl-runtime"]
-namespace = "compat"
-version = "2026.09.11"
-source  = "index+compat@2026.09.11"
-hash    = "fnv1a:54aacf23366443c4"
+version = "2026.09.10"
+source  = "index+compat@2026.09.10"
+hash    = "fnv1a:48db60465a688d63"
 
 [package."compat.openmp"]
 namespace = "compat"
 version = "22.1.8"
 source  = "index+compat@22.1.8"
 hash    = "fnv1a:d769c475fd4d5817"
-
-[package."compat.sycl-runtime"]
-namespace = "compat"
-version = "2026.09.11"
-source  = "index+compat@2026.09.11"
-hash    = "fnv1a:6deaf79cdc3c650c"
-
-[package."gcc.libstdcxx"]
-namespace = "gcc"
-version = "16.1.0.1"
-source  = "index+gcc@16.1.0.1"
-hash    = "fnv1a:4b6211883621d843"
 
 [package."mcpp.plugins"]
 namespace = "mcpp"

@@ -3,9 +3,6 @@
 #include <cstddef>
 #include <memory>
 
-// 只有声明：buffer 管理与拷贝路径定义在 src/backend/sycl/host/runtime.cpp。
-// data() 返回真正的 USM 设备指针，但在宿主上仍然不能解引用：请用 copy_to_host /
-// Tensor::to_host。
 #include "tensorvia/types.hpp"
 #include "tensorvia/tensor.hpp"
 #include "tensorvia/context.hpp"
@@ -16,8 +13,6 @@ private:
     void*                        m_data = nullptr;
     size_t                       m_numel = 0;
     DataType                     m_dtype = DataType::FLOAT32;
-    // 分配这条 buffer 的队列（对应 CUDA 的 m_stream）。释放必须交还给同一条
-    // 队列，才能排在引用它的既有工作之后；句柄归 context 所有，析构时必然有效。
     void*                        m_queue = nullptr;
     std::shared_ptr<SYCLContext> m_context;
 

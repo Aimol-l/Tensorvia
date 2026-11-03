@@ -1,7 +1,3 @@
-// Device::SYCL 沿单轴拼接。
-//
-// 宿主入口为每个输入启动一个内核，而不在设备侧暂存指针数组，因此不涉及托管内存
-// 或临时分配。
 #include <cstdint>
 #include <memory>
 #include <stdexcept>

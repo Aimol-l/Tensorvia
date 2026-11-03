@@ -1,13 +1,3 @@
-// Device::VULKAN 的 where / index_select / gather / cumsum。
-//
-// 几何形状与 CPU 实现逐项对齐：输入视为 outer x axis x inner，gather 用输出扁平
-// 下标解码坐标。跨步视图在这里物化成连续布局，设备内核只做线性寻址。
-//
-// 两个与其它后端不同的地方，都源于 Vulkan 只认识固定 dtype 的着色器：
-//   * where 的 cond 在宿主上转成 FLOAT64（本后端的 Typecast 是宿主往返）。着色器
-//     只判 "!= 0"，而任何 dtype 到 double 的转换都不会把非零变成零，NaN 仍是真，
-//     所以判真结果与 CPU 的 `cond[i] != C(0)` 完全一致。
-//   * index 不需要转换：缓冲按 32 位字读，`idx_is_64` 决定一个下标占几个字。
 #include <cstdint>
 #include <memory>
 #include <span>

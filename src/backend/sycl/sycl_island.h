@@ -1,18 +1,4 @@
-// 宿主驱动与 SYCL 设备单元之间的接缝。
-//
-// 本项目里的 SYCL 是双编译器模型：宿主翻译单元由项目自身的 C++ 工具链构建
-// （mcpp 下是模块，CMake 下是生成的头文件），而所有触及 queue 或 kernel 的代码
-// 都在 `device/*.sycl` 中、由 DPC++ 编译器构建。两个运行时不共享 C++ 实体，所以
-// 这个头文件就是它们之间的全部契约：
-//
-//   * 只用定宽整数、裸指针与 POD 结构体；
-//   * 不用 std 容器、std::string、tensorvia 类型；
-//   * 入口点是 `extern "C"`；失败以负状态码表示，绝不让异常跨越边界。
-//
-// 两条构建路径使用同一个头文件，因此 CMake 与 mcpp 产物跑的是同一份代码、同一个
-// 接缝。
-#ifndef TVV_SYCL_ISLAND_H
-#define TVV_SYCL_ISLAND_H
+#pragma once
 
 #include <cstddef>
 #include <cstdint>
@@ -356,5 +342,3 @@ int sycl_c_launch_cumsum(void* ctx, const void* in, void* out, int dtype,
                          const tvv::sycl::IndexAxis* p);
 
 }  // extern "C"
-
-#endif  // TVV_SYCL_ISLAND_H

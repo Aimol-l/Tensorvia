@@ -1,6 +1,3 @@
-// AVX2 向量化超越函数近似（f32）。
-// 供 arithmetic.cpp / activate.cpp 的 f32 快路径在 GMF 里 #include。
-// 精度约 1e-7 相对误差，满足神经网络前向需求（远高于测试容差 1e-5）。
 #pragma once
 
 #include <immintrin.h>

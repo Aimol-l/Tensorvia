@@ -1,4 +1,3 @@
-// 广播与标量比较内核；结果是不含 0 即 1 的 BOOL。
 #include "common.h"
 
 using namespace tvv::sycl_dev;

@@ -21,18 +21,6 @@ inline void check_vk(const std::shared_ptr<TensorImpl>& impl, const char* what) 
     if (!impl) throw std::runtime_error(std::string("vulkan ") + what + ": expected a VKTensor");
 }
 
-// 五个归约算子（Sum/Prod/Mean/Min/Max）的轴形式在这里完全同构：形状计算、结果
-// 分配与提交参数都一样，只有输出 dtype 与 OpType 不同。两趟全归约的分岔因此也
-// 只写一份。
-//
-// 全归约（outer*inner == 1）的几何让 vec 着色器的 total=1——一个工作组的 256 个
-// 工作项里只有一个在跑，16M 个元素要串行 500ms 以上。改成先切成
-// kFlatReduceBlocks 段并行算部分值，再对这 B 个部分值折叠；段长取 ceil，末段短于
-// 段长，由着色器按 numel 截断（见 shader 里的 limit）。
-//
-// B 取 1024 足以饱和常见设备；每段 N/1024 个元素（16M 时 64 个/工作项）仍是访存
-// 受限而非 submit 受限。阈值取得比 CUDA/SYCL 高一些：Vulkan 每次 submitCompute
-// 都要录命令并管 fence，固定开销明显更大，小张量上两趟不划算。
 constexpr int32_t kFlatReduceBlocks   = 1024;
 constexpr int64_t kFlatReduceMinNumel = 1 << 18;
 

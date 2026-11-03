@@ -23,14 +23,10 @@ namespace {
 struct Registry {
     std::mutex                                     mtx;
     std::condition_variable                        cv;
-    // 按 (kind, index) 作键：每个设备实例一条。
     std::unordered_map<DeviceId, TensorImplFactory, DeviceIdHash>  factories;
     std::unordered_map<DeviceId, DeviceControl, DeviceIdHash>      controls;
-    // 按 kind 作键：无论谁请求，初始化器只构建一个实例。
     std::unordered_map<Device, BackendInitializer> initializers;
     std::unordered_map<Device, BackendProbe>       probes;
-    // 已调用过初始化器的实例。没有它，某个拒绝某索引且什么也不注册的后端会让
-    // find_factory 死循环；有了它，“试过但没拿到”就是最终结论。
     std::unordered_set<DeviceId, DeviceIdHash>     attempted;
     std::unordered_set<DeviceId, DeviceIdHash>     in_flight;
     std::unordered_map<Device, DeviceProbe>        probe_cache;

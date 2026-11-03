@@ -1,12 +1,3 @@
-// sort / topk ——Device::VULKAN 宿主驱动。
-//
-// 与 CUDA/SYCL 后端同一套契约：排序键是 (值, 原始下标) 对（天然稳定，与 CPU 的
-// std::stable_sort 语义逐位一致），按轴长分派两条着色器：
-//   n <= 32    sort_small：一个 invocation 一列，私有内存插入排序；
-//   n <= 1024  sort_block：一个工作组一列，共享内存 bitonic（shared 1024 对，
-//              double 下 16KB，正是 Vulkan 保证的计算共享内存下限）；
-// 轴长超过 1024 显式抛错。topk 就是"排好序后取前 k 个"（largest -> 降序），
-// 与 sort 共用同一条路径，keep 与 descending 承载区别。
 #include <cstdint>
 #include <memory>
 #include <stdexcept>

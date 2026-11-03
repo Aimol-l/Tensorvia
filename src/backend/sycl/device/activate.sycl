@@ -1,5 +1,3 @@
-// 沿单轴做 Softmax。Relu/Silu/Tanh/Sigmoid 是逐元素一元算子，位于
-// arithmetic.sycl。
 #include "common.h"
 
 using namespace tvv::sycl_dev;

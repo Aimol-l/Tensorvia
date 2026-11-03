@@ -1,7 +1,3 @@
-// 填充与随机初始化。
-//
-// Random 使用基于计数器的 splitmix64 哈希 (seed, 元素下标)：没有逐元素的生成器
-// 状态，不依赖 oneDPL，且在每台设备上分布相同。
 #include "common.h"
 
 using namespace tvv::sycl_dev;

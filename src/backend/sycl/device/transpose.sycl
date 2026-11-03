@@ -1,4 +1,3 @@
-// 通用 N 维置换，输出连续。
 #include "common.h"
 
 using namespace tvv::sycl_dev;

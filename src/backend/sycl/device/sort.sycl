@@ -1,11 +1,3 @@
-// sort / topk：沿被排序的轴对每个 (outer, inner) 列独立排序。与 CUDA 后端同一
-// 套结构：排序键是 (值, 原始下标) 对——下标做次级键，天然稳定，与 CPU 的
-// std::stable_sort 语义逐位一致（平局时更靠前的下标在前）。
-//
-//   n <= 32    一个工作项一列，私有内存插入排序；
-//   n <= 1024  一个工作组一列，本地内存 bitonic（补齐到 2 的幂，尾部哨兵排在
-//              最后，只写前 keep 个）；
-// 轴长超过 1024 由宿主侧显式抛错。
 #include "common.h"
 
 using namespace tvv::sycl_dev;
