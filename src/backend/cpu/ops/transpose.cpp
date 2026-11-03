@@ -61,21 +61,16 @@ void transpose_nd_kernel(T* dst_data,const T* src_data, const std::vector<int64_
     #pragma omp parallel for
     for (size_t i = 0; i < size; ++i) {
         int64_t tmp = static_cast<int64_t>(i);
-        std::vector<int64_t> coord(dim);        // 存储解码后的多维坐标 (i,j,k, ...)
-        std::vector<int64_t> trans_coord(dim);  // 存储重新排列后的多维坐标 (a,b,c, ...)
+        int64_t coord[kMaxTensorDims] = {};        // 解码后的多维坐标 (i,j,k, ...)
         // 解码坐标，将线性索引转换为多维坐标
         for (int d = 0; d < dim; ++d) {
             coord[d] = tmp / in_strides[d];  // 计算当前维度上的坐标
             tmp %= in_strides[d];            // 更新tmp，用于计算下一个维度上的坐标
         }
-        // 根据axes重新排列坐标
-        for (int d = 0; d < dim; ++d) {
-            trans_coord[d] = coord[axes[d]];
-        }
-        // 编码坐标
+        // 按 axes 重排坐标并编码输出：out[d] 取输入的 axes[d] 维。
         int64_t out_index = 0;
         for (int d = 0; d < dim; ++d) {
-            out_index += trans_coord[d] * out_strides[d];  // 根据新的坐标计算线性索引
+            out_index += coord[axes[d]] * out_strides[d];
         }
         dst_data[out_index] = src_data[i];
     }
@@ -105,24 +100,18 @@ void transpose_nd_kernel(T* dst, const T* src, std::span<const int64_t> shape, c
         }
         return;
     }
-    // 递归：按最外层维度分片
-    const int64_t outer_dim = shape[0];
-    std::vector<int64_t> inner_shape(shape.begin() + 1, shape.end());
-    std::vector<int64_t> inner_axes;
-    for (int ax : axes) {
-        if (ax > 0) inner_axes.push_back(ax - 1);
+    // 其余情形（axes 既非恒等、也不是"前缀不变 + 末两维交换"的置换）：逐元素
+    // 按 axes 重排。此前的递归按 "ax > 0" 过滤并排序内层 axes，丢掉了轴的先后
+    // 关系，三维的 {1,0,2}、{2,0,1} 等会退化成恒等拷贝。
+    std::vector<int64_t> in_strides(dim, 1);
+    std::vector<int64_t> out_strides(dim, 1);
+    for (int d = dim - 2; d >= 0; --d) {
+        in_strides[d] = in_strides[d + 1] * shape[d + 1];
+        out_strides[d] = out_strides[d + 1] * shape[axes[d + 1]];
     }
-    // 调整 inner_axes 顺序
-    std::sort(inner_axes.begin(), inner_axes.end());
-    // 实际需要重排 inner_axes 以匹配原 axes，此处简化
-    int64_t inner_size = std::accumulate(inner_shape.begin(), inner_shape.end(), 1LL, std::multiplies<>());
-    for (int64_t i = 0; i < outer_dim; ++i) {
-        transpose_nd_kernel(
-            dst + i * inner_size,
-            src + i * inner_size,
-            inner_shape, inner_axes, dim - 1
-        );
-    }
+    const size_t total = static_cast<size_t>(
+        std::accumulate(shape.begin(), shape.end(), int64_t{1}, std::multiplies<>()));
+    transpose_nd_kernel<T>(dst, src, axes, in_strides, out_strides, total, dim);
 }
 Tensor TransposeImpl<Device::CPU>::execute(const Tensor& a, std::initializer_list<int64_t> axes) {
     // 创建结果张量

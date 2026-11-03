@@ -235,6 +235,30 @@ TEST_F(DeviceOps, SliceAndTranspose) {
     const Tensor a = moved_to(a_cpu, dev);
     expect_close(host_values<float>(ops::Slice(a, {{0, 1}, {1, 3}})), slice_ref, "slice");
     expect_close(host_values<float>(ops::Transpose(a, {1, 0})), transp_ref, "transpose");
+
+    // 三维六种置换逐一对照。非方阵（3x5x7）保证步长推导的错误不会被对称性
+    // 掩盖；其中 {0,1,2} 与 {1,0,2} 走 rank-3 的拷贝路径，其余走 tile 转置。
+    std::vector<float> v3(3 * 5 * 7);
+    for (std::size_t i = 0; i < v3.size(); ++i) v3[i] = static_cast<float>(i + 1);
+    const Tensor t3_cpu(v3, {3, 5, 7});
+    const Tensor t3 = moved_to(t3_cpu, dev);
+    constexpr int64_t kPerms[6][3] = {{0, 1, 2}, {0, 2, 1}, {1, 0, 2},
+                                      {1, 2, 0}, {2, 0, 1}, {2, 1, 0}};
+    for (const auto& perm : kPerms) {
+        const std::string what = "transpose3d " + std::to_string(perm[0]) +
+                                 std::to_string(perm[1]) + std::to_string(perm[2]);
+        expect_close(host_values<float>(ops::Transpose(t3, {perm[0], perm[1], perm[2]})),
+                     host_values<float>(ops::Transpose(t3_cpu, {perm[0], perm[1], perm[2]})),
+                     what);
+    }
+
+    // 四维走通用内核，确认 rank-3 快路径没有误接管。
+    std::vector<float> v4(2 * 3 * 4 * 5);
+    for (std::size_t i = 0; i < v4.size(); ++i) v4[i] = static_cast<float>(i) * 0.5f;
+    const Tensor t4_cpu(v4, {2, 3, 4, 5});
+    const Tensor t4 = moved_to(t4_cpu, dev);
+    expect_close(host_values<float>(ops::Transpose(t4, {2, 0, 3, 1})),
+                 host_values<float>(ops::Transpose(t4_cpu, {2, 0, 3, 1})), "transpose4d");
 }
 
 // 分配器的复用路径：多个线程各自反复建小张量、写值、读回。块常常由一个线程
