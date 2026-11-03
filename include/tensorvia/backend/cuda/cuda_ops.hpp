@@ -115,6 +115,13 @@ template <> struct SigmoidImpl<Device::CUDA> {
 template <> struct SoftmaxImpl<Device::CUDA> {
     static Tensor execute(const Tensor& a, int axis);
 };
+template <> struct LayerNormImpl<Device::CUDA> {
+    static Tensor execute(const Tensor& a, const Tensor& weight, const Tensor& bias,
+                          int axis, float eps);
+};
+template <> struct RmsNormImpl<Device::CUDA> {
+    static Tensor execute(const Tensor& a, const Tensor& weight, int axis, float eps);
+};
 
 // ---------------------------------------------------------------------------
 // 归约。

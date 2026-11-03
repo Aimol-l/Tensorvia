@@ -45,10 +45,14 @@ Bmm = { note = "形状校验后转 MatMul", parts = ["MatMul"], evidence = "src/
 Addmm = { note = "MatMul + Mul/Add 缩放与广播相加", parts = ["MatMul", "Mul", "Add"], evidence = "src/core/ops.cpp:Addmm" }
 Linear = { note = "MatMul(input, weight^T)，bias 形式再加 Add", parts = ["MatMul", "Transpose", "Add"], evidence = "src/core/ops.cpp:Linear" }
 
-# ---- 设备端组合路径：CPU 有原生内核，设备端由 ops.cpp 的 *_composed 拼出 ----
+# ---- 设备端组合路径：CPU 有原生内核，SYCL/VULKAN 端由 ops.cpp 的 *_composed 拼出 ----
+#      CUDA 的 LayerNorm/RmsNorm 已有融合内核（src/backend/cuda/device/norm.cu），
+#      不再走组合，因此按后端分别标注。
 LogSoftmax.devices = { note = "Max/Exp/Sum/Sub/Log 组合（log_softmax_composed）", parts = ["Max", "Exp", "Sum", "Sub", "Log"], evidence = "src/core/ops.cpp:LogSoftmax" }
-LayerNorm.devices = { note = "Sub/Mean/Mul/Div/Sqrt/Add 组合（layer_norm_composed）", parts = ["Typecast", "Sub", "Mean", "Mul", "Div", "Sqrt", "Add"], evidence = "src/core/ops.cpp:LayerNorm" }
-RmsNorm.devices = { note = "Mean/Mul/Div/Sqrt 组合（rms_norm_composed）", parts = ["Typecast", "Mean", "Mul", "Div", "Sqrt"], evidence = "src/core/ops.cpp:RmsNorm" }
+LayerNorm.SYCL = { note = "Sub/Mean/Mul/Div/Sqrt/Add 组合（layer_norm_composed）", parts = ["Typecast", "Sub", "Mean", "Mul", "Div", "Sqrt", "Add"], evidence = "src/core/ops.cpp:layer_norm_composed" }
+LayerNorm.VULKAN = { note = "Sub/Mean/Mul/Div/Sqrt/Add 组合（layer_norm_composed）", parts = ["Typecast", "Sub", "Mean", "Mul", "Div", "Sqrt", "Add"], evidence = "src/core/ops.cpp:layer_norm_composed" }
+RmsNorm.SYCL = { note = "Mean/Mul/Div/Sqrt 组合（rms_norm_composed）", parts = ["Typecast", "Mean", "Mul", "Div", "Sqrt"], evidence = "src/core/ops.cpp:rms_norm_composed" }
+RmsNorm.VULKAN = { note = "Mean/Mul/Div/Sqrt 组合（rms_norm_composed）", parts = ["Typecast", "Mean", "Mul", "Div", "Sqrt"], evidence = "src/core/ops.cpp:rms_norm_composed" }
 Var.devices = { note = "Mean/Sub/Mul 组合（var_composed）", parts = ["Typecast", "Mean", "Sub", "Mul"], evidence = "src/core/ops.cpp:Var" }
 Std.devices = { note = "Sqrt(var_composed)", parts = ["Typecast", "Mean", "Sub", "Mul", "Sqrt"], evidence = "src/core/ops.cpp:Std" }
 Norm.devices = { note = "Abs+Sum 或 Mul+Sum+Sqrt 组合（norm_composed）", parts = ["Typecast", "Abs", "Sum", "Mul", "Sqrt"], evidence = "src/core/ops.cpp:Norm" }

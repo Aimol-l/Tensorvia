@@ -156,10 +156,12 @@ TEST_F(DeviceOps, FullReduceOnLargeTensors) {
         const Tensor b_cpu(bv, {n});
         const Tensor b       = moved_to(b_cpu, dev);
         const float prod_ref = ops::Prod(b_cpu).item<float>();
-        // 容差放到 5e-3：CUDA/SYCL 的浮点归约累加器是 float32（reduction_acc_t
+        // 容差放到 5e-3：SYCL 的浮点归约累加器是 float32（reduction_acc_t
         // 只把窄整型与 16 位浮点加宽），1M 个元素连乘的 float32 偏差本就有一档，
-        // 两趟（1024 次/段）比单趟（1M 次）略差。这个容差仍能抓住结构性错误——
-        // 范围算错、漏掉末段、分母错都会给出 O(1) 的偏差。
+        // 两趟（1024 次/段）比单趟（1M 次）略差。CUDA 已把浮点 Prod 的累加器
+        // 对齐到 CPU 参考的 double（见 reduce.cu 的 prod_uses_wide_acc），
+        // 这条宽松容差现在只为 SYCL 保留。它仍能抓住结构性错误——范围算错、
+        // 漏掉末段、分母错都会给出 O(1) 的偏差。
         EXPECT_NEAR(ops::Prod(b).item<float>(), prod_ref, 5e-3 * std::abs(prod_ref))
             << "prod full n=" << n << " on " << dev_name;
 

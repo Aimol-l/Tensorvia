@@ -1,9 +1,3 @@
-// CUDA 宿主驱动与内核之间的强类型启动契约。
-//
-// 旧的纯 C island 为每个内核暴露一个 C 链接入口，并把一切经 int dtype id 与
-// void* 句柄打包传递。在 header-first 的 CUDA 产物中，宿主驱动与内核编译在同一
-// 实体宇宙里，因此边界可以直接用库自己的类型：DataType 替代 id，cudaStream_t
-// 替代 void*，cudaError_t 替代 int 状态码。不再有需要同步的 ABI。
 #ifndef TVV_CUDA_LAUNCH_HPP
 #define TVV_CUDA_LAUNCH_HPP
 
@@ -240,10 +234,27 @@ cudaError_t launch_softmax(cudaStream_t stream, const void* in, void* out,
                            DataType in_dtype, DataType out_dtype,
                            const ReduceAxis& p);
 
+// LayerNorm / RmsNorm：输入视为 outer x n 的连续行；weight（以及 LN 的 bias）广播
+// 到每行的 n 个元素。`rms` 为真时跳过减均值和 bias，只做 x / sqrt(mean(x²)+eps) * w。
+cudaError_t launch_norm(cudaStream_t stream, const void* in, const void* weight,
+                        const void* bias, void* out, DataType in_dtype,
+                        DataType out_dtype, int64_t outer, int64_t n, float eps,
+                        bool rms);
+
 // 单轴归约：`out` 为 outer * inner 个 out_dtype 元素。
 cudaError_t launch_reduce_axis(cudaStream_t stream, const void* in, void* out,
                                DataType in_dtype, DataType out_dtype, int op,
                                const ReduceAxis& p);
+
+// 全归约趟 1：把 numel 个连续元素切成 `blocks` 段，各写一个部分值到 out[0..blocks)。
+// 与 launch_reduce_axis 的 (B, ceil(N/B), 1) 几何相比，这里每段由整个 block 的
+// 线程分摊，而不是一个线程串行。
+cudaError_t launch_flat_partial(cudaStream_t stream, const void* in, void* out,
+                                int64_t numel, DataType in_dtype, DataType out_dtype,
+                                int64_t blocks, int op);
+
+// inner == 1 时轴归约改用 block 协作内核的轴长下限（宿主与设备共享）。
+inline constexpr int64_t kAxisInner1MinAxis = 256;
 
 // 沿轴求 argmax/argmin；`out` 为 outer * inner 个 INT32 元素。
 cudaError_t launch_arg_reduce(cudaStream_t stream, const void* in, void* out,

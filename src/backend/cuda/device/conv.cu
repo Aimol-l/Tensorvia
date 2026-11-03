@@ -21,6 +21,241 @@ using tvv::cuda::kThreads;
 using tvv::cuda::launch_status;
 using tvv::cuda::contract::promoted_t;
 
+// 分块几何（两个 tiled 内核共用）。
+constexpr int kConvTile       = 32;  // 输出 tile 的边长
+constexpr int kConvThreads    = 64;  // 8x8 = 64
+constexpr int kConvThreadTile = 4;   // 每线程 4x4 输出
+constexpr int kConvThreadsX   = kConvTile / kConvThreadTile;  // 8
+constexpr int kConvThreadsY   = kConvTile / kConvThreadTile;  // 8
+constexpr int kConvMaxKernel  = 5;   // kh/kw 上限（patch 最大 36x36）
+constexpr int kConvMaxOcTile  = 4;   // 单 block 的输出通道数上限
+
+// 3x3 专用版本：寄存器缓存每个线程的 6x6 输入块。
+//
+// 通用版本在通道循环里每做一次 FMA 就要读一次 shared，访存:计算 = 1:1，shared
+// 吞吐成为上限。这里每个通道只把 (4+3-1)^2 = 36 个输入装进寄存器，随后
+// 4 个输出通道 x 9 个 tap x 16 个输出 = 576 次 FMA 全部吃寄存器，比例变成
+// 16:1。核尺寸在编译期固定，展开也完整发生。
+template <class T>
+__global__ void conv2d_tiled3_kernel(const T* __restrict__ in, const T* __restrict__ weight,
+                                     const T* __restrict__ bias, T* __restrict__ out,
+                                     ops::Conv2dShape p) {
+    using Acc = tvv::cuda::contract::promoted_t<T>;
+    constexpr int oc_tile = sizeof(Acc) >= 8 ? 2 : kConvMaxOcTile;
+    constexpr int kSide   = kConvThreadTile + 3 - 1;  // 6
+
+    __shared__ T patch[kConvTile + 2][kConvTile + 2];
+    __shared__ T wsh[oc_tile * 9];
+
+    const int64_t groups = (p.out_ch + oc_tile - 1) / oc_tile;
+    const int64_t g   = blockIdx.z % groups;
+    const int64_t n   = blockIdx.z / groups;
+    const int64_t oc0 = g * oc_tile;
+    const int64_t oy0 = static_cast<int64_t>(blockIdx.y) * kConvTile;
+    const int64_t ox0 = static_cast<int64_t>(blockIdx.x) * kConvTile;
+
+    const int tx = threadIdx.x;
+    const int ty = threadIdx.y;
+    const int tid = ty * blockDim.x + tx;
+
+    const int64_t in_plane = p.in_h * p.in_w;
+
+    Acc acc[oc_tile][kConvThreadTile][kConvThreadTile];
+#pragma unroll
+    for (int o = 0; o < oc_tile; ++o) {
+        const int64_t oc = oc0 + o;
+        const Acc init = (bias != nullptr && oc < p.out_ch)
+                             ? tvv::cuda::to_compute<Acc>(bias[oc])
+                             : Acc(0);
+#pragma unroll
+        for (int i = 0; i < kConvThreadTile; ++i)
+#pragma unroll
+            for (int j = 0; j < kConvThreadTile; ++j) acc[o][i][j] = init;
+    }
+
+    for (int64_t c = 0; c < p.in_ch; ++c) {
+        const T* in_c = in + (n * p.in_ch + c) * in_plane;
+        for (int64_t idx = tid; idx < (kConvTile + 2) * (kConvTile + 2);
+             idx += kConvThreads) {
+            const int64_t py = idx / (kConvTile + 2);
+            const int64_t px = idx % (kConvTile + 2);
+            const int64_t iy = oy0 - p.padding + py;
+            const int64_t ix = ox0 - p.padding + px;
+            patch[py][px] = (iy >= 0 && iy < p.in_h && ix >= 0 && ix < p.in_w)
+                                ? in_c[iy * p.in_w + ix]
+                                : T(0);
+        }
+        for (int64_t idx = tid; idx < oc_tile * 9; idx += kConvThreads) {
+            const int64_t o  = idx / 9;
+            const int64_t r  = idx % 9;
+            const int64_t oc = oc0 + o;
+            wsh[idx] = oc < p.out_ch ? weight[(oc * p.in_ch + c) * 9 + r] : T(0);
+        }
+        __syncthreads();
+
+        Acc rp[kSide][kSide];
+#pragma unroll
+        for (int i = 0; i < kSide; ++i)
+#pragma unroll
+            for (int j = 0; j < kSide; ++j)
+                rp[i][j] = tvv::cuda::to_compute<Acc>(
+                    patch[ty * kConvThreadTile + i][tx * kConvThreadTile + j]);
+
+#pragma unroll
+        for (int o = 0; o < oc_tile; ++o) {
+#pragma unroll
+            for (int i = 0; i < 3; ++i) {
+#pragma unroll
+                for (int j = 0; j < 3; ++j) {
+                    const Acc wv = tvv::cuda::to_compute<Acc>(wsh[o * 9 + i * 3 + j]);
+#pragma unroll
+                    for (int di = 0; di < kConvThreadTile; ++di) {
+#pragma unroll
+                        for (int dj = 0; dj < kConvThreadTile; ++dj)
+                            acc[o][di][dj] += rp[di + i][dj + j] * wv;
+                    }
+                }
+            }
+        }
+        __syncthreads();
+    }
+
+    const int64_t out_plane = p.out_h * p.out_w;
+#pragma unroll
+    for (int o = 0; o < oc_tile; ++o) {
+        const int64_t oc = oc0 + o;
+        if (oc >= p.out_ch) continue;
+        T* out_c = out + (n * p.out_ch + oc) * out_plane;
+#pragma unroll
+        for (int di = 0; di < kConvThreadTile; ++di) {
+            const int64_t oy = oy0 + ty * kConvThreadTile + di;
+            if (oy >= p.out_h) continue;
+#pragma unroll
+            for (int dj = 0; dj < kConvThreadTile; ++dj) {
+                const int64_t ox = ox0 + tx * kConvThreadTile + dj;
+                if (ox >= p.out_w) continue;
+                out_c[oy * p.out_w + ox] = tvv::cuda::store_as<T>(acc[o][di][dj]);
+            }
+        }
+    }
+}
+
+// 分块卷积：一个 block 算 (n, oc 组) 的一个 32x32 输出 tile，每个线程算其中
+// 4x4，同时算 kConvMaxOcTile 个输出通道。
+//
+// 旧内核一输出一线程：每个输出都要沿 C x kh x kw 重新从全局/缓存读 576 个
+// 输入，线程之间没有显式复用。现在每处理一个输入通道，整个 block 先把该通道
+// 覆盖到的 (32+kh-1) x (32+kw-1) 输入 patch 收进 shared，之后 block 内所有输出
+// 都从 shared 读。再让一个 block 顺带算多个输出通道：同一份 patch 被 4 个通道
+// 复用，输入侧全局流量按通道组数等比下降——56x56x64 的基准形状下这是主要瓶颈。
+template <class T>
+__global__ void conv2d_tiled_kernel(const T* __restrict__ in, const T* __restrict__ weight,
+                                    const T* __restrict__ bias, T* __restrict__ out,
+                                    ops::Conv2dShape p) {
+    using Acc = tvv::cuda::contract::promoted_t<T>;
+
+    // 一个通道的 4x4 累加器是 16 个寄存器；double 下两个通道就把预算吃满，
+    // float 与 16 位类型可以放 4 个。
+    constexpr int oc_tile = sizeof(Acc) >= 8 ? 2 : kConvMaxOcTile;
+
+    __shared__ T patch[kConvTile + kConvMaxKernel - 1][kConvTile + kConvMaxKernel - 1];
+    __shared__ T wsh[oc_tile * kConvMaxKernel * kConvMaxKernel];
+
+    const int64_t groups = (p.out_ch + oc_tile - 1) / oc_tile;
+    const int64_t g  = blockIdx.z % groups;
+    const int64_t n  = blockIdx.z / groups;
+    const int64_t oc0 = g * oc_tile;
+    const int64_t oy0 = static_cast<int64_t>(blockIdx.y) * kConvTile;
+    const int64_t ox0 = static_cast<int64_t>(blockIdx.x) * kConvTile;
+
+    const int tx = threadIdx.x;  // 0..7，负责 4 列
+    const int ty = threadIdx.y;  // 0..7，负责 4 行
+    const int tid = ty * blockDim.x + tx;
+
+    const int64_t patch_h = kConvTile + p.kh - 1;
+    const int64_t patch_w = kConvTile + p.kw - 1;
+    const int64_t in_plane  = p.in_h * p.in_w;
+    const int64_t taps      = p.kh * p.kw;
+
+    Acc acc[oc_tile][kConvThreadTile][kConvThreadTile];
+#pragma unroll
+    for (int o = 0; o < oc_tile; ++o) {
+        const int64_t oc = oc0 + o;
+        const Acc init = (bias != nullptr && oc < p.out_ch)
+                             ? tvv::cuda::to_compute<Acc>(bias[oc])
+                             : Acc(0);
+#pragma unroll
+        for (int i = 0; i < kConvThreadTile; ++i)
+#pragma unroll
+            for (int j = 0; j < kConvThreadTile; ++j) acc[o][i][j] = init;
+    }
+
+    for (int64_t c = 0; c < p.in_ch; ++c) {
+        const T* in_c = in + (n * p.in_ch + c) * in_plane;
+        for (int64_t idx = tid; idx < patch_h * patch_w; idx += kConvThreads) {
+            const int64_t py = idx / patch_w;
+            const int64_t px = idx % patch_w;
+            const int64_t iy = oy0 - p.padding + py;
+            const int64_t ix = ox0 - p.padding + px;
+            patch[py][px] = (iy >= 0 && iy < p.in_h && ix >= 0 && ix < p.in_w)
+                                ? in_c[iy * p.in_w + ix]
+                                : T(0);
+        }
+        // 权重同样每通道只装一次；每组 9 个值在整个 block 内广播。
+        for (int64_t idx = tid; idx < oc_tile * taps; idx += kConvThreads) {
+            const int64_t o  = idx / taps;
+            const int64_t r  = idx % taps;
+            const int64_t oc = oc0 + o;
+            wsh[idx] = oc < p.out_ch
+                           ? weight[oc * p.in_ch * taps + c * taps + r]
+                           : T(0);
+        }
+        __syncthreads();
+
+#pragma unroll
+        for (int o = 0; o < oc_tile; ++o) {
+            const T* w_c = wsh + o * taps;
+            for (int64_t i = 0; i < p.kh; ++i) {
+                for (int64_t j = 0; j < p.kw; ++j) {
+                    const Acc wv = tvv::cuda::to_compute<Acc>(w_c[i * p.kw + j]);
+#pragma unroll
+                    for (int di = 0; di < kConvThreadTile; ++di) {
+#pragma unroll
+                        for (int dj = 0; dj < kConvThreadTile; ++dj) {
+                            acc[o][di][dj] +=
+                                tvv::cuda::to_compute<Acc>(
+                                    patch[ty * kConvThreadTile + di + i]
+                                         [tx * kConvThreadTile + dj + j]) *
+                                wv;
+                        }
+                    }
+                }
+            }
+        }
+        // 下一通道会覆盖 patch 与 wsh。
+        __syncthreads();
+    }
+
+    const int64_t out_plane = p.out_h * p.out_w;
+#pragma unroll
+    for (int o = 0; o < oc_tile; ++o) {
+        const int64_t oc = oc0 + o;
+        if (oc >= p.out_ch) continue;
+        T* out_c = out + (n * p.out_ch + oc) * out_plane;
+#pragma unroll
+        for (int di = 0; di < kConvThreadTile; ++di) {
+            const int64_t oy = oy0 + ty * kConvThreadTile + di;
+            if (oy >= p.out_h) continue;
+#pragma unroll
+            for (int dj = 0; dj < kConvThreadTile; ++dj) {
+                const int64_t ox = ox0 + tx * kConvThreadTile + dj;
+                if (ox >= p.out_w) continue;
+                out_c[oy * p.out_w + ox] = tvv::cuda::store_as<T>(acc[o][di][dj]);
+            }
+        }
+    }
+}
+
 template <class T>
 __global__ void conv2d_kernel(const T* in, const T* weight, const T* bias, T* out,
                               ops::Conv2dShape p) {
@@ -71,12 +306,38 @@ cudaError_t launch_conv2d(cudaStream_t stream, const void* in, const void* weigh
                           const void* bias, void* out, DataType dtype,
                           const ops::Conv2dShape& p) {
     if (in == nullptr || weight == nullptr || out == nullptr) return cudaErrorInvalidValue;
+    // tiled 路径要求 stride == 1（patch 的坐标按步长 1 推导）、核大小不超过
+    // shared patch 的静态上限。(n, oc 组) 必须放进 blockIdx.z——每 block 的通道
+    // 组数随标量类型变化，所以这半条判定放到 dtype 派发之后。
+    const bool tiled_geom = p.stride == 1 && p.kh > 0 && p.kw > 0 &&
+                            p.kh <= kConvMaxKernel && p.kw <= kConvMaxKernel &&
+                            p.in_ch > 0 && p.out_ch > 0;
     cudaError_t status = cudaErrorNotSupported;
     ::tvv::cuda::dispatch_dtype(dtype, [&](auto tag) {
         using T = typename decltype(tag)::type;
-        conv2d_kernel<T><<<blocks_for(p.numel()), kThreads, 0, stream>>>(
-            static_cast<const T*>(in), static_cast<const T*>(weight),
-            static_cast<const T*>(bias), static_cast<T*>(out), p);
+        constexpr int oc_tile = sizeof(tvv::cuda::contract::promoted_t<T>) >= 8 ? 2
+                                                                                : kConvMaxOcTile;
+        const int64_t groups = (p.out_ch + oc_tile - 1) / oc_tile;
+        const int64_t planes = p.batch * groups;
+        if (tiled_geom && planes > 0 && planes <= 65535) {
+            const dim3 threads(kConvThreadsX, kConvThreadsY);
+            const dim3 grid(static_cast<unsigned>((p.out_w + kConvTile - 1) / kConvTile),
+                            static_cast<unsigned>((p.out_h + kConvTile - 1) / kConvTile),
+                            static_cast<unsigned>(planes));
+            if (p.kh == 3 && p.kw == 3) {
+                conv2d_tiled3_kernel<T><<<grid, threads, 0, stream>>>(
+                    static_cast<const T*>(in), static_cast<const T*>(weight),
+                    static_cast<const T*>(bias), static_cast<T*>(out), p);
+            } else {
+                conv2d_tiled_kernel<T><<<grid, threads, 0, stream>>>(
+                    static_cast<const T*>(in), static_cast<const T*>(weight),
+                    static_cast<const T*>(bias), static_cast<T*>(out), p);
+            }
+        } else {
+            conv2d_kernel<T><<<blocks_for(p.numel()), kThreads, 0, stream>>>(
+                static_cast<const T*>(in), static_cast<const T*>(weight),
+                static_cast<const T*>(bias), static_cast<T*>(out), p);
+        }
         status = launch_status();
     });
     return status;

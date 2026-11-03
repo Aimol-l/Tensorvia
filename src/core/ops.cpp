@@ -33,10 +33,6 @@ concept has_cuda_impl = requires { sizeof(Impl<Device::CUDA>); };
 template <template <Device> class Impl>
 concept has_vulkan_impl = requires { sizeof(Impl<Device::VULKAN>); };
 
-// 后端派发：Impl<Device::X> 的全特化存在就走它，否则抛"该后端未实现"。
-// op 是算子名（公共同款 API 里的 snake_case 名字），只用于报错——spec Test
-// Steps 4 要求派发失败的消息同时带算子名与后端。CPU-only 的新算子请用
-// require_cpu(t, "op_name") 显式拒绝（消息含算子名与后端），不要依赖这里。
 template <template <Device> class Impl, typename... Args>
 decltype(auto) execute_on(DeviceId device, std::string_view op, Args&&... args) {
     ops::DeviceGuard guard(device);
@@ -1061,6 +1057,14 @@ Tensor LayerNorm(const Tensor& a, const Tensor& weight, const Tensor& bias, int 
     if (a.device() != Device::CPU) {
         int64_t outer = 1;
         for (int i = 0; i < axis; ++i) outer *= a_shape[i];
+#if defined(BACKEND_CUDA)
+        // CUDA 有融合内核：一次读、一次写完成整个归一化块。其余设备后端仍用
+        // 原子算子组合（layer_norm_composed）。
+        if (a.device() == Device::CUDA) {
+            return execute_on<LayerNormImpl>(a.device_id(), "layer_norm", a, weight, bias,
+                                             axis, eps);
+        }
+#endif
         return layer_norm_composed(a, weight, bias, outer, static_cast<int64_t>(norm_size),
                                    eps, res_type);
     }
@@ -1089,6 +1093,11 @@ Tensor RmsNorm(const Tensor& a, const Tensor& weight, int axis, float eps) {
     if (a.device() != Device::CPU) {
         int64_t outer = 1;
         for (int i = 0; i < axis; ++i) outer *= a_shape[i];
+#if defined(BACKEND_CUDA)
+        if (a.device() == Device::CUDA) {
+            return execute_on<RmsNormImpl>(a.device_id(), "rms_norm", a, weight, axis, eps);
+        }
+#endif
         return rms_norm_composed(a, weight, outer, static_cast<int64_t>(norm_size),
                                  eps, res_type);
     }
