@@ -48,6 +48,21 @@ private:
 
     std::array<uint32_t, 3>   m_max_workgroup_count{65535u, 65535u, 65535u};
 
+    // VK_KHR_cooperative_matrix 的探测结果。为 true 时 createLogicalDevice 已连同
+    // 扩展和特性一起启用；目前只有 f16/bf16 的 MatMul 内核用它。
+    bool m_cooperative_matrix = false;
+    std::vector<VkCooperativeMatrixPropertiesKHR> m_cooperative_matrix_configs;
+
+    // cooperative matrix 内核按 16 个 32 线程的 subgroup 排布，subgroup 大小不是
+    // 32 就不适用。ready 表示内核要求的 16x16x16 配置（A/B 为该 dtype、C/Result
+    // 为 f32）存在；active 表示管线确实建成了、正在用它（建失败会回落，见
+    // registerOp）。
+    uint32_t m_subgroup_size               = 0;
+    bool     m_matmul_coopmat_ready_f16    = false;
+    bool     m_matmul_coopmat_ready_bf16   = false;
+    bool     m_matmul_coopmat_active_f16   = false;
+    bool     m_matmul_coopmat_active_bf16  = false;
+
     // 一次已入队、尚未回收的提交。
     struct InFlight {
         vk::Fence         fence{};
@@ -113,6 +128,20 @@ public:
     ~VulkanContext() override;
 
     int device_index() const { return m_device_index; }
+
+    // VK_KHR_cooperative_matrix 是否可用并已启用：扩展存在、cooperativeMatrix
+    // 特性位为真、且设备至少报告一种矩阵配置，三者缺一即为 false。启用后的配置
+    // 列表按 M/N/K 与 A/B/C/Result 的元素类型给出，MatMul 的 f16/bf16 内核据此
+    // 决定能否走该路径。
+    bool supports_cooperative_matrix() const { return m_cooperative_matrix; }
+    const std::vector<VkCooperativeMatrixPropertiesKHR>& cooperative_matrix_configs() const {
+        return m_cooperative_matrix_configs;
+    }
+
+    // 该 dtype 的 MatMul 是否真的走在 cooperative matrix 内核上（探测通过、且
+    // 管线建成）。只有 FLOAT16/BFLOAT16 可能为 true；为 false 时走标量内核，
+    // 结果相同，只是慢。
+    bool matmul_uses_cooperative_matrix(DataType dtype) const;
 
     // 有多少物理设备通过计算适用性过滤，以及不带索引的调用方应得哪一个。索引空间
     // 是按 choosePhysicalDevice 的优先级排序后的过滤列表，所以 0 号恰好就是当前
@@ -184,6 +213,7 @@ private:
     void createInstance();
     void setupDebugMessenger();
     void choosePhysicalDevice(int device_index);
+    void probeCooperativeMatrix();
     void createLogicalDevice();
     void createVmaAllocator();
     vk::UniqueCommandPool    createCommandPool();
@@ -195,6 +225,8 @@ private:
     void createDescriptorSetLayout(std::string op, int tensor_count, int params_size);
     void createPipelineLayout(std::string type_op, std::string ori_op,
                               int tensor_count, int params_size);
+    // 取注册表里 key 对应的 SPIR-V 建计算管线，登记在 type_op 名下。
+    void createComputePipeline(const std::string& key, const std::string& type_op);
 };
 
 template <typename T>

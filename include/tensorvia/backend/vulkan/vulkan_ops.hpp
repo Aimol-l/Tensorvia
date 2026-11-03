@@ -215,4 +215,14 @@ template <> struct CumsumImpl<Device::VULKAN> {
     static Tensor execute(const Tensor& a, int axis);
 };
 
+// 融合归一化（一个 workgroup 一行）。只有 FLOAT32 注册了流水线：调用方必须
+// 保证 a.dtype() == FLOAT32，其余 dtype 走 ops.cpp 里的组合式路径。
+template <> struct LayerNormImpl<Device::VULKAN> {
+    static Tensor execute(const Tensor& a, const Tensor& weight, const Tensor& bias,
+                          int axis, float eps);
+};
+template <> struct RmsNormImpl<Device::VULKAN> {
+    static Tensor execute(const Tensor& a, const Tensor& weight, int axis, float eps);
+};
+
 }  // namespace ops

@@ -1,0 +1,64 @@
+#version 460
+
+// int64 源的类型转换（流水线键 typecast_int64）。
+//
+// 输出侧按 push constant 的 dst_type 选绑定：同一份目标 buffer 同时以 8 种标量
+// 类型绑定到 binding 1..9（BOOL 与 INT8 分开，前者写 0/1），只有被选中的那个
+// 会被写。Vulkan 允许描述符别名，未选中的别名不会被访问。这样一条流水线覆盖
+// 全部目标 dtype，不需要 64 个 (源, 目标) 组合的 shader。
+//
+// 语义与 CPU 的 cast_kernel 对齐：目标 BOOL 写 0/1（任何非零为真），源 BOOL
+// 以 INT8 流水线运行（值已规范化为 0/1），按数值处理。
+#extension GL_EXT_shader_explicit_arithmetic_types : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int8 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int16 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_float64 : require
+#extension GL_EXT_bfloat16 : require
+#extension GL_EXT_shader_8bit_storage : require
+#extension GL_EXT_shader_16bit_storage : require
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform Params {
+    int64_t numel;
+    int32_t dst_type;
+} p;
+
+layout(std430, binding = 0) readonly buffer Source { int64_t data[]; } src;
+layout(std430, binding = 1) writeonly buffer DstBool { int8_t data[]; } d_bool;
+layout(std430, binding = 2) writeonly buffer DstInt8 { int8_t data[]; } d_i8;
+layout(std430, binding = 3) writeonly buffer DstInt16 { int16_t data[]; } d_i16;
+layout(std430, binding = 4) writeonly buffer DstInt32 { int32_t data[]; } d_i32;
+layout(std430, binding = 5) writeonly buffer DstInt64 { int64_t data[]; } d_i64;
+layout(std430, binding = 6) writeonly buffer DstFloat16 { float16_t data[]; } d_f16;
+layout(std430, binding = 7) writeonly buffer DstBFloat16 { bfloat16_t data[]; } d_bf16;
+layout(std430, binding = 8) writeonly buffer DstFloat32 { float data[]; } d_f32;
+layout(std430, binding = 9) writeonly buffer DstFloat64 { double data[]; } d_f64;
+
+void main() {
+    int64_t idx = int64_t(gl_GlobalInvocationID.x);
+    if (idx >= p.numel) return;
+    int i = int(idx);
+    double v = double(src.data[i]);
+    if (p.dst_type == 0) {
+        d_bool.data[i] = (v != 0.0) ? int8_t(1) : int8_t(0);
+    } else if (p.dst_type == 1) {
+        d_i8.data[i] = int8_t(v);
+    } else if (p.dst_type == 2) {
+        d_i16.data[i] = int16_t(v);
+    } else if (p.dst_type == 3) {
+        d_i32.data[i] = int32_t(v);
+    } else if (p.dst_type == 4) {
+        d_i64.data[i] = int64_t(v);
+    } else if (p.dst_type == 5) {
+        d_f16.data[i] = float16_t(v);
+    } else if (p.dst_type == 6) {
+        d_bf16.data[i] = bfloat16_t(v);
+    } else if (p.dst_type == 7) {
+        d_f32.data[i] = float(v);
+    } else {
+        d_f64.data[i] = v;
+    }
+}

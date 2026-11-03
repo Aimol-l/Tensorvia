@@ -1,0 +1,139 @@
+#version 460
+#extension GL_KHR_cooperative_matrix : require
+#extension GL_KHR_memory_scope_semantics : require
+#extension GL_EXT_shader_16bit_storage : require
+#extension GL_EXT_shader_explicit_arithmetic_types : require
+#extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
+
+
+// cooperative matrix 版矩阵乘：走 tensor core（NVIDIA 上是 HMMA），而不是
+// 标量 FMA。宿主只在设备报告了 16x16x16 / f16 x f16 -> f32 的配置、且 subgroup
+// 大小为 32 时选这条流水线（见 VulkanContext::probeCooperativeMatrix）；其余
+// 情况用 matmul_float16.comp 的标量内核。
+//
+// 一个 workgroup = 16 个 subgroup = 512 个线程，产出 128x128 个输出：
+//   subgroup sg 负责第 16*(sg>>1) .. +15 行、第 64*(sg&1) .. +63 列，即 4 个
+//   16x16 累加器。每个 K 步（16）把 A 的 [128][16] 与 B 的 [16][128] 搬进共享
+//   内存，然后每个 subgroup 装 1 个 A 片和 4 个 B 片，做 4 次 coopMatMulAdd。
+//   共享内存把全局读摊成"每个元素每步只读一次"。
+//
+// tile 为什么比 64x64 大：每步要搬 (tile_m + tile_n) x 16 个元素，而算出的乘加
+// 是 tile_m x tile_n x 16——算术强度随 tile 边长线性上升。64x64 时实测只有峰值
+// 的一成多，瓶颈在搬运而不是 MMA 吞吐，所以把 tile 加到 128x128（4 倍强度，
+// 代价是每个 workgroup 16 个 subgroup、24 KB 共享内存）。
+//
+// 累加器是 f32：与标量内核一致，避免 f16 累加在长 K 上的漂移。输出是 f16，
+// 所以最后要把 f32 累加器经共享内存转成 f16 再写出（coopMatStore 不做类型转换）。
+//
+// 边界：M/N/K 不整除 16 时，共享内存里越界的元素填 0（不改变乘加结果），
+// 越界的输出丢弃。因此这条内核对所有形状都成立，无需宿主筛选尺寸。
+//
+// 注意：glslang 把 coopMatLoad/Store 实现成 void 形式（目标作为第一个实参），
+// 与 GLSL 规范里的返回值形式不同；把 coopMatStore 放进循环里的条件分支还会
+// 触发一条指向后续转换语句的误导性报错，所以输出阶段用宏展开成 4 段。
+
+layout(local_size_x = 512) in;
+
+layout(push_constant) uniform Params {
+    uint batch;
+    uint N; // 列数
+    uint K; // 归约维
+    uint M; // 行数
+} params;
+
+layout(std430, binding = 0) buffer InputA {
+    float16_t data[];
+} A; // [batch, M, K]
+
+layout(std430, binding = 1) buffer InputB {
+    float16_t data[];
+} B; // [batch, K, N]
+
+layout(std430, binding = 2) buffer Output {
+    float16_t data[];
+} C; // [batch, M, N]
+
+shared float16_t As[128 * 16];
+shared float16_t Bs[16 * 128];
+shared float        Cs[16 * 16 * 16]; // 每个 subgroup 一块转写区
+
+void main() {
+    const uint tid  = gl_LocalInvocationID.x; // 0..511
+    const uint sg   = tid >> 5;               // subgroup 0..15（subgroup 大小由宿主保证为 32）
+    const uint lane = tid & 31u;
+
+    const uint m0    = gl_WorkGroupID.y * 128u;
+    const uint n0    = gl_WorkGroupID.x * 128u;
+    const uint batch = gl_WorkGroupID.z;
+    const uint M = params.M, N = params.N, K = params.K;
+
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> acc0 =
+        coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> acc1 =
+        coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> acc2 =
+        coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> acc3 =
+        coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
+
+    coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseA> mA =
+        coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseA>(0.0);
+    coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB> mB0 =
+        coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB>(0.0);
+    coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB> mB1 =
+        coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB>(0.0);
+    coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB> mB2 =
+        coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB>(0.0);
+    coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB> mB3 =
+        coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB>(0.0);
+
+    const float16_t zero16 = float16_t(0.0);
+
+    for (uint k0 = 0u; k0 < K; k0 += 16u) {
+        // A 的 [128][16]：行主序，越界填 0。
+        for (uint i = tid; i < 2048u; i += 512u) {
+            const uint gm = m0 + (i >> 4);
+            const uint gk = k0 + (i & 15u);
+            As[i] = (gm < M && gk < K) ? A.data[(batch * M + gm) * K + gk] : zero16;
+        }
+        // B 的 [16][128]：行主序，越界填 0。
+        for (uint i = tid; i < 2048u; i += 512u) {
+            const uint gk = k0 + (i >> 7);
+            const uint gn = n0 + (i & 127u);
+            Bs[i] = (gk < K && gn < N) ? B.data[(batch * K + gk) * N + gn] : zero16;
+        }
+        barrier();
+
+        coopMatLoad(mA, As, (sg >> 1) * 256u, 16u, gl_CooperativeMatrixLayoutRowMajor);
+        coopMatLoad(mB0, Bs, (sg & 1u) * 64u, 128u, gl_CooperativeMatrixLayoutRowMajor);
+        coopMatLoad(mB1, Bs, (sg & 1u) * 64u + 16u, 128u, gl_CooperativeMatrixLayoutRowMajor);
+        coopMatLoad(mB2, Bs, (sg & 1u) * 64u + 32u, 128u, gl_CooperativeMatrixLayoutRowMajor);
+        coopMatLoad(mB3, Bs, (sg & 1u) * 64u + 48u, 128u, gl_CooperativeMatrixLayoutRowMajor);
+
+        acc0 = coopMatMulAdd(mA, mB0, acc0);
+        acc1 = coopMatMulAdd(mA, mB1, acc1);
+        acc2 = coopMatMulAdd(mA, mB2, acc2);
+        acc3 = coopMatMulAdd(mA, mB3, acc3);
+        barrier();
+    }
+
+    // f32 累加器 -> 共享内存 -> f16 写出。每个 subgroup 独占 Cs 的 256 个 float。
+    const uint sbase = sg * 256u;
+#define TV_EMIT(ACC, J)                                                          \
+    coopMatStore(ACC, Cs, sbase, 16u, gl_CooperativeMatrixLayoutRowMajor);       \
+    barrier();                                                                   \
+    for (uint i = lane; i < 256u; i += 32u) {                                    \
+        const uint gm = m0 + (sg >> 1) * 16u + (i >> 4);                         \
+        const uint gn = n0 + (sg & 1u) * 64u + 16u * (J) + (i & 15u);            \
+        if (gm < M && gn < N) {                                                  \
+            float v = Cs[sbase + i];                                             \
+            C.data[(batch * M + gm) * N + gn] = float16_t(v);                    \
+        }                                                                        \
+    }                                                                            \
+    barrier();
+    TV_EMIT(acc0, 0u)
+    TV_EMIT(acc1, 1u)
+    TV_EMIT(acc2, 2u)
+    TV_EMIT(acc3, 3u)
+#undef TV_EMIT
+}

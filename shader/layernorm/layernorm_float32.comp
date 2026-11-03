@@ -1,0 +1,58 @@
+#version 460
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+// 融合 LayerNorm：一个 workgroup 处理一行 [outer, n]。
+//
+// 组合形式要发 8 个内核、中间张量全部落显存；这里一行只读一遍全局（用于统计
+// 的第一遍可能由 L2 服务第二遍），均值/方差在 workgroup 内用共享内存树形归约。
+// 不做共享内存行缓存：n 没有上界，缓存版本会把可处理的行宽钉在 48 KB 以内。
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform Params {
+    int   norm_size;
+    int   outer;
+    float eps;
+} p;
+
+layout(std430, binding = 0) readonly buffer X { float data[]; } x;
+layout(std430, binding = 1) readonly buffer W { float data[]; } w;
+layout(std430, binding = 2) readonly buffer B { float data[]; } b;
+layout(std430, binding = 3) writeonly buffer Y { float data[]; } y;
+
+shared float red[256];
+
+// 归约后 red[0] 是本 workgroup 全体的和；返回前不保证其它线程已经离开。
+void main() {
+    const uint tid = gl_LocalInvocationID.x;
+    const int n = p.norm_size;
+    const int64_t base = int64_t(gl_WorkGroupID.x) * int64_t(n);
+
+    float local = 0.0;
+    for (int i = int(tid); i < n; i += 256) local += x.data[int(base) + i];
+    red[tid] = local;
+    barrier();
+    for (int s = 128; s > 0; s >>= 1) {
+        if (int(tid) < s) red[tid] += red[tid + uint(s)];
+        barrier();
+    }
+    const float mean = red[0] / float(n);
+    barrier();
+
+    local = 0.0;
+    for (int i = int(tid); i < n; i += 256) {
+        const float d = x.data[int(base) + i] - mean;
+        local += d * d;
+    }
+    red[tid] = local;
+    barrier();
+    for (int s = 128; s > 0; s >>= 1) {
+        if (int(tid) < s) red[tid] += red[tid + uint(s)];
+        barrier();
+    }
+    const float inv = inversesqrt(red[0] / float(n) + p.eps);
+    barrier();
+
+    for (int i = int(tid); i < n; i += 256) {
+        y.data[int(base) + i] = (x.data[int(base) + i] - mean) * inv * w.data[i] + b.data[i];
+    }
+}

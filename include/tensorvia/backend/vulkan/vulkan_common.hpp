@@ -78,6 +78,10 @@ struct ReduceVecParams {
     int32_t inner_dim;
     int32_t numel;
     int32_t mean_n;
+    // 0 = 每线程一个输出（派发 outer_dim/256 个 workgroup）；
+    // 1 = 每 workgroup 一个输出、线程沿归约轴分摊（派发 outer_dim 个 workgroup）。
+    // 只有 FLOAT32 的归约着色器实现了这一模式，其余 dtype 必须传 0。
+    int32_t block_mode;
 };
 
 struct Trans2DParams {
@@ -223,6 +227,36 @@ struct Conv2dParams {
     uint32_t has_bias;
 };
 
+// typecast：目标 dtype 的编码。必须与 shader/typecast/*.comp 里的 dst_type
+// 分支一一对应——这里刻意不用 DataType 的枚举序号，避免枚举增删悄悄改变语义。
+struct TypecastParams {
+    int64_t numel;
+    int32_t dst_type;
+};
+
+// BOOL 与 INT8 共用 storage 布局但写出的值不同（前者规范化为 0/1），所以是两个
+// 独立的绑定。
+constexpr int32_t kCastDstBool     = 0;
+constexpr int32_t kCastDstInt8     = 1;
+constexpr int32_t kCastDstInt16    = 2;
+constexpr int32_t kCastDstInt32    = 3;
+constexpr int32_t kCastDstInt64    = 4;
+constexpr int32_t kCastDstFloat16  = 5;
+constexpr int32_t kCastDstBFloat16 = 6;
+constexpr int32_t kCastDstFloat32  = 7;
+constexpr int32_t kCastDstFloat64  = 8;
+
+// typecast 的绑定数：1 个源 + 9 个目标别名绑定（BOOL 与 INT8 各一个）。
+constexpr int kTypecastBindings = 10;
+
+// 融合 LayerNorm / RmsNorm：一个 workgroup 一行 [outer, norm_size]。
+// 与 GLSL push_constant 的 std430 布局兼容（sizeof = 12）。
+struct NormParams {
+    int32_t norm_size;
+    int32_t outer;
+    float   eps;
+};
+
 // ---------------------------------------------------------------------------
 // 由 VMA 支撑的 buffer 持有者。
 //
@@ -346,6 +380,27 @@ inline void require_int32_indexable(int64_t numel, const char* what) {
         "vulkan {}: {} elements exceed this backend's limit of {} (shader element "
         "indices are 32-bit)",
         what, numel, max_elems()));
+}
+
+// 一元/激活内核按线性下标从 buffer 基址读，只有"连续且偏移为 0"的张量满足这个
+// 前提。其余视图先物化成连续副本（Tensor::clone 会选 copy_to 或
+// clone_as_contiguous，两者都处理 offset）。返回的 storage 只在需要物化时被占用，
+// 常见路径上保持空构造。
+inline const Tensor& linear_source(const Tensor& a, Tensor& storage) {
+    if (a.is_contiguous() && a.offset() == 0) return a;
+    storage = a.clone();
+    return storage;
+}
+
+// 非原地一元/激活的源操作数：dtype 需要提升时（整型输入算浮点结果）先转成 rt，
+// 否则直接读原张量。两种情形的结果都由 storage 承接，返回的指针只在调用方持着
+// storage 期间有效。
+inline const Tensor* unary_source(const Tensor& a, DataType rt, Tensor& storage) {
+    if (rt != a.dtype()) {
+        storage = a.to_type(rt);
+        return &storage;
+    }
+    return &linear_source(a, storage);
 }
 
 // VMA 用 VkResult 而非 vk::Result 报错。

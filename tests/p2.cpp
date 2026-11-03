@@ -43,7 +43,13 @@ TEST_F(DeviceOps, EnqueueDoesNotWaitForCompletion) {
     const double overhead_ms = std::max(time_enqueue(tiny, tiny, kProbeOps) / kProbeOps, 1e-4);
 
     // 2) 放大矩阵，直到单次"入队 + 同步"往返达到提交开销的 6 倍，即 GPU 工作
-    //    至少是提交开销的 5 倍。放大到 2048 还不够就按上限收手，不无限等待。
+    //    至少是提交开销的 5 倍。
+    //
+    //    上限是 4096 而不是 2048：mcpp test 会并行跑同一设备上的其他测试二进制，
+    //    别的进程占着 GPU 时每次提交能被驱动拖到几毫秒（空闲时的十倍以上），而
+    //    内核越快、单次往返里的 GPU 工作越少，2048 就不够 6 倍了。这跟实现是否
+    //    异步无关——是分母被外部进程抬高了。到 4096 仍不满足就说明这台机器此刻
+    //    量不出这条性质，跳过而不是把一个被噪声支配的比值判成失败。
     int64_t side = 256;
     double round_ms = 0.0;
     Tensor a, b;
@@ -58,8 +64,13 @@ TEST_F(DeviceOps, EnqueueDoesNotWaitForCompletion) {
         Tensor one = ops::MatMul(a, b);
         ops::synchronize();
         round_ms = ms_since(round_start);
-        if (round_ms >= 6.0 * overhead_ms || side >= 2048) break;
+        if (round_ms >= 6.0 * overhead_ms || side >= 4096) break;
         side *= 2;
+    }
+    if (round_ms < 6.0 * overhead_ms) {
+        GTEST_SKIP() << "machine too loaded to measure asynchrony: a " << side << "x"
+                     << side << " round trip is " << round_ms
+                     << " ms, the measured submit overhead is " << overhead_ms << " ms";
     }
 
     // 3) 按实测往返耗时决定做多少次，让总工作量落在几十毫秒。

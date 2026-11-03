@@ -1,20 +1,27 @@
 #version 460
-#extension GL_EXT_bfloat16 : enable
-#extension GL_EXT_shader_explicit_arithmetic_types : enable
+#extension GL_EXT_bfloat16 : require
+#extension GL_EXT_shader_explicit_arithmetic_types : require
 
-// 2-D 卷积（cross-correlation）：一个调用算一个输出元素。
+
+// 2-D 卷积（cross-correlation）：每线程算 4 个输出通道 x 4 个相邻输出列，
+// 16x16 个线程拼成一个 64x64 的输出块（一个 workgroup 覆盖一行输出的
+// 一整段）。输入/输出都是连续 NCHW。
 //
-// 输入/输出都是连续 NCHW，扁平输出下标直接解码成 (n, oc, oy, ox)。padding 落在
-// 感受野之外的位置按 0 贡献，所以越界的 (y, x) 直接跳过，不需要真的补零。
+// 旧版一个调用算一个输出元素：每一次乘加都要读一次输入、一次权重。这里 16 次
+// 乘加只用 8 次读取，而且同一次输入读取被 4 个输出通道摊掉、同一次权重
+// 读取被 4 个输出列摊掉——寄存器分块换的就是这个比例。
 //
-// 累加器取宽的标量类型：半精度输入在 float 里累加，写回时才收窄——与 CUDA/SYCL
-// 后端的 promoted_t 一致。
+// 边界：oc 越界的通道用最后一个通道的权重参与计算（结果不写回），避免越界读；
+// x/y 越界的感受野位置贡献 0，所以不需要真的补零。
 //
 // has_bias == 0 时 binding 2 不读：宿主在那里绑的是权重 buffer，只为满足描述符
-// 布局必须非空。
-//
-// 本文件与同目录另一份 conv2d_<dtype>.comp 只有标量类型不同；改语义时四份一起改。
-layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+// 布局必须非空。本文件与同目录另一份 conv2d_<dtype>.comp 只有标量类型不同。
+#define OC_TILE 4
+#define OX_TILE 4
+#define WG_X 16
+#define WG_Y 16
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
 layout(push_constant) uniform Params {
     uint batch;
@@ -33,52 +40,92 @@ layout(push_constant) uniform Params {
 
 layout(std430, binding = 0) buffer Input {
     bfloat16_t data[];
-} src;  // [batch, in_ch, in_h, in_w]
+} src; // [batch, in_ch, in_h, in_w]
 
 layout(std430, binding = 1) buffer Weight {
     bfloat16_t data[];
-} wgt;  // [out_ch, in_ch, kh, kw]
+} wgt; // [out_ch, in_ch, kh, kw]
 
 layout(std430, binding = 2) buffer Bias {
     bfloat16_t data[];
-} bia;  // [out_ch]
+} bia; // [out_ch]
 
 layout(std430, binding = 3) buffer Output {
     bfloat16_t data[];
-} dst;  // [batch, out_ch, out_h, out_w]
+} dst; // [batch, out_ch, out_h, out_w]
 
 void main() {
-    uint idx = gl_GlobalInvocationID.x;
-    uint total = params.batch * params.out_ch * params.out_h * params.out_w;
-    if (idx >= total) return;
+    const uint oc_blocks = (params.out_ch + uint(WG_Y * OC_TILE) - 1u) / uint(WG_Y * OC_TILE);
+    const uint n   = gl_WorkGroupID.z / oc_blocks;
+    const uint ocb = gl_WorkGroupID.z % oc_blocks;
+    const uint oy  = gl_WorkGroupID.y;
+    const uint ox0 = (gl_WorkGroupID.x * uint(WG_X) + gl_LocalInvocationID.x) * uint(OX_TILE);
+    const uint oc0 = (ocb * uint(WG_Y) + gl_LocalInvocationID.y) * uint(OC_TILE);
 
-    uint ox = idx % params.out_w;
-    uint rest = idx / params.out_w;
-    uint oy = rest % params.out_h;
-    rest /= params.out_h;
-    uint oc = rest % params.out_ch;
-    uint n = rest / params.out_ch;
+    const uint out_ch = params.out_ch;
+    const uint out_w  = params.out_w;
+    const uint in_ch  = params.in_ch;
+    const uint in_h   = params.in_h;
+    const uint in_w   = params.in_w;
 
-    float acc = params.has_bias != 0 ? float(bia.data[oc]) : 0.0;
+    // 越界通道借用最后一个通道的权重：读到的值无害，只是不写回。
+    uint ocm[OC_TILE];
+    for (uint a = 0u; a < uint(OC_TILE); ++a) ocm[a] = min(oc0 + a, out_ch - 1u);
 
-    uint in_plane = params.in_h * params.in_w;
-    uint out_plane = params.out_h * params.out_w;
-    uint taps = params.in_ch * params.kh * params.kw;
+    // 输出列在输入里的中心偏移（不含 kernel 偏移）。
+    int xoff[OX_TILE];
+    for (uint b = 0u; b < uint(OX_TILE); ++b)
+        xoff[b] = int(ox0 + b) * int(params.stride);
 
-    for (uint c = 0; c < params.in_ch; ++c) {
-        uint in_base = (n * params.in_ch + c) * in_plane;
-        uint w_base = oc * taps + c * params.kh * params.kw;
-        for (uint i = 0; i < params.kh; ++i) {
-            int y = int(oy * params.stride + i) - int(params.padding);
-            if (y < 0 || y >= int(params.in_h)) continue;
-            for (uint j = 0; j < params.kw; ++j) {
-                int x = int(ox * params.stride + j) - int(params.padding);
-                if (x < 0 || x >= int(params.in_w)) continue;
-                acc += float(src.data[in_base + uint(y) * params.in_w + uint(x)]) *
-                       float(wgt.data[w_base + i * params.kw + j]);
+    float acc[OC_TILE][OX_TILE];
+    for (uint a = 0u; a < uint(OC_TILE); ++a)
+        for (uint b = 0u; b < uint(OX_TILE); ++b)
+            acc[a][b] = params.has_bias != 0 ? float(bia.data[ocm[a]]) : float(0);
+
+    const uint in_plane = in_h * in_w;
+    const uint taps     = in_ch * params.kh * params.kw;
+    const uint kplane   = params.kh * params.kw;
+    const int  pad      = int(params.padding);
+    const int  ih       = int(in_h);
+    const int  iw       = int(in_w);
+
+    for (uint c = 0u; c < in_ch; ++c) {
+        const uint in_base = (n * in_ch + c) * in_plane;
+        for (uint i = 0u; i < params.kh; ++i) {
+            const int y = int(oy * params.stride + i) - pad;
+            if (y < 0 || y >= ih) continue;
+            const uint row = in_base + uint(y) * in_w;
+
+            // 权重基址只随 (c, i) 变，提到 j 循环外
+            uint wbase[OC_TILE];
+            for (uint a = 0u; a < uint(OC_TILE); ++a)
+                wbase[a] = ocm[a] * taps + c * kplane + i * params.kw;
+
+            for (uint j = 0u; j < params.kw; ++j) {
+                float w[OC_TILE];
+                for (uint a = 0u; a < uint(OC_TILE); ++a)
+                    w[a] = float(wgt.data[wbase[a] + j]);
+
+                float v[OX_TILE];
+                for (uint b = 0u; b < uint(OX_TILE); ++b) {
+                    const int x = xoff[b] + int(j) - pad;
+                    v[b] = (x >= 0 && x < iw) ? float(src.data[row + uint(x)]) : float(0);
+                }
+
+                for (uint a = 0u; a < uint(OC_TILE); ++a)
+                    for (uint b = 0u; b < uint(OX_TILE); ++b) acc[a][b] += v[b] * w[a];
             }
         }
     }
 
-    dst.data[(n * params.out_ch + oc) * out_plane + oy * params.out_w + ox] = bfloat16_t(acc);
+    const uint out_plane = params.out_h * out_w;
+    for (uint a = 0u; a < uint(OC_TILE); ++a) {
+        const uint oc = oc0 + a;
+        if (oc >= out_ch) break;
+        for (uint b = 0u; b < uint(OX_TILE); ++b) {
+            const uint ox = ox0 + b;
+            if (ox >= out_w) break;
+            dst.data[(n * out_ch + oc) * out_plane + oy * out_w + ox] = bfloat16_t(acc[a][b]);
+        }
+    }
 }

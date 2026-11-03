@@ -257,6 +257,18 @@ int main(int argc, char* argv[]) {
         const Phases p = measure([&] { (void)ops::MatMul(a, b); }, 5);
         report("matmul f32 1024", p, 2.0 * M * M * M, true);
     }
+    {   // 半精度 matmul：Vulkan 上设备具备条件时换成 cooperative matrix（tensor
+        // core）内核，否则仍是标量内核——同一份数字因此能直接看两条路径的差距。
+        for (const DT dt : {DT::FLOAT16, DT::BFLOAT16}) {
+            for (const std::int64_t M : {std::int64_t{1024}, std::int64_t{2048}}) {
+                Tensor a = Tensor::Random({M, M}, 0.0f, 1.0f, dt, dev);
+                Tensor b = Tensor::Random({M, M}, 0.0f, 1.0f, dt, dev);
+                const Phases p = measure([&] { (void)ops::MatMul(a, b); }, 5);
+                report(std::format("matmul {} {}", dtype_to_string(dt), M), p,
+                       2.0 * M * M * M, true);
+            }
+        }
+    }
     {   // conv2d：NCHW 小通道（推理常见形状）；参照为同机 cuDNN（PyTorch）
         constexpr std::int64_t N = 8, C = 64, H = 56, W = 56, K = 64, R = 3, S = 3;
         Tensor x = Tensor::Random({N, C, H, W}, 0.0f, 1.0f, DT::FLOAT32, dev);

@@ -13,7 +13,8 @@
 
 namespace ops {
 
-// 一个调用算一个输出元素：输入/输出都是连续 NCHW，shader 按扁平下标解码。
+// 寄存器分块的 conv2d：每个线程算 4 个输出通道 x 4 个相邻输出列，一个 workgroup
+// 覆盖一行输出上的 64 个通道 x 64 个列。 */
 Tensor Conv2dImpl<Device::VULKAN>::execute(const Tensor& input, const Tensor& weight,
                                            const Tensor* bias, const Conv2dShape& shape) {
     vulkan_detail::require_int32_indexable(shape.numel(), "conv2d");
@@ -51,12 +52,18 @@ Tensor Conv2dImpl<Device::VULKAN>::execute(const Tensor& input, const Tensor& we
                               .out_w    = static_cast<uint32_t>(shape.out_w),
                               .has_bias = static_cast<uint32_t>(bias != nullptr ? 1 : 0)};
 
-    constexpr uint32_t kWorkgroup = 256;
-    const uint32_t gx = static_cast<uint32_t>((shape.numel() + kWorkgroup - 1) / kWorkgroup);
+    // 与 shader/conv2d/*.comp 的分块一致：16x16 个线程，每线程 4 个输出通道 x
+    // 4 个相邻输出列，一个 workgroup 覆盖 64 个通道 x 64 个输出列的一整行输出。
+    constexpr uint32_t kBlock = 64;
+    const uint32_t gx = static_cast<uint32_t>((shape.out_w + kBlock - 1) / kBlock);
+    const uint32_t gy = static_cast<uint32_t>(shape.out_h);
+    const uint32_t gz =
+        static_cast<uint32_t>(shape.batch) *
+        static_cast<uint32_t>((shape.out_ch + kBlock - 1) / kBlock);
     ctx_impl->submitCompute(OpType::Conv2d, input.dtype(),
                             {in_impl->buffer(), w_impl->buffer(), bias_buffer,
                              out_impl->buffer()},
-                            gx, 1, 1, &params, sizeof(params));
+                            gx, gy, gz, &params, sizeof(params));
     return dst;
 }
 

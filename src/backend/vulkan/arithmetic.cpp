@@ -142,21 +142,29 @@ void unary_inplace(Tensor& a, OpType op, const char* what) {
                             (a.numel() + 255) / 256, 1, 1, &numel, sizeof(int64_t));
 }
 
+// 非原地一元：直接写一块新分配的 dst，而不是 clone() 后跑原地内核。clone 那条路径
+// 要把整个张量多读多写一遍（16M f32 是 128 MB 的额外流量），而着色器本来就支持
+// 读 0 写 1 两个绑定。
 template <class Impl>
 Tensor unary_out_of_place(const Tensor& a, OpType op, const char* what) {
     // int8/16/32 -> float32；int64 -> float64；浮点保持自身 dtype。
     DataType rt = a.dtype();
     if (is_integral_dtype(rt)) rt = DataType::FLOAT32;
     else if (rt == DataType::INT64) rt = DataType::FLOAT64;
-    Tensor result = rt == a.dtype() ? a.clone() : a.to_type(rt);
+
+    Tensor storage;
+    const Tensor* src = vulkan_detail::unary_source(a, rt, storage);
+    Tensor result(a.shape(), rt, Device::VULKAN);
+
+    auto src_impl = std::dynamic_pointer_cast<VKTensor>(src->get_impl());
     auto dst_impl = std::dynamic_pointer_cast<VKTensor>(result.get_impl());
-    if (!dst_impl)
-        throw std::runtime_error(std::string("vulkan ") + what + ": expected a VKTensor");
+    if (!src_impl || !dst_impl)
+        throw std::runtime_error(std::string("vulkan ") + what + ": expected VKTensors");
     auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(dst_impl->context());
     if (!ctx_impl)
         throw std::runtime_error(std::string("vulkan ") + what + ": missing VulkanContext");
     int64_t numel = result.numel();
-    ctx_impl->submitCompute(op, result.dtype(), {dst_impl->buffer(), dst_impl->buffer()},
+    ctx_impl->submitCompute(op, rt, {src_impl->buffer(), dst_impl->buffer()},
                             (result.numel() + 255) / 256, 1, 1, &numel, sizeof(int64_t));
     return result;
 }
@@ -178,15 +186,20 @@ Tensor value_out_of_place(const Tensor& a, OpType op, float val, const char* wha
     DataType rt = a.dtype();
     if (is_integral_dtype(rt)) rt = DataType::FLOAT32;
     else if (rt == DataType::INT64) rt = DataType::FLOAT64;
-    Tensor result = rt == a.dtype() ? a.clone() : a.to_type(rt);
+
+    Tensor storage;
+    const Tensor* src = vulkan_detail::unary_source(a, rt, storage);
+    Tensor result(a.shape(), rt, Device::VULKAN);
+
+    auto src_impl = std::dynamic_pointer_cast<VKTensor>(src->get_impl());
     auto dst_impl = std::dynamic_pointer_cast<VKTensor>(result.get_impl());
-    if (!dst_impl)
-        throw std::runtime_error(std::string("vulkan ") + what + ": expected a VKTensor");
+    if (!src_impl || !dst_impl)
+        throw std::runtime_error(std::string("vulkan ") + what + ": expected VKTensors");
     auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(dst_impl->context());
     if (!ctx_impl)
         throw std::runtime_error(std::string("vulkan ") + what + ": missing VulkanContext");
     ValueParams<float> params{.value = val, .numel = static_cast<int64_t>(result.numel())};
-    ctx_impl->submitCompute(op, result.dtype(), {dst_impl->buffer(), dst_impl->buffer()},
+    ctx_impl->submitCompute(op, rt, {src_impl->buffer(), dst_impl->buffer()},
                             (result.numel() + 255) / 256, 1, 1, &params, sizeof(params));
     return result;
 }
@@ -227,8 +240,12 @@ void ClampImpl<Device::VULKAN>::execute(Tensor& a, float min, float max) {
 }
 
 Tensor AbsImpl<Device::VULKAN>::execute(const Tensor& a) {
-    Tensor result = a.clone();
-    auto src_impl = std::dynamic_pointer_cast<VKTensor>(a.get_impl());
+    // abs 收 AllTypes 且不改 dtype（不像 sin 那样把整型提到浮点），所以没有提升
+    // 这一步：源直接取原张量（视图先物化），一次 src -> dst。
+    Tensor storage;
+    const Tensor& src = vulkan_detail::linear_source(a, storage);
+    Tensor result(a.shape(), a.dtype(), Device::VULKAN);
+    auto src_impl = std::dynamic_pointer_cast<VKTensor>(src.get_impl());
     auto dst_impl = std::dynamic_pointer_cast<VKTensor>(result.get_impl());
     if (!src_impl || !dst_impl)
         throw std::runtime_error("vulkan Abs: expected VKTensors");

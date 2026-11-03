@@ -29,7 +29,6 @@ Tensor MatMulImpl<Device::VULKAN>::execute(const Tensor& a, const Tensor& b) {
         batched ? std::vector<int64_t>{batch, rows, cols}
                 : std::vector<int64_t>{rows, cols};
     const DataType res_type = compute_type(a.dtype(), b.dtype());
-    constexpr int TILE_SZ   = 16;
 
     Tensor dst(newshape, res_type, Device::VULKAN);
     const Tensor A = a.dtype() == res_type ? a : ops::Typecast(a, res_type);
@@ -43,12 +42,20 @@ Tensor MatMulImpl<Device::VULKAN>::execute(const Tensor& a, const Tensor& b) {
     auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(A_impl->context());
     if (!ctx_impl) throw std::runtime_error("vulkan MatMul: missing VulkanContext");
 
+    // 与 shader/matmul/*.comp 的 BM/BN 一致：标量内核每个 workgroup 产出 64x64
+    // 个输出；f16/bf16 走 cooperative matrix 时是 128x128（16 个 subgroup，tx/ty
+    // 一起翻倍换取搬运量减半）。两条路径的 push constant 与绑定完全相同，只有网格
+    // 不同。
+    const bool coopmat = ctx_impl->matmul_uses_cooperative_matrix(res_type);
+    const int  tile_m  = coopmat ? 128 : 64;
+    const int  tile_n  = coopmat ? 128 : 64;
+
     MatmulParams params{.batch = static_cast<uint32_t>(batch),
                         .N     = static_cast<uint32_t>(cols),
                         .K     = static_cast<uint32_t>(common),
                         .M     = static_cast<uint32_t>(rows)};
-    const uint32_t gx = static_cast<uint32_t>((cols + TILE_SZ - 1) / TILE_SZ);
-    const uint32_t gy = static_cast<uint32_t>((rows + TILE_SZ - 1) / TILE_SZ);
+    const uint32_t gx = static_cast<uint32_t>((cols + tile_n - 1) / tile_n);
+    const uint32_t gy = static_cast<uint32_t>((rows + tile_m - 1) / tile_m);
     const uint32_t gz = static_cast<uint32_t>(batch);
     ctx_impl->submitCompute(OpType::Matmul, res_type,
                             {A_impl->buffer(), B_impl->buffer(), Dst_impl->buffer()}, gx, gy,

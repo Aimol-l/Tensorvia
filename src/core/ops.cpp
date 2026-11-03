@@ -1065,6 +1065,14 @@ Tensor LayerNorm(const Tensor& a, const Tensor& weight, const Tensor& bias, int 
                                              axis, eps);
         }
 #endif
+#if defined(BACKEND_VULKAN)
+        // Vulkan 的融合内核只覆盖 FLOAT32（流水线按 dtype 注册），其余 dtype
+        // 仍走组合式路径。
+        if (a.device() == Device::VULKAN && a.dtype() == DataType::FLOAT32) {
+            return execute_on<LayerNormImpl>(a.device_id(), "layer_norm", a, weight, bias,
+                                             axis, eps);
+        }
+#endif
         return layer_norm_composed(a, weight, bias, outer, static_cast<int64_t>(norm_size),
                                    eps, res_type);
     }
@@ -1095,6 +1103,11 @@ Tensor RmsNorm(const Tensor& a, const Tensor& weight, int axis, float eps) {
         for (int i = 0; i < axis; ++i) outer *= a_shape[i];
 #if defined(BACKEND_CUDA)
         if (a.device() == Device::CUDA) {
+            return execute_on<RmsNormImpl>(a.device_id(), "rms_norm", a, weight, axis, eps);
+        }
+#endif
+#if defined(BACKEND_VULKAN)
+        if (a.device() == Device::VULKAN && a.dtype() == DataType::FLOAT32) {
             return execute_on<RmsNormImpl>(a.device_id(), "rms_norm", a, weight, axis, eps);
         }
 #endif

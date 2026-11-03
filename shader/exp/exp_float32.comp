@@ -24,13 +24,13 @@ layout(std430, binding = 1) buffer InputB {
 // 溢出为 inf，88 与 88.7 之间是另一个后端差异。tests/numerics.cpp 断言
 // `exp(-100.0f)` **恰好等于 0.0**（容差 0），这一支就是为它写的。
 //
-// 绑定 0 与 1 在 C++ 侧指向同一个缓冲区（ExpImpl 的原地/非原地两条路径都传
-// {buf, buf}），所以读 b 写 b 是对的。
+// 读绑定 0、写绑定 1：原地路径传 {buf, buf}（两个绑定别名同一缓冲区），非原地
+// 路径传两个不同的 buffer。只读 a、只写 b，两条路径都是对的。
 void main() {
     uint idx = gl_GlobalInvocationID.x;
     if (int64_t(idx) >= params.numel) return;
 
-    float x = b.data[idx];
+    float x = a.data[idx];
     if (x != x) { b.data[idx] = x; return; }                        // NaN 传播
     if (x > 88.0)  { b.data[idx] = uintBitsToFloat(0x7F800000u); return; }  // +inf
     if (x < -87.0) { b.data[idx] = 0.0; return; }                   // 下溢归零

@@ -1,5 +1,6 @@
 #version 460
 #extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_float64 : require
 
 
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
@@ -9,6 +10,10 @@ layout(push_constant) uniform Params {
     int outer_dim; // 输出总数（= outer*inner），派发边界
     int inner_dim;
     int numel;     // 输入的真实元素数；两趟归约的末段按它截断
+    // 下面两个字段不是每个归约都用：它们让同一个着色器兼作 block 协作模式。
+    // 布局必须与 C++ 的 ReduceVecParams 一致（见 vulkan_common.hpp）。
+    int mean_n;    // 0 = 用 axis_dim；全归约趟 2 传真实元素数
+    int block_mode; // 0 = 每线程一个输出（原路径）；1 = 每 workgroup 一个输出
 } params;
 
 
@@ -23,7 +28,44 @@ layout(std430, binding = 1) buffer OutputB {
 // 定义循环展开因子
 const int UNROLL = 4;
 
+// 累加器是 double：CPU 参考（reduce_acc_t）对浮点一律用 double 连乘，而 float32
+// 连乘 1M 个元素的舍入偏差能到千分点，且偏差量随归约树的形状变化——同一份输入在
+// "逐线程串行"和"block 树"下会差近 1%。用 double 累加后结果不再依赖并行划分方式，
+// 只剩输出处一次舍入。与 CUDA 的 prod_uses_wide_acc 是同一条决策。
+shared double red[256];
+
 void main() {
+    if (params.block_mode != 0) {
+        // 一个 workgroup 负责一个输出：线程沿归约轴分摊，共享内存树形归约。
+        // 逐线程一个输出的路径在输出很少时（尤其是全归约只有 1 个输出）只能
+        // 用上极少数线程，这里把它换成整块并行。
+        const uint wg  = gl_WorkGroupID.x;
+        const uint tid = gl_LocalInvocationID.x;
+        const int outer_idx = int(wg) / params.inner_dim;
+        const int inner_idx = int(wg) % params.inner_dim;
+        const int64_t base = int64_t(outer_idx) * int64_t(params.inner_dim) *
+                                 int64_t(params.axis_dim) +
+                             int64_t(inner_idx);
+        int rem = params.numel - int(base);
+        int limit = params.axis_dim;
+        if (rem < limit) limit = rem;
+
+        double acc = 1.0;
+        for (int i = int(tid); i < limit; i += 256) {
+            acc = acc * double(src.data[int(base) + i * params.inner_dim]);
+        }
+        red[tid] = acc;
+        barrier();
+        for (int s = 128; s > 0; s >>= 1) {
+            if (int(tid) < s) red[tid] = red[tid] * red[tid + uint(s)];
+            barrier();
+        }
+        if (tid == 0u) {
+            dst.data[wg] = float(red[0]);
+        }
+        return;
+    }
+
     uint idx = gl_GlobalInvocationID.x;
     if (int64_t(idx) >= params.outer_dim) return;
 
@@ -39,21 +81,21 @@ void main() {
     int limit = params.axis_dim;
     if (rem < limit) limit = rem;
 
-    // 空乘积为 1；整型在 int64 里累加（与 sum 家族的 reduction_type 一致）。
-    float acc = float(1.0);
+    // 空乘积为 1；与 block 路径同样用 double 累加，结果与划分方式无关。
+    double acc = 1.0;
     // --- 主循环 (4-way 展开) ---
     uint i = 0;
     for(; i + (UNROLL - 1) < limit; i += UNROLL) {
-        float prod_v = float(src.data[base_offset + i * params.inner_dim])
-        * float(src.data[base_offset + (i + 1)* params.inner_dim])
-        * float(src.data[base_offset + (i + 2)* params.inner_dim])
-        * float(src.data[base_offset + (i + 3)* params.inner_dim]);
+        double prod_v = double(src.data[base_offset + i * params.inner_dim])
+        * double(src.data[base_offset + (i + 1)* params.inner_dim])
+        * double(src.data[base_offset + (i + 2)* params.inner_dim])
+        * double(src.data[base_offset + (i + 3)* params.inner_dim]);
         acc *= prod_v;
     }
 
     for(; i < limit; ++i) {
-        acc *= float(src.data[base_offset + i * params.inner_dim]);
+        acc *= double(src.data[base_offset + i * params.inner_dim]);
     }
 
-    dst.data[idx] = acc;
+    dst.data[idx] = float(acc);
 }

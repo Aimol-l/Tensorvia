@@ -52,6 +52,21 @@ const std::vector<const char*>& required_device_extensions() {
     return extensions;
 }
 
+// 可选扩展：设备有就启用，没有也不影响任何现有内核。不能放进上面那个列表——
+// 那里是硬性过滤器，缺一项设备在探测阶段就会被排除掉。
+//
+// 现在库内还没有使用它的内核；探测结果的作用是把"这台设备能不能用 coopmat"
+// 变成可查询的事实，并让设备创建时把扩展和特性一并打开，后续的 f16/bf16/i8
+// 矩阵乘不必再动设备创建。
+constexpr const char* kCooperativeMatrixExtension = "VK_KHR_cooperative_matrix";
+
+bool has_device_extension(vk::PhysicalDevice device, const char* name) {
+    for (const auto& prop : device.enumerateDeviceExtensionProperties()) {
+        if (std::strcmp(name, prop.extensionName) == 0) return true;
+    }
+    return false;
+}
+
 uint32_t find_best_compute_family(std::vector<vk::QueueFamilyProperties>&& queue_families) {
     for (uint32_t i = 0; i < queue_families.size(); i++) {
         const auto& family = queue_families[i];
@@ -82,16 +97,8 @@ bool is_suitable_physical_device(vk::PhysicalDevice device) {
         return false;
     }
     // 缺少必需扩展的设备无法打开，把它计入只会把失败从探测阶段推迟到首次分配。
-    const auto available = device.enumerateDeviceExtensionProperties();
     for (const char* required : required_device_extensions()) {
-        bool found = false;
-        for (const auto& prop : available) {
-            if (std::strcmp(required, prop.extensionName) == 0) {
-                found = true;
-                break;
-            }
-        }
-        if (!found) return false;
+        if (!has_device_extension(device, required)) return false;
     }
     return true;
 }
@@ -202,43 +209,79 @@ void VulkanContext::registerOp(OpType ops, DataType dtype, int tensor_count, int
 void VulkanContext::registerOp(OpType ops, std::vector<DataType>& dtypes,
                                int tensor_count, int params_size) {
     std::string ori_op = op_to_string(ops);
-    for (auto& type : dtypes) {
-        const std::string key = make_pipeline_key(ops, type);
-        // 视图直接指向编译进产物的静态数组：不拷贝。setCode 收的是
-        // ArrayProxyNoTemporaries，所以代理得先落成一个具名对象。
-        const auto spv = vkspv::get_spv_code(key);
-        const vk::ArrayProxyNoTemporaries<const std::uint32_t> code(
-            static_cast<std::uint32_t>(spv.words), spv.data);
-        vk::ShaderModuleCreateInfo createInfo;
-        createInfo.setCode(code);
 
-        vk::UniqueShaderModule shaderModule;
-        try {
-            shaderModule =
-                vk::UniqueShaderModule(m_device->createShaderModule(createInfo), *m_device);
-        } catch (const std::exception& e) {
-            std::cerr << e.what() << '\n';
-            throw;
+    // MatMul 的 f16/bf16 有 cooperative matrix（tensor core）版本：流水线键与
+    // 内核几何都不变（64x64 tile、3 个 buffer、同样的 push constant），只是换一份
+    // SPIR-V，所以 matmul.cpp 不需要知道走了哪条。设备不具备条件、或者管线建不出来
+    // 时回落到标量内核——结果相同，只是慢。
+    auto coopmat_key = [this](OpType op, DataType type) -> std::string {
+        if (op != OpType::Matmul) return {};
+        if (type == DataType::FLOAT16 && m_matmul_coopmat_ready_f16) {
+            return "matmul_coopmat_float16";
         }
+        if (type == DataType::BFLOAT16 && m_matmul_coopmat_ready_bf16) {
+            return "matmul_coopmat_bfloat16";
+        }
+        return {};
+    };
+    auto set_active = [this](DataType type, bool active) {
+        if (type == DataType::FLOAT16) m_matmul_coopmat_active_f16 = active;
+        if (type == DataType::BFLOAT16) m_matmul_coopmat_active_bf16 = active;
+    };
 
-        vk::PipelineShaderStageCreateInfo stageInfo;
-        stageInfo.setStage(vk::ShaderStageFlagBits::eCompute);
-        stageInfo.setModule(*shaderModule);
-        stageInfo.setPName("main");
-
-        std::string type_op = std::format("{}_{}", ori_op, dtype_to_string(type));
+    for (auto& type : dtypes) {
+        const std::string type_op = std::format("{}_{}", ori_op, dtype_to_string(type));
         this->createDescriptorSetLayout(ori_op, tensor_count, params_size);
         this->createPipelineLayout(type_op, ori_op, tensor_count, params_size);
 
-        vk::ComputePipelineCreateInfo pipelineInfo{};
-        pipelineInfo.stage  = stageInfo;
-        pipelineInfo.layout = *this->m_pipeline_layouts[type_op];
-        auto result = this->m_device->createComputePipeline(nullptr, pipelineInfo);
-        if (result.result != vk::Result::eSuccess) {
-            throw std::runtime_error("Failed to create compute pipeline!");
+        // 只有 MatMul 会动 active 标志：其它算子也会以 FLOAT16/BFLOAT16 注册一轮，
+        // 让它们去写会把 MatMul 的选择冲掉。
+        const std::string coop_key = coopmat_key(ops, type);
+        if (!coop_key.empty()) {
+            try {
+                this->createComputePipeline(coop_key, type_op);
+                set_active(type, true);
+                continue;
+            } catch (const std::exception& e) {
+                std::cerr << "cooperative matrix kernel unavailable for " << type_op
+                          << ", using the scalar one: " << e.what() << '\n';
+            }
         }
-        this->m_pipelines[type_op] = vk::UniquePipeline(result.value, *m_device);
+        this->createComputePipeline(make_pipeline_key(ops, type), type_op);
+        if (ops == OpType::Matmul) set_active(type, false);
     }
+}
+
+void VulkanContext::createComputePipeline(const std::string& key, const std::string& type_op) {
+    // 视图直接指向编译进产物的静态数组：不拷贝。setCode 收的是
+    // ArrayProxyNoTemporaries，所以代理得先落成一个具名对象。
+    const auto spv = vkspv::get_spv_code(key);
+    const vk::ArrayProxyNoTemporaries<const std::uint32_t> code(
+        static_cast<std::uint32_t>(spv.words), spv.data);
+    vk::ShaderModuleCreateInfo createInfo;
+    createInfo.setCode(code);
+
+    vk::UniqueShaderModule shaderModule;
+    try {
+        shaderModule = vk::UniqueShaderModule(m_device->createShaderModule(createInfo), *m_device);
+    } catch (const std::exception& e) {
+        std::cerr << e.what() << '\n';
+        throw;
+    }
+
+    vk::PipelineShaderStageCreateInfo stageInfo;
+    stageInfo.setStage(vk::ShaderStageFlagBits::eCompute);
+    stageInfo.setModule(*shaderModule);
+    stageInfo.setPName("main");
+
+    vk::ComputePipelineCreateInfo pipelineInfo{};
+    pipelineInfo.stage  = stageInfo;
+    pipelineInfo.layout = *this->m_pipeline_layouts[type_op];
+    auto result = this->m_device->createComputePipeline(nullptr, pipelineInfo);
+    if (result.result != vk::Result::eSuccess) {
+        throw std::runtime_error("Failed to create compute pipeline!");
+    }
+    this->m_pipelines[type_op] = vk::UniquePipeline(result.value, *m_device);
 }
 
 void VulkanContext::registerPipelines() {
@@ -273,7 +316,7 @@ void VulkanContext::registerPipelines() {
     registerOp(OpType::Log, FloatTypes, 2, sizeof(ValueParams<float>));
     registerOp(OpType::Clamp, AllTypes, 2, sizeof(ClampParams));
 
-    registerOp(OpType::Relu, AllTypes, 1, sizeof(int64_t));
+    registerOp(OpType::Relu, AllTypes, 2, sizeof(int64_t));
     registerOp(OpType::Silu, FloatTypes, 2, sizeof(int64_t));
     registerOp(OpType::Tanh, FloatTypes, 2, sizeof(int64_t));
     registerOp(OpType::Sigmoid, FloatTypes, 2, sizeof(int64_t));
@@ -323,6 +366,14 @@ void VulkanContext::registerPipelines() {
 
     // input / weight / bias / output。四个 dtype：卷积只对浮点定义（与 PyTorch 一致）。
     registerOp(OpType::Conv2d, FloatTypes, 4, sizeof(Conv2dParams));
+
+    // 一种源 dtype 一条流水线；目标 dtype 由 push constant 选择写哪个别名绑定
+    // （BOOL 的源以 INT8 流水线运行，值已规范化为 0/1）。
+    registerOp(OpType::Typecast, AllTypes, kTypecastBindings, sizeof(TypecastParams));
+
+    // 融合归一化只对 FLOAT32 注册；其余 dtype 在 ops.cpp 里仍走组合式路径。
+    registerOp(OpType::LayerNorm, DataType::FLOAT32, 4, sizeof(NormParams));
+    registerOp(OpType::RmsNorm, DataType::FLOAT32, 3, sizeof(NormParams));
 }
 
 void VulkanContext::createDescriptorSetLayout(std::string ori_op, int tensor_count,
@@ -417,21 +468,84 @@ bool VulkanContext::checkLayerSupport() {
 }
 
 bool VulkanContext::checkExtensionSupport() {
-    auto availableDeviceExten = m_phydevice.enumerateDeviceExtensionProperties();
     for (const char* extName : required_device_extensions()) {
-        bool found = false;
-        for (const auto& prop : availableDeviceExten) {
-            if (strcmp(extName, prop.extensionName) == 0) {
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
+        if (!has_device_extension(m_phydevice, extName)) {
             std::println("Required extension {} not available!", extName);
             return false;
         }
     }
     return true;
+}
+
+// VK_KHR_cooperative_matrix 的能力探测。三个条件都满足才算可用：扩展存在、
+// cooperativeMatrix 特性位为真、并且至少报告一种矩阵配置。只有全部满足时才在
+// createLogicalDevice 里启用——半支持的状态打开扩展只会在管线创建时失败。
+void VulkanContext::probeCooperativeMatrix() {
+    m_cooperative_matrix = false;
+    m_cooperative_matrix_configs.clear();
+    if (!has_device_extension(m_phydevice, kCooperativeMatrixExtension)) return;
+
+    vk::PhysicalDeviceCooperativeMatrixFeaturesKHR features{};
+    vk::PhysicalDeviceFeatures2 features2{};
+    features2.pNext = &features;
+    m_phydevice.getFeatures2(&features2);
+    if (!features.cooperativeMatrix) return;
+
+    // 属性查询是实例级入口，loader 不导出，必须经 vkGetInstanceProcAddr 取。
+    const auto get_properties =
+        reinterpret_cast<PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR>(
+            m_instance->getProcAddr("vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR"));
+    if (get_properties == nullptr) return;
+
+    const auto device = static_cast<VkPhysicalDevice>(m_phydevice);
+    uint32_t   count  = 0;
+    if (get_properties(device, &count, nullptr) != VK_SUCCESS || count == 0) return;
+    std::vector<VkCooperativeMatrixPropertiesKHR> configs(
+        count, VkCooperativeMatrixPropertiesKHR{
+                   VK_STRUCTURE_TYPE_COOPERATIVE_MATRIX_PROPERTIES_KHR});
+    if (get_properties(device, &count, configs.data()) != VK_SUCCESS) return;
+    configs.resize(count);
+
+    m_cooperative_matrix_configs = std::move(configs);
+    m_cooperative_matrix         = true;
+
+    // 内核的形状是写死的：每个 subgroup 做 16x16x16 的 f16/bf16 x f16/bf16 -> f32
+    // 乘加，16 个 subgroup 拼成一个 128x128 的 workgroup。所以只有 subgroup 大小
+    // 32、且设备报告了对应元素组合的这一种配置时才启用，否则留在标量内核上。
+    vk::PhysicalDeviceSubgroupProperties subgroup{};
+    vk::PhysicalDeviceProperties2        properties2{};
+    properties2.pNext = &subgroup;
+    m_phydevice.getProperties2(&properties2);
+    m_subgroup_size = subgroup.subgroupSize;
+
+    for (const auto& config : m_cooperative_matrix_configs) {
+        if (config.scope != VK_SCOPE_SUBGROUP_KHR) continue;
+        if (config.MSize != 16 || config.NSize != 16 || config.KSize != 16) continue;
+        if (config.CType != VK_COMPONENT_TYPE_FLOAT32_KHR ||
+            config.ResultType != VK_COMPONENT_TYPE_FLOAT32_KHR) {
+            continue;
+        }
+        if (config.AType == VK_COMPONENT_TYPE_FLOAT16_KHR &&
+            config.BType == VK_COMPONENT_TYPE_FLOAT16_KHR) {
+            m_matmul_coopmat_ready_f16 = true;
+        }
+        if (config.AType == VK_COMPONENT_TYPE_BFLOAT16_KHR &&
+            config.BType == VK_COMPONENT_TYPE_BFLOAT16_KHR) {
+            m_matmul_coopmat_ready_bf16 = true;
+        }
+    }
+    if (m_subgroup_size != 32) {
+        m_matmul_coopmat_ready_f16  = false;
+        m_matmul_coopmat_ready_bf16 = false;
+    }
+}
+
+bool VulkanContext::matmul_uses_cooperative_matrix(DataType dtype) const {
+    switch (dtype) {
+    case DataType::FLOAT16: return m_matmul_coopmat_active_f16;
+    case DataType::BFLOAT16: return m_matmul_coopmat_active_bf16;
+    default: return false;
+    }
 }
 
 void VulkanContext::setupDebugMessenger() {
@@ -493,6 +607,7 @@ void VulkanContext::choosePhysicalDevice(int device_index) {
     this->m_queuefamily = computefamily;
     const auto& wg = phydevice.getProperties().limits.maxComputeWorkGroupCount;
     m_max_workgroup_count = {wg[0], wg[1], wg[2]};
+    probeCooperativeMatrix();
 }
 
 void VulkanContext::createLogicalDevice() {
@@ -536,7 +651,18 @@ void VulkanContext::createLogicalDevice() {
     vk11Features.pNext = &vk12Features;
     vk12Features.pNext = nullptr;
 
-    const std::vector<const char*>& extensions = required_device_extensions();
+    // 可选扩展在探测通过时启用。打开一个暂时没有内核使用的扩展是有意的：它把
+    // "这台设备支持 coopmat" 从属性查询变成设备能力，后续内核直接用即可。
+    std::vector<const char*> extensions(required_device_extensions().begin(),
+                                        required_device_extensions().end());
+    vk::PhysicalDeviceCooperativeMatrixFeaturesKHR cooperativeMatrixFeatures{};
+    if (m_cooperative_matrix) {
+        extensions.push_back(kCooperativeMatrixExtension);
+        cooperativeMatrixFeatures.cooperativeMatrix = VK_TRUE;
+        cooperativeMatrixFeatures.pNext             = features2.pNext;
+        features2.pNext                             = &cooperativeMatrixFeatures;
+    }
+
     vk::DeviceCreateInfo createInfo{};
     createInfo.setQueueCreateInfos(queueCreateInfo)
         .setEnabledExtensionCount(static_cast<uint32_t>(extensions.size()))

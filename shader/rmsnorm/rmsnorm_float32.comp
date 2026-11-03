@@ -1,0 +1,44 @@
+#version 460
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+// 融合 RmsNorm：一个 workgroup 处理一行 [outer, n]。
+//
+// 与 LayerNorm 同一套结构，差别只有：不做去均值，统计量是 sum(x^2)/n。
+// 三次全局访问里前两次读同一行，第二次通常由 L2 服务。
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform Params {
+    int   norm_size;
+    int   outer;
+    float eps;
+} p;
+
+layout(std430, binding = 0) readonly buffer X { float data[]; } x;
+layout(std430, binding = 1) readonly buffer W { float data[]; } w;
+layout(std430, binding = 2) writeonly buffer Y { float data[]; } y;
+
+shared float red[256];
+
+void main() {
+    const uint tid = gl_LocalInvocationID.x;
+    const int n = p.norm_size;
+    const int64_t base = int64_t(gl_WorkGroupID.x) * int64_t(n);
+
+    float local = 0.0;
+    for (int i = int(tid); i < n; i += 256) {
+        const float v = x.data[int(base) + i];
+        local += v * v;
+    }
+    red[tid] = local;
+    barrier();
+    for (int s = 128; s > 0; s >>= 1) {
+        if (int(tid) < s) red[tid] += red[tid + uint(s)];
+        barrier();
+    }
+    const float inv = inversesqrt(red[0] / float(n) + p.eps);
+    barrier();
+
+    for (int i = int(tid); i < n; i += 256) {
+        y.data[int(base) + i] = x.data[int(base) + i] * inv * w.data[i];
+    }
+}

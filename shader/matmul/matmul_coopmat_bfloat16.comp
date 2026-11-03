@@ -1,0 +1,119 @@
+#version 460
+#extension GL_KHR_cooperative_matrix : require
+#extension GL_KHR_memory_scope_semantics : require
+#extension GL_EXT_bfloat16 : require
+#extension GL_EXT_shader_explicit_arithmetic_types : require
+
+
+// cooperative matrix 版矩阵乘（bf16 输入、f32 累加、bf16 输出），结构与
+// matmul_coopmat_float16.comp 完全相同——差别只有元素类型和 bf16 扩展。设计
+// 说明、边界处理和 glslang 的坑都写在那里，这里不再重复。
+//
+// 设备侧只要求 16x16x16 / bf16 x bf16 -> f32 这一种配置；本 GPU（RTX 40 系）
+// 的 bf16 配置恰好只有这一种。
+
+layout(local_size_x = 512) in;
+
+layout(push_constant) uniform Params {
+    uint batch;
+    uint N; // 列数
+    uint K; // 归约维
+    uint M; // 行数
+} params;
+
+layout(std430, binding = 0) buffer InputA {
+    bfloat16_t data[];
+} A; // [batch, M, K]
+
+layout(std430, binding = 1) buffer InputB {
+    bfloat16_t data[];
+} B; // [batch, K, N]
+
+layout(std430, binding = 2) buffer Output {
+    bfloat16_t data[];
+} C; // [batch, M, N]
+
+shared bfloat16_t As[128 * 16];
+shared bfloat16_t Bs[16 * 128];
+shared float      Cs[16 * 16 * 16]; // 每个 subgroup 一块转写区
+
+void main() {
+    const uint tid  = gl_LocalInvocationID.x; // 0..511
+    const uint sg   = tid >> 5;               // subgroup 0..15（subgroup 大小由宿主保证为 32）
+    const uint lane = tid & 31u;
+
+    const uint m0    = gl_WorkGroupID.y * 128u;
+    const uint n0    = gl_WorkGroupID.x * 128u;
+    const uint batch = gl_WorkGroupID.z;
+    const uint M = params.M, N = params.N, K = params.K;
+
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> acc0 =
+        coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> acc1 =
+        coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> acc2 =
+        coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> acc3 =
+        coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
+
+    coopmat<bfloat16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseA> mA =
+        coopmat<bfloat16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseA>(0.0);
+    coopmat<bfloat16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB> mB0 =
+        coopmat<bfloat16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB>(0.0);
+    coopmat<bfloat16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB> mB1 =
+        coopmat<bfloat16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB>(0.0);
+    coopmat<bfloat16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB> mB2 =
+        coopmat<bfloat16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB>(0.0);
+    coopmat<bfloat16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB> mB3 =
+        coopmat<bfloat16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB>(0.0);
+
+    const bfloat16_t zero16 = bfloat16_t(0.0);
+
+    for (uint k0 = 0u; k0 < K; k0 += 16u) {
+        // A 的 [128][16]：行主序，越界填 0。
+        for (uint i = tid; i < 2048u; i += 512u) {
+            const uint gm = m0 + (i >> 4);
+            const uint gk = k0 + (i & 15u);
+            As[i] = (gm < M && gk < K) ? A.data[(batch * M + gm) * K + gk] : zero16;
+        }
+        // B 的 [16][128]：行主序，越界填 0。
+        for (uint i = tid; i < 2048u; i += 512u) {
+            const uint gk = k0 + (i >> 7);
+            const uint gn = n0 + (i & 127u);
+            Bs[i] = (gk < K && gn < N) ? B.data[(batch * K + gk) * N + gn] : zero16;
+        }
+        barrier();
+
+        coopMatLoad(mA, As, (sg >> 1) * 256u, 16u, gl_CooperativeMatrixLayoutRowMajor);
+        coopMatLoad(mB0, Bs, (sg & 1u) * 64u, 128u, gl_CooperativeMatrixLayoutRowMajor);
+        coopMatLoad(mB1, Bs, (sg & 1u) * 64u + 16u, 128u, gl_CooperativeMatrixLayoutRowMajor);
+        coopMatLoad(mB2, Bs, (sg & 1u) * 64u + 32u, 128u, gl_CooperativeMatrixLayoutRowMajor);
+        coopMatLoad(mB3, Bs, (sg & 1u) * 64u + 48u, 128u, gl_CooperativeMatrixLayoutRowMajor);
+
+        acc0 = coopMatMulAdd(mA, mB0, acc0);
+        acc1 = coopMatMulAdd(mA, mB1, acc1);
+        acc2 = coopMatMulAdd(mA, mB2, acc2);
+        acc3 = coopMatMulAdd(mA, mB3, acc3);
+        barrier();
+    }
+
+    // f32 累加器 -> 共享内存 -> bf16 写出。每个 subgroup 独占 Cs 的 256 个 float。
+    const uint sbase = sg * 256u;
+#define TV_EMIT(ACC, J)                                                          \
+    coopMatStore(ACC, Cs, sbase, 16u, gl_CooperativeMatrixLayoutRowMajor);       \
+    barrier();                                                                   \
+    for (uint i = lane; i < 256u; i += 32u) {                                    \
+        const uint gm = m0 + (sg >> 1) * 16u + (i >> 4);                         \
+        const uint gn = n0 + (sg & 1u) * 64u + 16u * (J) + (i & 15u);            \
+        if (gm < M && gn < N) {                                                  \
+            float v = Cs[sbase + i];                                             \
+            C.data[(batch * M + gm) * N + gn] = bfloat16_t(v);                   \
+        }                                                                        \
+    }                                                                            \
+    barrier();
+    TV_EMIT(acc0, 0u)
+    TV_EMIT(acc1, 1u)
+    TV_EMIT(acc2, 2u)
+    TV_EMIT(acc3, 3u)
+#undef TV_EMIT
+}

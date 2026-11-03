@@ -1,5 +1,8 @@
 #include "test_support.hpp"
 
+#include <cstring>
+#include <format>
+
 // 设备生命周期、多设备寻址与 CUDA context/stream 用例。
 // 这些用例看的是后端自身，不只是张量 API。
 #if defined(BACKEND_CUDA)
@@ -55,6 +58,53 @@ TEST_F(DeviceOps, ElementwiseAndMatMul) {
     expect_close(host_values<float>(a / b), div_ref, "div");
     expect_close(host_values<float>(a * 2.0f), sca_ref, "mul-scalar");
     expect_close(host_values<float>(ops::MatMul(a, c)), mm_ref, "matmul");
+}
+
+TEST_F(DeviceOps, MatMulHalfPrecision) {
+    // 半精度 matmul：Vulkan 上启用 cooperative matrix 后这条路径会换成 tensor
+    // core 内核（口径见 VulkanCapabilities.CooperativeMatrixReflectsDeviceState），
+    // 其余后端是标量内核，两者必须给出相同结果。
+    //
+    // 取值都是 0.25 的倍数、P 和不超过 256，f16/bf16 与 f32 都能精确表示，所以
+    // 参考值只需按半精度的舍入误差放宽，不必给累加漂移留余量。形状覆盖三种
+    // 边界：M/N/K 都不整除 tile、整块对齐、以及带 batch 的 3-D。
+    auto check = [&](DataType dtype, std::int64_t batch, std::int64_t M, std::int64_t K,
+                     std::int64_t N) {
+        const std::int64_t elems_a = batch * M * K;
+        const std::int64_t elems_b = batch * K * N;
+        std::vector<float> av(elems_a), bv(elems_b);
+        for (std::int64_t i = 0; i < elems_a; ++i) av[i] = float((i * 7) % 5) * 0.5f;
+        for (std::int64_t i = 0; i < elems_b; ++i) bv[i] = float((i * 11) % 7) * 0.25f;
+
+        const Tensor a32(av, {batch, M, K});
+        const Tensor b32(bv, {batch, K, N});
+        // 参考值：f32 精确相乘，再按目标 dtype 舍入一次。
+        const Tensor ref32 = ops::MatMul(a32, b32);
+        const Tensor ref   = ops::Typecast(ref32, dtype);
+        const auto   want  = host_values<float>(ops::Typecast(ref, DataType::FLOAT32));
+
+        const Tensor a = moved_to(ops::Typecast(a32, dtype), dev);
+        const Tensor b = moved_to(ops::Typecast(b32, dtype), dev);
+        const Tensor c = ops::MatMul(a, b);
+        ASSERT_TRUE(c.device() == dev) << "result must stay on " << device_to_string(dev);
+        const auto got = host_values<float>(ops::Typecast(c, DataType::FLOAT32));
+
+        ASSERT_EQ(got.size(), want.size()) << "matmul " << dtype_to_string(dtype);
+        // 两三个 ulp 的余量：bfloat16 只有 8 位有效位，相对误差约 0.8%。
+        const double tol = dtype == DataType::FLOAT16 ? 4e-3 : 3e-2;
+        for (std::size_t i = 0; i < got.size(); ++i) {
+            const double scale = std::max(1.0, std::abs(double(want[i])));
+            EXPECT_NEAR(got[i], want[i], tol * scale)
+                << "matmul " << dtype_to_string(dtype) << " batch=" << batch << " M=" << M
+                << " K=" << K << " N=" << N << " at index " << i;
+        }
+    };
+
+    for (const DataType dtype : {DataType::FLOAT16, DataType::BFLOAT16}) {
+        check(dtype, 1, 70, 70, 70);   // 三个维度都留下半块 tile
+        check(dtype, 1, 128, 128, 128);  // 整块对齐
+        check(dtype, 2, 80, 48, 96);   // 批处理 + K 不整除 64
+    }
 }
 
 TEST_F(DeviceOps, UnaryMath) {
@@ -158,10 +208,11 @@ TEST_F(DeviceOps, FullReduceOnLargeTensors) {
         const float prod_ref = ops::Prod(b_cpu).item<float>();
         // 容差放到 5e-3：SYCL 的浮点归约累加器是 float32（reduction_acc_t
         // 只把窄整型与 16 位浮点加宽），1M 个元素连乘的 float32 偏差本就有一档，
-        // 两趟（1024 次/段）比单趟（1M 次）略差。CUDA 已把浮点 Prod 的累加器
-        // 对齐到 CPU 参考的 double（见 reduce.cu 的 prod_uses_wide_acc），
-        // 这条宽松容差现在只为 SYCL 保留。它仍能抓住结构性错误——范围算错、
-        // 漏掉末段、分母错都会给出 O(1) 的偏差。
+        // 两趟（1024 次/段）比单趟（1M 次）略差。CUDA 与 VULKAN 已把浮点 Prod
+        // 的累加器对齐到 CPU 参考的 double（见 reduce.cu 的 prod_uses_wide_acc
+        // 与 shader/prod/prodvec_float32.comp），这条宽松容差现在只为 SYCL
+        // 保留。它仍能抓住结构性错误——范围算错、漏掉末段、分母错都会给出
+        // O(1) 的偏差。
         EXPECT_NEAR(ops::Prod(b).item<float>(), prod_ref, 5e-3 * std::abs(prod_ref))
             << "prod full n=" << n << " on " << dev_name;
 
@@ -225,6 +276,50 @@ TEST_F(DeviceOps, ComparisonTypecastConcat) {
     expect_close(host_values<std::int8_t>(ops::Greater(a, 3.0f)), gt0_ref, "greater-scalar");
     expect_close(host_values<double>(ops::Typecast(a, DataType::FLOAT64)), cast_ref, "typecast");
     expect_close(host_values<float>(ops::Concat({a, b}, 0)), cat_ref, "concat");
+}
+
+// 9 种 dtype 两两转换（含同型）。参考值由 CPU 后端给出，比较用原始字节：取值
+// 都落在所有 dtype 都能精确表示的范围内，所以"逐位相同"是合理要求，也省掉了
+// 为 f16/bf16 写浮点比较。BOOLe 源单独给 0/1 序列，免得整列都是 1。
+TEST_F(DeviceOps, TypecastAllDtypePairs) {
+    constexpr DataType kTypes[] = {
+        DataType::BOOL,     DataType::INT8,     DataType::INT16,    DataType::INT32,
+        DataType::INT64,    DataType::FLOAT16,  DataType::BFLOAT16, DataType::FLOAT32,
+        DataType::FLOAT64};
+    // -1.75 用来看浮点 -> 整型的截断方向（向零），-3 覆盖负数。
+    const std::vector<double> numeric{-3.0, -1.75, 0.0, 0.5, 1.0, 2.0, 7.0, -1.0};
+    const std::vector<double> flags{0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0};
+
+    auto expect_bits = [](Tensor got, const Tensor& want, std::string_view what) {
+        ASSERT_EQ(got.dtype(), want.dtype()) << what;
+        ASSERT_EQ(got.numel(), want.numel()) << what;
+        got.to_host();
+        const size_t bytes = got.numel() * calc_dtype_size(got.dtype());
+        EXPECT_EQ(std::memcmp(got.data(), want.data(), bytes), 0)
+            << what << " differs from the CPU reference";
+    };
+
+    for (DataType src_type : kTypes) {
+        // 构造函数收的是非 const 左值引用，所以先落成一个具名对象。
+        std::vector<double> base_values = src_type == DataType::BOOL ? flags : numeric;
+        const Tensor base_cpu(base_values, std::vector<int64_t>{2, 4});
+        const Tensor src_cpu = ops::Typecast(base_cpu, src_type);
+        for (DataType dst_type : kTypes) {
+            const std::string what =
+                std::format("cast {}->{} on {}", dtype_to_string(src_type),
+                            dtype_to_string(dst_type), device_to_string(dev));
+            const Tensor want = ops::Typecast(src_cpu, dst_type);
+            Tensor got        = ops::Typecast(moved_to(src_cpu, dev), dst_type);
+            EXPECT_TRUE(got.device() == dev) << what;
+            expect_bits(got, want, what);
+
+            // 原地入口（to_type_）与返回新张量的入口共用内核，但换 buffer 的
+            // 路径不同：旧存储在提交在飞时就要退役。
+            Tensor in_place = moved_to(src_cpu, dev);
+            in_place.to_type_(dst_type);
+            expect_bits(in_place, want, what + " (in-place)");
+        }
+    }
 }
 
 TEST_F(DeviceOps, SliceAndTranspose) {
@@ -571,6 +666,75 @@ TEST(VulkanQueue, OneChannelPerThreadAndOpsStayCorrect) {
 
     // 设备级同步覆盖所有通道。
     EXPECT_NO_THROW(ops::synchronize());
+}
+#endif  // BACKEND_VULKAN
+
+
+// ---------- 0f''. Vulkan 可选能力：cooperative matrix 探测 ----------
+#if defined(BACKEND_VULKAN)
+TEST(VulkanCapabilities, CooperativeMatrixReflectsDeviceState) {
+    if (!backend_available(Device::VULKAN)) GTEST_SKIP() << "Vulkan is unavailable in this build";
+
+    Tensor probe = Tensor::Ones({4, 4}, DataType::FLOAT32, Device::VULKAN);
+    auto   ctx   = vulkan_context_of(probe);
+    ASSERT_NE(ctx, nullptr);
+
+    const auto device        = ctx->getPhysicalDevice();
+    bool       has_extension = false;
+    for (const auto& ext : device.enumerateDeviceExtensionProperties())
+        if (std::strcmp(ext.extensionName, "VK_KHR_cooperative_matrix") == 0) has_extension = true;
+
+    // 报告值只能比"设备有扩展"更严格：没有扩展却报支持，将来的内核会在创建
+    // 管线时失败；有扩展却漏报，则白白丢掉一条可选路径。
+    if (!has_extension) {
+        EXPECT_FALSE(ctx->supports_cooperative_matrix());
+        EXPECT_TRUE(ctx->cooperative_matrix_configs().empty());
+        return;
+    }
+
+    vk::PhysicalDeviceCooperativeMatrixFeaturesKHR features{};
+    vk::PhysicalDeviceFeatures2                  features2{};
+    features2.pNext = &features;
+    device.getFeatures2(&features2);
+    EXPECT_EQ(ctx->supports_cooperative_matrix(), static_cast<bool>(features.cooperativeMatrix));
+
+    if (!ctx->supports_cooperative_matrix()) return;
+    const auto& configs = ctx->cooperative_matrix_configs();
+    ASSERT_FALSE(configs.empty());
+    for (const auto& c : configs) {
+        EXPECT_GT(c.MSize, 0u) << "a reported configuration must have a positive M";
+        EXPECT_GT(c.NSize, 0u) << "a reported configuration must have a positive N";
+        EXPECT_GT(c.KSize, 0u) << "a reported configuration must have a positive K";
+        std::println("[tensorvia] coopmat M={} N={} K={} A={} B={} C={} R={}", c.MSize, c.NSize,
+                     c.KSize, static_cast<uint32_t>(c.AType), static_cast<uint32_t>(c.BType),
+                     static_cast<uint32_t>(c.CType), static_cast<uint32_t>(c.ResultType));
+    }
+
+    // MatMul 的半精度内核要求的正是 subgroup 32 + 16x16x16 + f32 累加。这些条件
+    // 都在时，管线应当真的换成了 coopmat 版本——回落是建管线失败时的安全网，
+    // 不是这里的预期结果。
+    vk::PhysicalDeviceSubgroupProperties subgroup{};
+    vk::PhysicalDeviceProperties2        props2{};
+    props2.pNext = &subgroup;
+    device.getProperties2(&props2);
+    if (subgroup.subgroupSize != 32) return;
+
+    bool f16 = false, bf16 = false;
+    for (const auto& c : configs) {
+        if (c.scope != VK_SCOPE_SUBGROUP_KHR || c.MSize != 16 || c.NSize != 16 || c.KSize != 16)
+            continue;
+        if (c.CType != VK_COMPONENT_TYPE_FLOAT32_KHR ||
+            c.ResultType != VK_COMPONENT_TYPE_FLOAT32_KHR)
+            continue;
+        f16 |= c.AType == VK_COMPONENT_TYPE_FLOAT16_KHR && c.BType == VK_COMPONENT_TYPE_FLOAT16_KHR;
+        bf16 |=
+            c.AType == VK_COMPONENT_TYPE_BFLOAT16_KHR && c.BType == VK_COMPONENT_TYPE_BFLOAT16_KHR;
+    }
+    if (f16) EXPECT_TRUE(ctx->matmul_uses_cooperative_matrix(DataType::FLOAT16));
+    if (bf16) EXPECT_TRUE(ctx->matmul_uses_cooperative_matrix(DataType::BFLOAT16));
+    std::println("[tensorvia] matmul coopmat in use: f16={} bf16={}",
+                 ctx->matmul_uses_cooperative_matrix(DataType::FLOAT16),
+                 ctx->matmul_uses_cooperative_matrix(DataType::BFLOAT16));
 }
 #endif  // BACKEND_VULKAN
 

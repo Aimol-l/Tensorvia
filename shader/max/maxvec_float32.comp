@@ -8,6 +8,10 @@ layout(push_constant) uniform Params {
     int outer_dim; // 输出总数（= outer*inner），派发边界
     int inner_dim;
     int numel;     // 输入的真实元素数；两趟归约的末段按它截断
+    // 下面两个字段不是每个归约都用：它们让同一个着色器兼作 block 协作模式。
+    // 布局必须与 C++ 的 ReduceVecParams 一致（见 vulkan_common.hpp）。
+    int mean_n;    // 0 = 用 axis_dim；全归约趟 2 传真实元素数
+    int block_mode; // 0 = 每线程一个输出（原路径）；1 = 每 workgroup 一个输出
 } params;
 
 
@@ -25,7 +29,41 @@ float max_c(float a, float b) {
     return b > a ? b : a;
 }
 
+shared float red[256];
+
 void main() {
+    if (params.block_mode != 0) {
+        // 一个 workgroup 负责一个输出：线程沿归约轴分摊，共享内存树形归约。
+        // 逐线程一个输出的路径在输出很少时（尤其是全归约只有 1 个输出）只能
+        // 用上极少数线程，这里把它换成整块并行。
+        const uint wg  = gl_WorkGroupID.x;
+        const uint tid = gl_LocalInvocationID.x;
+        const int outer_idx = int(wg) / params.inner_dim;
+        const int inner_idx = int(wg) % params.inner_dim;
+        const int64_t base = int64_t(outer_idx) * int64_t(params.inner_dim) *
+                                 int64_t(params.axis_dim) +
+                             int64_t(inner_idx);
+        int rem = params.numel - int(base);
+        int limit = params.axis_dim;
+        if (rem < limit) limit = rem;
+
+        float acc = uintBitsToFloat(0xFF800000u);
+        for (int i = int(tid); i < limit; i += 256) {
+            acc = max_c(acc, src.data[int(base) + i * params.inner_dim]);
+        }
+        red[tid] = acc;
+        barrier();
+        for (int s = 128; s > 0; s >>= 1) {
+            if (int(tid) < s) red[tid] = max_c(red[tid], red[tid + uint(s)]);
+            barrier();
+        }
+        if (tid == 0u) {
+            float result = red[0];
+            dst.data[wg] = result;
+        }
+        return;
+    }
+
     uint idx = gl_GlobalInvocationID.x;
     if (int64_t(idx) >= params.outer_dim) return;
 

@@ -24,6 +24,12 @@ inline void check_vk(const std::shared_ptr<TensorImpl>& impl, const char* what) 
 constexpr int32_t kFlatReduceBlocks   = 1024;
 constexpr int64_t kFlatReduceMinNumel = 1 << 18;
 
+// block 协作模式（一个 workgroup 一个输出）的门槛。轴太短时逐线程一个输出更
+// 划算：一个 workgroup 只有 256 个工作项，摊到 512 个元素以下就只剩归约开销。
+constexpr int32_t kBlockReduceMinAxis = 512;
+// 全归约只有 1 个输出：一趟只能开 1 个 workgroup，所以超过这个规模就拆两趟。
+constexpr int32_t kBlockReduceMinFull = 1 << 16;
+
 Tensor axis_reduce_vk(const Tensor& a, int axis, DataType out_type, OpType op,
                       const char* what) {
     auto src_impl = std::dynamic_pointer_cast<VKTensor>(a.get_impl());
@@ -50,6 +56,58 @@ Tensor axis_reduce_vk(const Tensor& a, int axis, DataType out_type, OpType op,
     Tensor result(new_shape, out_type, Device::VULKAN);
     auto result_impl = std::dynamic_pointer_cast<VKTensor>(result.get_impl());
     check_vk(result_impl, what);
+
+    const int32_t outputs = outer_dim * inner_dim;
+    // 只有 FLOAT32 的归约着色器实现了 block 协作模式（shader/*_float32.comp）。
+    const bool block = a.dtype() == DataType::FLOAT32 && axis_dim >= kBlockReduceMinAxis;
+
+    if (block && outputs == 1 && axis_dim >= kBlockReduceMinFull) {
+        // 全归约两趟：趟 1 用 B 个 workgroup 各摊一段连续元素，趟 2 用一个
+        // workgroup 折叠 B 个部分和。
+        const int32_t chunk =
+            static_cast<int32_t>((static_cast<int64_t>(axis_dim) + kFlatReduceBlocks - 1) /
+                                 kFlatReduceBlocks);
+        Tensor partial({kFlatReduceBlocks}, out_type, Device::VULKAN);
+        auto partial_impl = std::dynamic_pointer_cast<VKTensor>(partial.get_impl());
+        check_vk(partial_impl, what);
+
+        // 趟 1：Mean 先算纯部分和，分母留到趟 2（末段短于 chunk，先除会少算）。
+        const OpType pass1_op = (op == OpType::Mean) ? OpType::SumVec : op;
+        const ReduceVecParams first{.axis_dim  = chunk,
+                                    .outer_dim = kFlatReduceBlocks,
+                                    .inner_dim = 1,
+                                    .numel     = axis_dim,
+                                    .mean_n    = 0,
+                                    .block_mode = 1};
+        ctx_impl->submitCompute(pass1_op, a.dtype(),
+                                {src_impl->buffer(), partial_impl->buffer()},
+                                static_cast<uint32_t>(kFlatReduceBlocks), 1, 1, &first,
+                                sizeof(ReduceVecParams));
+
+        const ReduceVecParams second{.axis_dim  = kFlatReduceBlocks,
+                                     .outer_dim = 1,
+                                     .inner_dim = 1,
+                                     .numel     = kFlatReduceBlocks,
+                                     .mean_n    = (op == OpType::Mean) ? axis_dim : 0,
+                                     .block_mode = 1};
+        ctx_impl->submitCompute(op, out_type, {partial_impl->buffer(), result_impl->buffer()},
+                                1, 1, 1, &second, sizeof(ReduceVecParams));
+        return result;
+    }
+
+    if (block) {
+        // 每行一个 workgroup，线程沿归约轴分摊：输出数就是 workgroup 数。
+        const ReduceVecParams params{.axis_dim  = axis_dim,
+                                     .outer_dim = outputs,
+                                     .inner_dim = inner_dim,
+                                     .numel     = static_cast<int32_t>(a.numel()),
+                                     .mean_n    = (op == OpType::Mean) ? axis_dim : 0,
+                                     .block_mode = 1};
+        ctx_impl->submitCompute(op, a.dtype(), {src_impl->buffer(), result_impl->buffer()},
+                                static_cast<uint32_t>(outputs), 1, 1, &params,
+                                sizeof(ReduceVecParams));
+        return result;
+    }
 
     if (outer_dim * inner_dim == 1 && axis_dim >= kFlatReduceMinNumel) {
         const int32_t chunk = static_cast<int32_t>((static_cast<int64_t>(axis_dim) +

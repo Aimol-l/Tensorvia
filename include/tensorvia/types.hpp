@@ -144,7 +144,12 @@ enum class OpType {
     All, Any, Nonzero, Argmax, Argmin,
     // 条件选择、索引与累积和。也只有 Vulkan 需要把它们写进流水线键：其余后端
     // 直接跑实现，不查表。
-    Where, IndexSelect, Gather, Cumsum, Conv2d
+    Where, IndexSelect, Gather, Cumsum, Conv2d,
+    // 类型转换。目标 dtype 是运行的参数而不是流水线键，所以一种源 dtype 一条
+    // 流水线（`typecast_<src>`），目标由 push constant 选择绑定。
+    Typecast,
+    // 融合归一化：一个 workgroup 一行，只对 FLOAT32 注册（其余 dtype 走组合式）。
+    LayerNorm, RmsNorm
 };
 
 enum class Device { CPU, CUDA, SYCL, VULKAN };
@@ -291,6 +296,9 @@ inline const char* op_to_string(OpType op) {
         case OpType::Gather:        return "gather";
         case OpType::Cumsum:        return "cumsum";
         case OpType::Conv2d:        return "conv2d";
+        case OpType::Typecast:      return "typecast";
+        case OpType::LayerNorm:     return "layernorm";
+        case OpType::RmsNorm:       return "rmsnorm";
         default: throw std::invalid_argument("Unknown OpType");
     }
 }

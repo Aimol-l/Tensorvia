@@ -20,19 +20,29 @@ void ReluImpl<Device::VULKAN>::execute(Tensor& a) {
     auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
     if (!ctx_impl) throw std::runtime_error("vulkan Relu: missing VulkanContext");
     int64_t numel = a.numel();
-    ctx_impl->submitCompute(OpType::Relu, a.dtype(), {src_impl->buffer()},
+    // 原地：读/写两个绑定指向同一块 buffer。
+    ctx_impl->submitCompute(OpType::Relu, a.dtype(),
+                            {src_impl->buffer(), src_impl->buffer()},
                             (a.numel() + 255) / 256, 1, 1, &numel, sizeof(int64_t));
 }
 
 Tensor ReluImpl<Device::VULKAN>::execute(const Tensor& a) {
-    Tensor result     = a.clone();
-    auto src_impl     = std::dynamic_pointer_cast<VKTensor>(result.get_impl());
-    if (!src_impl) throw std::runtime_error("vulkan Relu: expected a VKTensor");
-    auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(src_impl->context());
+    // 直接写新分配的 dst：clone() 再多读多写一整遍张量，而着色器是 src/dst 双
+    // 绑定，本来就支持两块 buffer。
+    Tensor storage;
+    const Tensor& src = vulkan_detail::linear_source(a, storage);
+    Tensor result(a.shape(), a.dtype(), Device::VULKAN);
+
+    auto src_impl = std::dynamic_pointer_cast<VKTensor>(src.get_impl());
+    auto dst_impl = std::dynamic_pointer_cast<VKTensor>(result.get_impl());
+    if (!src_impl || !dst_impl)
+        throw std::runtime_error("vulkan Relu: expected VKTensors");
+    auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(dst_impl->context());
     if (!ctx_impl) throw std::runtime_error("vulkan Relu: missing VulkanContext");
 
     int64_t numel = result.numel();
-    ctx_impl->submitCompute(OpType::Relu, result.dtype(), {src_impl->buffer()},
+    ctx_impl->submitCompute(OpType::Relu, result.dtype(),
+                            {src_impl->buffer(), dst_impl->buffer()},
                             (result.numel() + 255) / 256, 1, 1, &numel, sizeof(int64_t));
     return result;
 }
@@ -55,16 +65,20 @@ Tensor SiluImpl<Device::VULKAN>::execute(const Tensor& a) {
     DataType rt = a.dtype();
     if (is_integral_dtype(rt)) rt = DataType::FLOAT32;
     else if (rt == DataType::INT64) rt = DataType::FLOAT64;
-    Tensor result = rt == a.dtype() ? a.clone() : a.to_type(rt);
 
+    Tensor storage;
+    const Tensor* src = vulkan_detail::unary_source(a, rt, storage);
+    Tensor result(a.shape(), rt, Device::VULKAN);
+
+    auto src_impl = std::dynamic_pointer_cast<VKTensor>(src->get_impl());
     auto dst_impl = std::dynamic_pointer_cast<VKTensor>(result.get_impl());
-    if (!dst_impl) throw std::runtime_error("vulkan Silu: expected a VKTensor");
+    if (!src_impl || !dst_impl)
+        throw std::runtime_error("vulkan Silu: expected VKTensors");
     auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(dst_impl->context());
     if (!ctx_impl) throw std::runtime_error("vulkan Silu: missing VulkanContext");
 
     int64_t numel = result.numel();
-    ctx_impl->submitCompute(OpType::Silu, result.dtype(),
-                            {dst_impl->buffer(), dst_impl->buffer()},
+    ctx_impl->submitCompute(OpType::Silu, rt, {src_impl->buffer(), dst_impl->buffer()},
                             (result.numel() + 255) / 256, 1, 1, &numel, sizeof(int64_t));
     return result;
 }
@@ -85,16 +99,20 @@ Tensor TanhImpl<Device::VULKAN>::execute(const Tensor& a) {
     DataType rt = a.dtype();
     if (is_integral_dtype(rt)) rt = DataType::FLOAT32;
     else if (rt == DataType::INT64) rt = DataType::FLOAT64;
-    Tensor result = rt == a.dtype() ? a.clone() : a.to_type(rt);
 
+    Tensor storage;
+    const Tensor* src = vulkan_detail::unary_source(a, rt, storage);
+    Tensor result(a.shape(), rt, Device::VULKAN);
+
+    auto src_impl = std::dynamic_pointer_cast<VKTensor>(src->get_impl());
     auto dst_impl = std::dynamic_pointer_cast<VKTensor>(result.get_impl());
-    if (!dst_impl) throw std::runtime_error("vulkan Tanh: expected a VKTensor");
+    if (!src_impl || !dst_impl)
+        throw std::runtime_error("vulkan Tanh: expected VKTensors");
     auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(dst_impl->context());
     if (!ctx_impl) throw std::runtime_error("vulkan Tanh: missing VulkanContext");
 
     int64_t numel = result.numel();
-    ctx_impl->submitCompute(OpType::Tanh, result.dtype(),
-                            {dst_impl->buffer(), dst_impl->buffer()},
+    ctx_impl->submitCompute(OpType::Tanh, rt, {src_impl->buffer(), dst_impl->buffer()},
                             (result.numel() + 255) / 256, 1, 1, &numel, sizeof(int64_t));
     return result;
 }
@@ -115,16 +133,20 @@ Tensor SigmoidImpl<Device::VULKAN>::execute(const Tensor& a) {
     DataType rt = a.dtype();
     if (is_integral_dtype(rt)) rt = DataType::FLOAT32;
     else if (rt == DataType::INT64) rt = DataType::FLOAT64;
-    Tensor result = rt == a.dtype() ? a.clone() : a.to_type(rt);
 
+    Tensor storage;
+    const Tensor* src = vulkan_detail::unary_source(a, rt, storage);
+    Tensor result(a.shape(), rt, Device::VULKAN);
+
+    auto src_impl = std::dynamic_pointer_cast<VKTensor>(src->get_impl());
     auto dst_impl = std::dynamic_pointer_cast<VKTensor>(result.get_impl());
-    if (!dst_impl) throw std::runtime_error("vulkan Sigmoid: expected a VKTensor");
+    if (!src_impl || !dst_impl)
+        throw std::runtime_error("vulkan Sigmoid: expected VKTensors");
     auto ctx_impl = std::dynamic_pointer_cast<VulkanContext>(dst_impl->context());
     if (!ctx_impl) throw std::runtime_error("vulkan Sigmoid: missing VulkanContext");
 
     int64_t numel = result.numel();
-    ctx_impl->submitCompute(OpType::Sigmoid, result.dtype(),
-                            {dst_impl->buffer(), dst_impl->buffer()},
+    ctx_impl->submitCompute(OpType::Sigmoid, rt, {src_impl->buffer(), dst_impl->buffer()},
                             (result.numel() + 255) / 256, 1, 1, &numel, sizeof(int64_t));
     return result;
 }

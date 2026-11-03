@@ -1,11 +1,19 @@
 #version 460
+#extension GL_EXT_shader_explicit_arithmetic_types_int32 : require
 
-#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
 
-#define TILE 16
+// 输出分块 64x64，16x16 个线程，每线程 4x4 个输出，累加器留在
+// 寄存器里。每个 K 步（16）把 A 的 [64][16] 与 B 的 [16][64] 搬进共享内存，
+// 线程读 4 个 A 行与 4 个 B 列做 16 次乘加：一次共享读取摊到 4 次乘加上。
+// 旧版每线程只有 1 个输出，16 次乘加要 32 次共享读取，而且每 16 个 K 就要两次
+// barrier——分块越大，访存/同步开销被摊得越薄。
+//
+// 边界：M/N/K 不整除分块时，越界的 load 填 0（不改变乘加结果），越界的 store 丢弃。
+#define BM 64
+#define BN 64
+#define BK 16
 
-// 工作组大小 = (TILE, TILE, 1)
-layout(local_size_x = TILE, local_size_y = TILE, local_size_z = 1) in;
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
 layout(push_constant) uniform Params {
     uint batch;
@@ -26,57 +34,72 @@ layout(std430, binding = 2) buffer Output {
     int data[];
 } C; // [batch, M, N]
 
-// 共享内存分块
-shared int tileA[TILE][TILE + 1]; // +1 避免 bank 冲突
-shared int tileB[TILE][TILE + 1];
+// 行主序 + 1 个填充位：按列读 A 时相邻行落在不同 bank 上。
+shared int As[BM][BK + 1];
+shared int Bs[BK][BN + 1];
 
 void main() {
-    uint wg_batch = gl_WorkGroupID.z;        // batch 索引
-    uint wg_m = gl_WorkGroupID.y;            // 输出中的块行
-    uint wg_n = gl_WorkGroupID.x;            // 输出中的块列
+    const uint wg_batch = gl_WorkGroupID.z;
+    const uint m_base   = gl_WorkGroupID.y * uint(BM);
+    const uint n_base   = gl_WorkGroupID.x * uint(BN);
+    const uint lx = gl_LocalInvocationID.x; // 0..15
+    const uint ly = gl_LocalInvocationID.y; // 0..15
+    const uint tid = ly * uint(16) + lx;  // 0..255
 
-    uint local_m = gl_LocalInvocationID.y;   // 块内线程行
-    uint local_n = gl_LocalInvocationID.x;   // 块内线程列
+    uint M = params.M;
+    uint N = params.N;
+    uint K = params.K;
 
-    // 输出位置
-    uint global_m = wg_m * TILE + local_m;
-    uint global_n = wg_n * TILE + local_n;
+    // 每线程 4x4 个输出的累加器
+    int acc[4][4];
+    for (uint r = 0u; r < 4u; ++r)
+        for (uint c = 0u; c < 4u; ++c) acc[r][c] = int(0);
 
-    // 累加器
-    int acc = 0;
-
-    // 分片迭代
-    uint numTiles = (params.K + TILE - 1) / TILE;
-    for (uint tile = 0; tile < numTiles; ++tile) {
-        // --- 加载 A tile: [TILE, TILE] from global A[wg_batch, global_m, k_start : k_start+TILE]
-        uint k_start = tile * TILE;
-        uint a_k = k_start + local_n; // 注意：A 按行主序，每行 K 个
-        if (global_m < params.M && a_k < params.K) {
-            uint a_idx = wg_batch * params.M * params.K + global_m * params.K + a_k;
-            tileA[local_m][local_n] = A.data[a_idx];
-        } else {
-            tileA[local_m][local_n] = 0;
+    for (uint k0 = 0u; k0 < K; k0 += uint(BK)) {
+        // A 分块：4 个元素/线程，按行连续——一个 warp 覆盖两整行（2 x 64B）
+        for (uint i = 0u; i < 4u; ++i) {
+            const uint lin = tid + i * uint(256);
+            const uint r   = lin / uint(BK);
+            const uint c   = lin % uint(BK);
+            const uint gm  = m_base + r;
+            const uint gk  = k0 + c;
+            As[r][c] = (gm < M && gk < K)
+                           ? A.data[wg_batch * M * K + gm * K + gk]
+                           : int(0);
         }
-        // --- 加载 B tile: [TILE, TILE] from global B[wg_batch, k_start : k_start+TILE, global_n]
-        uint b_k = k_start + local_m;
-        if (b_k < params.K && global_n < params.N) {
-            uint b_idx = wg_batch * params.K * params.N + b_k * params.N + global_n;
-            tileB[local_m][local_n] = B.data[b_idx];
-        } else {
-            tileB[local_m][local_n] = 0;
+        // B 分块：4 个元素/线程，按行连续——一个 warp 覆盖 128B
+        for (uint i = 0u; i < 4u; ++i) {
+            const uint lin = tid + i * uint(256);
+            const uint r   = lin / uint(BN);
+            const uint c   = lin % uint(BN);
+            const uint gk  = k0 + r;
+            const uint gn  = n_base + c;
+            Bs[r][c] = (gk < K && gn < N)
+                           ? B.data[wg_batch * K * N + gk * N + gn]
+                           : int(0);
         }
-        // 同步 workgroup
         barrier();
-        // --- 点积计算
-        for (uint k = 0; k < TILE; ++k) {
-            acc += int(tileA[local_m][k]) * int(tileB[k][local_n]);
+
+        // 一次共享读取喂 4 次乘加
+        for (uint k = 0u; k < uint(BK); ++k) {
+            int a[4];
+            int b[4];
+            for (uint r = 0u; r < 4u; ++r) a[r] = int(As[ly * uint(4) + r][k]);
+            for (uint c = 0u; c < 4u; ++c) b[c] = int(Bs[k][lx * uint(4) + c]);
+            for (uint r = 0u; r < 4u; ++r)
+                for (uint c = 0u; c < 4u; ++c) acc[r][c] += a[r] * b[c];
         }
-        barrier(); // 必须同步，避免下一轮覆盖 shared data
+        barrier();
     }
 
-    // 写回结果
-    if (global_m < params.M && global_n < params.N) {
-        uint c_idx = wg_batch * params.M * params.N + global_m * params.N + global_n;
-        C.data[c_idx] = acc;
+    // 写回 4x4 个输出
+    for (uint r = 0u; r < 4u; ++r) {
+        const uint gm = m_base + ly * uint(4) + r;
+        if (gm >= M) break;
+        for (uint c = 0u; c < 4u; ++c) {
+            const uint gn = n_base + lx * uint(4) + c;
+            if (gn >= N) break;
+            C.data[wg_batch * M * N + gm * N + gn] = acc[r][c];
+        }
     }
 }
