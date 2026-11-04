@@ -341,8 +341,10 @@ int main() {
 
         mcpp::rules::sycl::options opt;
         // The seam header lives beside host/ and device/; both include it by
-        // name. Nothing here is part of the installed surface.
-        opt.includes = {root + "/src/backend/sycl"};
+        // name. Nothing here is part of the installed surface. `include/` is on
+        // the list because runtime.sycl also reaches the library's own
+        // _sync_counters.h, same as the CUDA units.
+        opt.includes = {root + "/include", root + "/src/backend/sycl"};
         opt.flags    = {"-DBACKEND_SYCL"};
         if (!mcpp::rules::sycl::compile(opt)) return 1;
     }

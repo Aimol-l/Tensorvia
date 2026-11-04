@@ -107,6 +107,53 @@ TEST_F(DeviceOps, MatMulHalfPrecision) {
     }
 }
 
+TEST_F(DeviceOps, NormCoversShapesAndLowPrecision) {
+    // 融合归一化内核的覆盖面：多行、超过 local 阈值的长行（16384 x 4B = 64 KB，
+    // 任何设备上都会退回流式）、三维按尾部块归一化，以及半精度。参考值是同一份
+    // 输入在 CPU 上算出来的（CPU lane 走的是另一套内核），半精度按 ulp 放宽。
+    auto compare = [](const Tensor& got, const Tensor& want, double tol,
+                      std::string_view what) {
+        // 半精度先升到 f32 再取回：host_values<float> 是按 T 解释缓冲区的，直接
+        // 读 f16 会把位模式当成 float。
+        const auto g = host_values<float>(ops::Typecast(got, DataType::FLOAT32));
+        const auto w = host_values<float>(ops::Typecast(want, DataType::FLOAT32));
+        ASSERT_EQ(g.size(), w.size()) << what;
+        for (std::size_t i = 0; i < g.size(); ++i) {
+            const double scale = std::max(1.0, std::abs(double(w[i])));
+            EXPECT_NEAR(g[i], w[i], tol * scale) << what << " at index " << i;
+        }
+    };
+
+    auto check = [&](const std::vector<int64_t>& shape, int axis, DataType dtype,
+                     double tol, std::string_view what) {
+        int64_t n = 1;
+        for (std::size_t d = static_cast<std::size_t>(axis); d < shape.size(); ++d)
+            n *= shape[d];
+
+        const Tensor a_cpu = Tensor::Random(shape, -2.0f, 2.0f, dtype, Device::CPU);
+        const Tensor w_cpu = Tensor::Random({n}, -2.0f, 2.0f, dtype, Device::CPU);
+        const Tensor b_cpu = Tensor::Random({n}, -2.0f, 2.0f, dtype, Device::CPU);
+        const Tensor a = moved_to(a_cpu, dev);
+        const Tensor w = moved_to(w_cpu, dev);
+        const Tensor b = moved_to(b_cpu, dev);
+
+        const Tensor ln = ops::LayerNorm(a, w, b, axis, 1e-5f);
+        ASSERT_TRUE(ln.device() == dev) << what;
+        compare(ln, ops::LayerNorm(a_cpu, w_cpu, b_cpu, axis, 1e-5f), tol,
+                std::string(what) + " layer_norm");
+
+        const Tensor rms = ops::RmsNorm(a, w, axis, 1e-5f);
+        ASSERT_TRUE(rms.device() == dev) << what;
+        compare(rms, ops::RmsNorm(a_cpu, w_cpu, axis, 1e-5f), tol,
+                std::string(what) + " rms_norm");
+    };
+
+    check({64, 1024}, 1, DataType::FLOAT32, 1e-5, "64x1024");
+    check({4, 16384}, 1, DataType::FLOAT32, 1e-5, "4x16384");
+    check({8, 4, 512}, 2, DataType::FLOAT32, 1e-5, "8x4x512");
+    check({32, 256}, 1, DataType::FLOAT16, 1e-2, "f16 32x256");
+}
+
 TEST_F(DeviceOps, UnaryMath) {
     std::vector<float> av{0.5f, 1.0f, 1.5f, 2.0f, 2.5f, 3.0f};  // log/sqrt 需要正数
     const Tensor a_cpu(av, {2, 3});

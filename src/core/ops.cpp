@@ -1073,6 +1073,13 @@ Tensor LayerNorm(const Tensor& a, const Tensor& weight, const Tensor& bias, int 
                                              axis, eps);
         }
 #endif
+#if defined(BACKEND_SYCL)
+        // SYCL 的融合内核覆盖任意 dtype 与任意 axis，与 CUDA 同构。
+        if (a.device() == Device::SYCL) {
+            return execute_on<LayerNormImpl>(a.device_id(), "layer_norm", a, weight, bias,
+                                             axis, eps);
+        }
+#endif
         return layer_norm_composed(a, weight, bias, outer, static_cast<int64_t>(norm_size),
                                    eps, res_type);
     }
@@ -1108,6 +1115,11 @@ Tensor RmsNorm(const Tensor& a, const Tensor& weight, int axis, float eps) {
 #endif
 #if defined(BACKEND_VULKAN)
         if (a.device() == Device::VULKAN && a.dtype() == DataType::FLOAT32) {
+            return execute_on<RmsNormImpl>(a.device_id(), "rms_norm", a, weight, axis, eps);
+        }
+#endif
+#if defined(BACKEND_SYCL)
+        if (a.device() == Device::SYCL) {
             return execute_on<RmsNormImpl>(a.device_id(), "rms_norm", a, weight, axis, eps);
         }
 #endif

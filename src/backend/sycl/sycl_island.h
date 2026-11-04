@@ -289,6 +289,13 @@ int sycl_c_launch_softmax(void* ctx, const void* in, void* out,
                           int in_dtype, int out_dtype,
                           const tvv::sycl::ReduceAxis* p);
 
+// layer_norm / rms_norm：输入视为 outer x n 的连续行，weight（以及 LN 的 bias）
+// 是 n 个元素、按行广播；`bias` 为 nullptr 表示没有偏置，`rms` 非 0 时连均值项
+// 一并跳过。一次读、一次写完成整行，取代组合式的 8~10 个内核。
+int sycl_c_launch_norm(void* ctx, const void* in, const void* weight, const void* bias,
+                       void* out, int in_dtype, int out_dtype, int64_t outer, int64_t n,
+                       float eps, int rms);
+
 int sycl_c_launch_reduce_axis(void* ctx, const void* in, void* out,
                               int in_dtype, int out_dtype, int op,
                               const tvv::sycl::ReduceAxis* p);

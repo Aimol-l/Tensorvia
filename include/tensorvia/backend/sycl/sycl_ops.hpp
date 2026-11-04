@@ -140,6 +140,17 @@ template <> struct ArgMaxImpl<Device::SYCL> {
 template <> struct ArgMinImpl<Device::SYCL> {
     static Tensor execute(const Tensor& a, int axis);
 };
+
+// ---------------------------------------------------------------------------
+// 归一化。融合内核：每行一次读、一次写，不再走组合式路径。
+// ---------------------------------------------------------------------------
+template <> struct LayerNormImpl<Device::SYCL> {
+    static Tensor execute(const Tensor& a, const Tensor& weight, const Tensor& bias,
+                          int axis, float eps);
+};
+template <> struct RmsNormImpl<Device::SYCL> {
+    static Tensor execute(const Tensor& a, const Tensor& weight, int axis, float eps);
+};
 template <> struct AllImpl<Device::SYCL> {
     static bool execute(const Tensor& a, float value);
 };

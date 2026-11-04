@@ -1,0 +1,206 @@
+#include "common.h"
+
+#include <cmath>
+
+using namespace tvv::sycl_dev;
+
+namespace {
+
+// 计算类型与逐元素路径一致：整型提升到 float；16 位浮点拓宽到 float；其余保持。
+// 不能用 reduction_acc_t：那个把窄整型留在整型里（归约不丢位即可），而归一化要
+// 求先有小数。
+template <class T>
+using norm_acc_t = std::conditional_t<std::is_integral<T>::value, float, promoted_t<T>>;
+
+// 单工作组的树形求和。kWorkGroup 是 2 的幂，逐级折半的写法才成立。
+//
+// 结果在最后一次屏障之前写入 scratch[0]，所以所有工作项读到同一个值；返回后
+// 再放行一次——下一次调用会覆盖 scratch，快的项不能赶在慢的项读到上一轮结果
+// 之前动手。
+template <class Acc>
+inline Acc wg_sum(const sycl::local_accessor<Acc, 1>& scratch, sycl::nd_item<1> item,
+                  size_t local, Acc value) {
+    const size_t lid = item.get_local_id(0);
+    scratch[lid] = value;
+    item.barrier(sycl::access::fence_space::local_space);
+    for (size_t s = local / 2; s > 0; s >>= 1) {
+        if (lid < s) scratch[lid] += scratch[lid + s];
+        item.barrier(sycl::access::fence_space::local_space);
+    }
+    const Acc result = scratch[0];
+    item.barrier(sycl::access::fence_space::local_space);
+    return result;
+}
+
+// 1 / sqrt(mean_square + eps)。均值在 Acc 里算，开方与倒数在 double 里做一次，
+// 与 CPU/CUDA 内核的 `1.0f / sqrt(var + eps)` 只差一次舍入。
+template <class Acc>
+inline Acc norm_inv_std(Acc mean_square, int64_t n, float eps) {
+    const double denom =
+        static_cast<double>(mean_square / Acc(n)) + static_cast<double>(eps);
+    return static_cast<Acc>(1.0 / sycl::sqrt(denom));
+}
+
+// 行驻留 local 的版本：一个工作组处理一行，行在组内被读三趟（RMS 两趟），全局
+// 只有一次加载和一次回写。GPU 上这是首选；CPU 设备上 local 是模拟的，多一次
+// 拷贝比重读一遍 L2 更贵，所以那里走下面的流式版本（见 launch_norm）。
+//
+// Rms 是模板参数而不是运行期标志：三个内层循环里各有一处 `Rms ? a : b`，留成
+// 运行期分支会挡住向量化。用到的那个特化才 JIT，另一份不会付编译时间。
+template <bool Rms, class T, class Out>
+void norm_shared_kernel(sycl::queue& q, const T* in, const Out* w, const Out* b, Out* out,
+                        int64_t outer, int64_t n, float eps) {
+    using Acc = norm_acc_t<T>;
+    const size_t local  = kWorkGroup;
+    const size_t groups = static_cast<size_t>(outer);
+    q.submit([&](sycl::handler& h) {
+        sycl::local_accessor<Acc, 1> row(sycl::range<1>(static_cast<size_t>(n)), h);
+        sycl::local_accessor<Acc, 1> scratch(sycl::range<1>(local), h);
+        h.parallel_for(
+            sycl::nd_range<1>(sycl::range<1>(groups * local), sycl::range<1>(local)),
+            [=](sycl::nd_item<1> item) {
+                const size_t  lid  = item.get_local_id(0);
+                const int64_t step = static_cast<int64_t>(local);
+                for (int64_t r = static_cast<int64_t>(item.get_group(0)); r < outer;
+                     r += static_cast<int64_t>(item.get_group_range(0))) {
+                    const int64_t base = r * n;
+                    for (int64_t i = static_cast<int64_t>(lid); i < n; i += step)
+                        row[i] = to_compute<Acc>(in[base + i]);
+                    item.barrier(sycl::access::fence_space::local_space);
+
+                    Acc mean = Acc(0);
+                    if constexpr (!Rms) {
+                        Acc sum = Acc(0);
+                        for (int64_t i = static_cast<int64_t>(lid); i < n; i += step)
+                            sum += row[i];
+                        sum  = wg_sum(scratch, item, local, sum);
+                        mean = sum / Acc(n);
+                    }
+
+                    Acc sq = Acc(0);
+                    for (int64_t i = static_cast<int64_t>(lid); i < n; i += step) {
+                        const Acc d = Rms ? row[i] : row[i] - mean;
+                        sq += d * d;
+                    }
+                    sq = wg_sum(scratch, item, local, sq);
+                    const Acc inv = norm_inv_std(sq, n, eps);
+
+                    for (int64_t i = static_cast<int64_t>(lid); i < n; i += step) {
+                        const Acc d = Rms ? row[i] : row[i] - mean;
+                        const Acc y = d * inv * to_compute<Acc>(w[i]);
+                        if constexpr (Rms)
+                            out[base + i] = store_as<Out>(y);
+                        else
+                            out[base + i] = store_as<Out>(y + to_compute<Acc>(b[i]));
+                    }
+                    // 下一行（若有）会覆盖 row。
+                    item.barrier(sycl::access::fence_space::local_space);
+                }
+            });
+    });
+}
+
+// 流式版本：行放不进 local 时，均值/方差/归一化各自扫描一遍全局。LN 是 3 读
+// 1 写，RMS 是 2 读 1 写。
+template <bool Rms, class T, class Out>
+void norm_stream_kernel(sycl::queue& q, const T* in, const Out* w, const Out* b, Out* out,
+                        int64_t outer, int64_t n, float eps) {
+    using Acc = norm_acc_t<T>;
+    const size_t local  = kWorkGroup;
+    const size_t groups = static_cast<size_t>(outer);
+    q.submit([&](sycl::handler& h) {
+        sycl::local_accessor<Acc, 1> scratch(sycl::range<1>(local), h);
+        h.parallel_for(
+            sycl::nd_range<1>(sycl::range<1>(groups * local), sycl::range<1>(local)),
+            [=](sycl::nd_item<1> item) {
+                const size_t  lid  = item.get_local_id(0);
+                const int64_t step = static_cast<int64_t>(local);
+                for (int64_t r = static_cast<int64_t>(item.get_group(0)); r < outer;
+                     r += static_cast<int64_t>(item.get_group_range(0))) {
+                    const T* src = in + r * n;
+                    Out*     dst = out + r * n;
+
+                    Acc mean = Acc(0);
+                    if constexpr (!Rms) {
+                        Acc sum = Acc(0);
+                        for (int64_t i = static_cast<int64_t>(lid); i < n; i += step)
+                            sum += to_compute<Acc>(src[i]);
+                        sum  = wg_sum(scratch, item, local, sum);
+                        mean = sum / Acc(n);
+                    }
+
+                    Acc sq = Acc(0);
+                    for (int64_t i = static_cast<int64_t>(lid); i < n; i += step) {
+                        const Acc v = to_compute<Acc>(src[i]);
+                        const Acc d = Rms ? v : v - mean;
+                        sq += d * d;
+                    }
+                    sq = wg_sum(scratch, item, local, sq);
+                    const Acc inv = norm_inv_std(sq, n, eps);
+
+                    for (int64_t i = static_cast<int64_t>(lid); i < n; i += step) {
+                        const Acc v = to_compute<Acc>(src[i]);
+                        const Acc d = Rms ? v : v - mean;
+                        const Acc y = d * inv * to_compute<Acc>(w[i]);
+                        if constexpr (Rms)
+                            dst[i] = store_as<Out>(y);
+                        else
+                            dst[i] = store_as<Out>(y + to_compute<Acc>(b[i]));
+                    }
+                }
+            });
+    });
+}
+
+// 一行的 Acc 字节数超过它就退回流式（GPU 上 local 上限常见 48/64 KB，取 32 KB
+// 留出余量）。
+constexpr int64_t kNormLocalBytes = 32 * 1024;
+
+// 路径选择。CPU 设备一律流式：那里的 local 是模拟的，驻留一遍相当于多一次全行
+// 拷贝，而重读的那几趟本来就在 L2/L3 里。
+template <class T, class Out>
+void launch_norm(sycl::queue& q, const T* in, const Out* w, const Out* b, Out* out,
+                 int64_t outer, int64_t n, float eps, int rms, bool use_shared) {
+    if (rms) {
+        if (use_shared) norm_shared_kernel<true, T, Out>(q, in, w, b, out, outer, n, eps);
+        else            norm_stream_kernel<true, T, Out>(q, in, w, b, out, outer, n, eps);
+    } else {
+        if (use_shared) norm_shared_kernel<false, T, Out>(q, in, w, b, out, outer, n, eps);
+        else            norm_stream_kernel<false, T, Out>(q, in, w, b, out, outer, n, eps);
+    }
+}
+
+}  // namespace
+
+extern "C" {
+
+int sycl_c_launch_norm(void* ctx, const void* in, const void* weight, const void* bias,
+                       void* out, int in_dtype, int out_dtype, int64_t outer, int64_t n,
+                       float eps, int rms) {
+    if (ctx == nullptr || in == nullptr || weight == nullptr || out == nullptr)
+        return tvv::sycl::kSyclInvalid;
+    if (outer <= 0 || n <= 0) return tvv::sycl::kSyclInvalid;
+    try {
+        auto& q = queue_of(ctx);
+        const bool cpu_device = static_cast<Context*>(ctx)->device.is_cpu();
+        return dispatch_dtype(in_dtype, [&](auto src_tag) -> int {
+            using T = typename decltype(src_tag)::type;
+            return dispatch_dtype(out_dtype, [&](auto dst_tag) -> int {
+                using Out = typename decltype(dst_tag)::type;
+                const int64_t bytes = n * static_cast<int64_t>(sizeof(norm_acc_t<T>));
+                const bool use_shared = !cpu_device && bytes <= kNormLocalBytes;
+                launch_norm<T, Out>(q, static_cast<const T*>(in),
+                                    static_cast<const Out*>(weight),
+                                    static_cast<const Out*>(bias),
+                                    static_cast<Out*>(out), outer, n, eps, rms, use_shared);
+                return tvv::sycl::kSyclOk;
+            });
+        });
+    } catch (const std::exception& e) {
+        return record_failure(e);
+    } catch (...) {
+        return record_failure();
+    }
+}
+
+}  // extern "C"
