@@ -4,9 +4,200 @@ using namespace tvv::sycl_dev;
 
 namespace {
 
-void repack_kernel(sycl::queue& q, const char* src, char* dst, int64_t numel,
-                   int64_t offset, int32_t ndim, int32_t dtype_size,
-                   const int64_t* shape, const int64_t* strides) {
+constexpr size_t kTile     = 32;
+constexpr size_t kTileRows = 8;
+
+template <int Bytes>
+struct bytes_word {
+    using type = std::conditional_t<
+        Bytes == 1, uint8_t,
+        std::conditional_t<Bytes == 2, uint16_t,
+                           std::conditional_t<Bytes == 4, uint32_t, uint64_t>>>;
+};
+
+// 通用路径：逐元素解码多维坐标。两侧步长都任意，只保证语义。
+template <class T>
+void repack_generic_kernel(sycl::queue& q, const T* src, T* dst, int64_t numel,
+                           int64_t offset, int32_t ndim, const int64_t* shape,
+                           const int64_t* strides) {
+    int64_t shape_v[kMaxDims] = {};
+    int64_t strides_v[kMaxDims] = {};
+    for (int32_t d = 0; d < ndim; ++d) {
+        shape_v[d] = shape[d];
+        strides_v[d] = strides[d];
+    }
+    q.parallel_for(range_of(numel), [=](sycl::id<1> idx) {
+        const int64_t i = static_cast<int64_t>(idx[0]);
+        int64_t temp = i;
+        int64_t src_offset = offset;
+        for (int32_t d = ndim - 1; d >= 0; --d) {
+            const int64_t coord = temp % shape_v[d];
+            temp /= shape_v[d];
+            src_offset += coord * strides_v[d];
+        }
+        dst[i] = src[src_offset];
+    });
+}
+
+// 输入最内轴就是输出的最内轴（步长 1）：每个 (batch, row) 是一段连续拷贝。
+// 二维网格让 lane 沿这段连续区间走，读和写都合并。
+template <class T, int N>
+void repack_run_kernel(sycl::queue& q, const T* src, T* dst, int64_t offset,
+                       const int64_t* shape, const int64_t* strides,
+                       int64_t runs, int64_t run_len) {
+    q.parallel_for(
+        sycl::range<2>(static_cast<size_t>(runs), static_cast<size_t>(run_len)),
+        [=](sycl::id<2> id) {
+            const int64_t r = static_cast<int64_t>(id[0]);
+            const int64_t c = static_cast<int64_t>(id[1]);
+            int64_t rem = r;
+            int64_t src_base = offset;
+            int64_t dst_base = 0;
+            int64_t out_stride = run_len;
+            // 除最内轴外的坐标：源按输入步长、目的按连续布局各自累加。
+            for (int d = N - 2; d >= 0; --d) {
+                const int64_t dim = shape[d];
+                if (dim <= 0) continue;
+                const int64_t coord = rem % dim;
+                rem /= dim;
+                src_base += coord * strides[d];
+                dst_base += coord * out_stride;
+                out_stride *= dim;
+            }
+            dst[dst_base + c] = src[src_base + c];
+        });
+}
+
+// 输入连续轴与输出连续轴不同（典型的 permute().contiguous()）：和转置同一个
+// 思路——把这一对轴放进 local tile，其余轴当 batch。装载时 lane 走输入连续轴，
+// 写出时 lane 走输出连续轴，两侧全局访存都落在连续地址上。
+template <class T, int N>
+void repack_tiled_kernel(sycl::queue& q, const T* src, T* dst, int64_t offset,
+                         const int64_t* shape, const int64_t* strides, int j) {
+    // j 是源里步长为 1 的轴；输出最内轴 N-1 在源里的步长是 strides[N-1]。
+    int64_t len_s = 0;     // 沿 j 的长度
+    int64_t stride_x = 0;  // 源沿输出最内轴的步长
+    int64_t out_stride[N] = {};
+    int64_t acc = 1;
+    for (int d = N - 1; d >= 0; --d) {
+        out_stride[d] = acc;
+        acc *= shape[d];
+    }
+    for (int k = 0; k < N; ++k)
+        if (k == j) len_s = shape[k];
+    const int64_t len_c = shape[N - 1];
+    stride_x = strides[N - 1];
+    const int64_t stride_y = out_stride[j];
+
+    int64_t batches = 1;
+    for (int d = 0; d < N; ++d)
+        if (d != j && d != N - 1) batches *= shape[d];
+
+    const size_t grid_s = static_cast<size_t>((len_s + kTile - 1) / kTile);
+    const size_t grid_c = static_cast<size_t>((len_c + kTile - 1) / kTile);
+
+    q.submit([&](sycl::handler& h) {
+        sycl::local_accessor<T, 1> tile(sycl::range<1>(kTile * (kTile + 1)), h);
+        h.parallel_for(
+            sycl::nd_range<3>(
+                sycl::range<3>(grid_s * kTileRows, grid_c * kTile,
+                               static_cast<size_t>(batches)),
+                sycl::range<3>(kTileRows, kTile, 1)),
+            [=](sycl::nd_item<3> item) {
+                const size_t la = item.get_local_id(0);
+                const size_t lb = item.get_local_id(1);  // lane 最快维
+
+                int64_t rem = static_cast<int64_t>(item.get_group(2));
+                int64_t src_base = offset;
+                int64_t dst_base = 0;
+                for (int d = N - 1; d >= 0; --d) {
+                    if (d == j || d == N - 1) continue;
+                    const int64_t dim = shape[d];
+                    if (dim <= 0) continue;
+                    const int64_t c = rem % dim;
+                    rem /= dim;
+                    src_base += c * strides[d];
+                    dst_base += c * out_stride[d];
+                }
+
+                // 装载：lane 沿 j（源步长 1）——连续读。
+                const int64_t ys = static_cast<int64_t>(item.get_group(0) * kTile +
+                                                        lb);
+                const int64_t xc0 = static_cast<int64_t>(item.get_group(1) * kTile +
+                                                         la);
+                if (ys < len_s) {
+                    for (size_t jj = 0; jj < kTile; jj += kTileRows) {
+                        const int64_t xc = xc0 + static_cast<int64_t>(jj);
+                        if (xc < len_c)
+                            tile[(la + jj) * (kTile + 1) + lb] =
+                                src[src_base + ys + xc * stride_x];
+                    }
+                }
+                item.barrier(sycl::access::fence_space::local_space);
+                // 写出：lane 沿输出最内轴——连续写，tile 换向取元素。
+                const int64_t x_out = static_cast<int64_t>(item.get_group(1) * kTile +
+                                                           lb);
+                const int64_t y_out0 = static_cast<int64_t>(item.get_group(0) * kTile +
+                                                            la);
+                if (x_out < len_c) {
+                    for (size_t jj = 0; jj < kTile; jj += kTileRows) {
+                        const int64_t y_out = y_out0 + static_cast<int64_t>(jj);
+                        if (y_out < len_s)
+                            dst[dst_base + y_out * stride_y + x_out] =
+                                tile[lb * (kTile + 1) + la + jj];
+                    }
+                }
+            });
+    });
+}
+
+// 找源里步长为 1 的轴；没有就返回 -1（走通用路径）。
+inline int contiguous_axis(int32_t ndim, const int64_t* shape, const int64_t* strides) {
+    for (int d = ndim - 1; d >= 0; --d)
+        if (shape[d] > 1 && strides[d] == 1) return d;
+    return -1;
+}
+
+template <class T, int N>
+void repack_rank(sycl::queue& q, const T* src, T* dst, int64_t offset,
+                 const int64_t* shape, const int64_t* strides) {
+    const int j = contiguous_axis(N, shape, strides);
+    if (j < 0) {
+        int64_t numel = 1;
+        for (int d = 0; d < N; ++d) numel *= shape[d];
+        repack_generic_kernel<T>(q, src, dst, numel, offset, N, shape, strides);
+        return;
+    }
+    if (j == N - 1) {
+        int64_t run_len = shape[N - 1];
+        int64_t runs = 1;
+        for (int d = 0; d < N - 1; ++d) runs *= shape[d];
+        repack_run_kernel<T, N>(q, src, dst, offset, shape, strides, runs, run_len);
+        return;
+    }
+    repack_tiled_kernel<T, N>(q, src, dst, offset, shape, strides, j);
+}
+
+// 秩 > 4 或元素宽度非 1/2/4/8 字节时，退回逐字节通用路径。
+template <class T>
+void repack_ranked(sycl::queue& q, const T* src, T* dst, int64_t numel,
+                   int64_t offset, int32_t ndim, const int64_t* shape,
+                   const int64_t* strides) {
+    switch (ndim) {
+        case 1: repack_rank<T, 1>(q, src, dst, offset, shape, strides); return;
+        case 2: repack_rank<T, 2>(q, src, dst, offset, shape, strides); return;
+        case 3: repack_rank<T, 3>(q, src, dst, offset, shape, strides); return;
+        case 4: repack_rank<T, 4>(q, src, dst, offset, shape, strides); return;
+        default:
+            repack_generic_kernel<T>(q, src, dst, numel, offset, ndim, shape, strides);
+            return;
+    }
+}
+
+// 逐字节兜底：元素宽度不是 1/2/4/8 时用。
+void repack_byte_kernel(sycl::queue& q, const char* src, char* dst, int64_t numel,
+                        int64_t offset, int32_t ndim, int32_t dtype_size,
+                        const int64_t* shape, const int64_t* strides) {
     int64_t shape_v[kMaxDims] = {};
     int64_t strides_v[kMaxDims] = {};
     for (int32_t d = 0; d < ndim; ++d) {
@@ -28,6 +219,14 @@ void repack_kernel(sycl::queue& q, const char* src, char* dst, int64_t numel,
     });
 }
 
+template <class T>
+void repack_typed(sycl::queue& q, const void* in, void* out, int64_t numel,
+                  int64_t offset, int32_t ndim, const int64_t* shape,
+                  const int64_t* strides) {
+    repack_ranked<T>(q, static_cast<const T*>(in), static_cast<T*>(out), numel,
+                     offset, ndim, shape, strides);
+}
+
 }  // namespace
 
 extern "C" {
@@ -41,9 +240,18 @@ int sycl_c_launch_repack(void* ctx, const void* in, void* out, int64_t numel,
     if (ndim < 0 || ndim > kMaxDims) return tvv::sycl::kSyclInvalid;
     if (numel == 0) return tvv::sycl::kSyclOk;
     try {
-        repack_kernel(queue_of(ctx), static_cast<const char*>(in),
-                      static_cast<char*>(out), numel, offset, ndim, dtype_size,
-                      shape, strides);
+        auto& q = queue_of(ctx);
+        switch (dtype_size) {
+            case 1: repack_typed<uint8_t>(q, in, out, numel, offset, ndim, shape, strides); break;
+            case 2: repack_typed<uint16_t>(q, in, out, numel, offset, ndim, shape, strides); break;
+            case 4: repack_typed<uint32_t>(q, in, out, numel, offset, ndim, shape, strides); break;
+            case 8: repack_typed<uint64_t>(q, in, out, numel, offset, ndim, shape, strides); break;
+            default:
+                repack_byte_kernel(q, static_cast<const char*>(in),
+                                   static_cast<char*>(out), numel, offset, ndim,
+                                   dtype_size, shape, strides);
+                break;
+        }
         return tvv::sycl::kSyclOk;
     } catch (const std::exception& e) {
         return record_failure(e);

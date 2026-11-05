@@ -1,15 +1,3 @@
-// 基准：每个用例输出三段耗时——submit（调用返回）/ sync（synchronize() 耗时）/
-// total（两者之和）——以及按总耗时计算的吞吐。冷启动（首次调用，含 SYCL JIT、
-// Vulkan 流水线创建、CUDA 模块加载）单独报告，不并入热态中位数。
-//
-// 为什么必须三段：异步后端的调用返回不等于算完。把三段混成一个数字，就无法区分
-// 内核、传输与同步各自占多少（FR-4.1）；CPU 后端的 sync 近似为 0，仍照常输出。
-// 吞吐按 total 计算——那才是设备侧真正算完的时间。
-//
-// 用法: bench [cpu|cuda|vulkan|sycl]（与 examples/ 的参数约定一致；不传参数时测
-// 本构建编译进来的后端，请求的后端没编进本构建或机器上没有时明确退回，不静默降级）。
-#include <algorithm>
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <format>
@@ -27,28 +15,35 @@ double ms_since(Clock::time_point t0) {
     return std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
 }
 
-double median(std::vector<double> samples) {
-    std::sort(samples.begin(), samples.end());
-    return samples[samples.size() / 2];
+double mean(const std::vector<double>& samples) {
+    double sum = 0.0;
+    for (double v : samples) sum += v;
+    return samples.empty() ? 0.0 : sum / static_cast<double>(samples.size());
 }
 
-// 三段计时 + 冷启动。f() 是被测调用；冷启动那次也排空队列，让"首次"包含全部
-// 一次性成本（JIT / 流水线 / 模块加载）。
+// 三段计时 + 冷启动。f() 是被测调用；第 1 次也排空队列，让"首次"包含全部一次性
+// 成本（JIT / 流水线 / 模块加载），之后 10 次取均值。
+constexpr int kWarmupRuns = 1;
+constexpr int kMeasuredRuns = 10;
+
 struct Phases {
     double submit_ms = 0;  // 调用返回
     double sync_ms   = 0;  // synchronize() 耗时
     double total_ms  = 0;  // submit + sync
-    double cold_ms   = 0;  // 首次调用（含一次性成本）
+    double cold_ms   = 0;  // 预热那次（含一次性成本）
 };
 
 template <class F>
-Phases measure(F&& f, int reps = 9) {
+Phases measure(F&& f) {
     Phases p;
-    const auto cold0 = Clock::now();
-    f();
-    ops::synchronize();
-    p.cold_ms = ms_since(cold0);
+    for (int i = 0; i < kWarmupRuns; ++i) {
+        const auto cold0 = Clock::now();
+        f();
+        ops::synchronize();
+        p.cold_ms = ms_since(cold0);
+    }
 
+    constexpr int reps = kMeasuredRuns;
     std::vector<double> submit, sync, total;
     submit.reserve(reps);
     sync.reserve(reps);
@@ -63,9 +58,9 @@ Phases measure(F&& f, int reps = 9) {
         sync.push_back(std::chrono::duration<double, std::milli>(t2 - t1).count());
         total.push_back(std::chrono::duration<double, std::milli>(t2 - t0).count());
     }
-    p.submit_ms = median(submit);
-    p.sync_ms   = median(sync);
-    p.total_ms  = median(total);
+    p.submit_ms = mean(submit);
+    p.sync_ms   = mean(sync);
+    p.total_ms  = mean(total);
     return p;
 }
 
@@ -115,7 +110,8 @@ Device resolve_device(std::string_view name) {
 int main(int argc, char* argv[]) {
     using DT = DataType;
     const Device dev = argc > 1 ? resolve_device(argv[1]) : kDefaultDevice;
-    std::println("device {} | reps 9 (heavy 5) | throughput on total time", device_to_string(dev));
+    std::println("device {} | {} warm-up + {} measured, mean | throughput on total time",
+                 device_to_string(dev), kWarmupRuns, kMeasuredRuns);
 
     {   // 带宽上限参照：同 dtype 拷贝（读 + 写）
         constexpr std::int64_t N = std::int64_t{1} << 24;  // 16M f32
@@ -161,7 +157,7 @@ int main(int argc, char* argv[]) {
         Tensor a = Tensor::Random({M, M}, 0.0f, 1.0f, DT::FLOAT32, dev);
         Tensor b = Tensor::Random({M, M}, 0.0f, 1.0f, DT::FLOAT32, dev);
         Tensor d({M, M}, DT::FLOAT32, dev);
-        const Phases p = measure([&] { ops::Add(a, b, d); }, 5);
+        const Phases p = measure([&] { ops::Add(a, b, d); });
         report("add f32 4096x4096", p, 3.0 * double(M) * M * 4);
     }
     {   // 标量 in-place：读写各一次
@@ -206,7 +202,7 @@ int main(int argc, char* argv[]) {
     {   // 超越函数（CPU 侧标量 libm，无法自动向量化）
         constexpr std::int64_t N = std::int64_t{1} << 22;  // 4M
         Tensor a = Tensor::Random({N}, 0.0f, 1.0f, DT::FLOAT32, dev);
-        const Phases p = measure([&] { (void)ops::Exp(a); }, 5);
+        const Phases p = measure([&] { (void)ops::Exp(a); });
         report("exp f32 4M", p, 2.0 * double(N) * 4);
     }
     {   // 全量 reduce
@@ -217,44 +213,44 @@ int main(int argc, char* argv[]) {
     }
     {   // 带轴 reduce：axis=1（内存布局连续方向）
         Tensor a = Tensor::Random({4096, 4096}, 0.0f, 1.0f, DT::FLOAT32, dev);
-        const Phases p = measure([&] { (void)ops::Sum(a, 1); }, 5);
+        const Phases p = measure([&] { (void)ops::Sum(a, 1); });
         report("sum-axis1 4096x4096", p, double(4096) * 4096 * 4);
     }
     {   // 2D 转置（tiled kernel）
         Tensor a = Tensor::Random({1024, 1024}, 0.0f, 1.0f, DT::FLOAT32, dev);
-        const Phases p = measure([&] { ops::Transpose(a); }, 5);
+        const Phases p = measure([&] { ops::Transpose(a); });
         report("transpose2d 1024x1024", p, 2.0 * 1024 * 1024 * 4);
     }
     {   // N 维转置（逐元素 div/mod + 堆分配）
         Tensor a = Tensor::Random({64, 64, 64}, 0.0f, 1.0f, DT::FLOAT32, dev);
-        const Phases p = measure([&] { (void)ops::Transpose(a, {2, 0, 1}); }, 5);
+        const Phases p = measure([&] { (void)ops::Transpose(a, {2, 0, 1}); });
         report("transpose3d 64^3", p, 2.0 * 64 * 64 * 64 * 4);
     }
     {   // 非连续视图物化（clone_as_contiguous gather）
         Tensor a = Tensor::Random({128, 64, 64}, 0.0f, 1.0f, DT::FLOAT32, dev);
         auto p = a.permute({2, 0, 1});
-        const Phases ph = measure([&] { (void)p.contiguous(); }, 5);
+        const Phases ph = measure([&] { (void)p.contiguous(); });
         report("gather permute 128x64x64", ph, 2.0 * 128 * 64 * 64 * 4);
     }
     {   // matmul：256 / 512 / 1024 三档
         constexpr std::int64_t M = 256;
         Tensor a = Tensor::Random({M, M}, 0.0f, 1.0f, DT::FLOAT32, dev);
         Tensor b = Tensor::Random({M, M}, 0.0f, 1.0f, DT::FLOAT32, dev);
-        const Phases p = measure([&] { (void)ops::MatMul(a, b); }, 5);
+        const Phases p = measure([&] { (void)ops::MatMul(a, b); });
         report("matmul f32 256", p, 2.0 * M * M * M, true);
     }
     {
         constexpr std::int64_t M = 512;
         Tensor a = Tensor::Random({M, M}, 0.0f, 1.0f, DT::FLOAT32, dev);
         Tensor b = Tensor::Random({M, M}, 0.0f, 1.0f, DT::FLOAT32, dev);
-        const Phases p = measure([&] { (void)ops::MatMul(a, b); }, 5);
+        const Phases p = measure([&] { (void)ops::MatMul(a, b); });
         report("matmul f32 512", p, 2.0 * M * M * M, true);
     }
     {
         constexpr std::int64_t M = 1024;
         Tensor a = Tensor::Random({M, M}, 0.0f, 1.0f, DT::FLOAT32, dev);
         Tensor b = Tensor::Random({M, M}, 0.0f, 1.0f, DT::FLOAT32, dev);
-        const Phases p = measure([&] { (void)ops::MatMul(a, b); }, 5);
+        const Phases p = measure([&] { (void)ops::MatMul(a, b); });
         report("matmul f32 1024", p, 2.0 * M * M * M, true);
     }
     {   // 半精度 matmul：Vulkan 上设备具备条件时换成 cooperative matrix（tensor
@@ -263,7 +259,7 @@ int main(int argc, char* argv[]) {
             for (const std::int64_t M : {std::int64_t{1024}, std::int64_t{2048}}) {
                 Tensor a = Tensor::Random({M, M}, 0.0f, 1.0f, dt, dev);
                 Tensor b = Tensor::Random({M, M}, 0.0f, 1.0f, dt, dev);
-                const Phases p = measure([&] { (void)ops::MatMul(a, b); }, 5);
+                const Phases p = measure([&] { (void)ops::MatMul(a, b); });
                 report(std::format("matmul {} {}", dtype_to_string(dt), M), p,
                        2.0 * M * M * M, true);
             }
@@ -273,7 +269,7 @@ int main(int argc, char* argv[]) {
         constexpr std::int64_t N = 8, C = 64, H = 56, W = 56, K = 64, R = 3, S = 3;
         Tensor x = Tensor::Random({N, C, H, W}, 0.0f, 1.0f, DT::FLOAT32, dev);
         Tensor w = Tensor::Random({K, C, R, S}, 0.0f, 1.0f, DT::FLOAT32, dev);
-        const Phases p = measure([&] { (void)ops::Conv2d(x, w); }, 5);
+        const Phases p = measure([&] { (void)ops::Conv2d(x, w); });
         report("conv2d f32 8x64x56x56", p, 2.0 * double(N) * K * (H - 2) * (W - 2) * C * R * S, true);
     }
     {   // arange：单写（设备生成器形式：宿主算值一次性搬到目标设备）
@@ -317,14 +313,14 @@ int main(int argc, char* argv[]) {
         Tensor a = Tensor::Random({R, H}, 0.0f, 1.0f, DT::FLOAT32, dev);
         Tensor w = Tensor::Random({H}, 0.0f, 1.0f, DT::FLOAT32, dev);
         Tensor b = Tensor::Random({H}, 0.0f, 1.0f, DT::FLOAT32, dev);
-        const Phases p = measure([&] { (void)ops::LayerNorm(a, w, b, 1, 1e-5f); }, 5);
+        const Phases p = measure([&] { (void)ops::LayerNorm(a, w, b, 1, 1e-5f); });
         report("layer_norm f32 8192x4096", p, 4.0 * double(R) * H * 4);
     }
     {   // rms_norm：AVX2 归约 mean(x²) + 乘 weight
         constexpr std::int64_t R = 8192, H = 4096;
         Tensor a = Tensor::Random({R, H}, 0.0f, 1.0f, DT::FLOAT32, dev);
         Tensor w = Tensor::Random({H}, 0.0f, 1.0f, DT::FLOAT32, dev);
-        const Phases p = measure([&] { (void)ops::RmsNorm(a, w, 1, 1e-5f); }, 5);
+        const Phases p = measure([&] { (void)ops::RmsNorm(a, w, 1, 1e-5f); });
         report("rms_norm f32 8192x4096", p, 3.0 * double(R) * H * 4);
     }
     {   // randn：写 N 个高斯样本
@@ -355,7 +351,7 @@ int main(int argc, char* argv[]) {
         Tensor logits = Tensor::Random({N, C}, 0.0f, 1.0f, DT::FLOAT32, dev);
         Tensor tgt = Tensor::Random({N}, 0.0f, float(C - 1), DT::INT64, dev);
         if (dev == Device::CPU) {
-            const Phases p = measure([&] { (void)ops::CrossEntropyLoss(logits, tgt); }, 5);
+            const Phases p = measure([&] { (void)ops::CrossEntropyLoss(logits, tgt); });
             report("cross_entropy f32 8192x256", p, 4.0 * double(N) * C * 4);
         }
     }

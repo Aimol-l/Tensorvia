@@ -351,11 +351,6 @@ std::println("{}", device_id_to_string(t.device_id()));   // CUDA:1
 完整示例见 `examples/multi_device.cpp`：在只有一张卡的机器上它照常跑完，跨卡那一段
 打印一条提示后跳过。
 
-> **迁移提示**：旧的 `to_device(uint32_t id = 0)` 已删除。它把传进来的参数整个忽略，只按
-> 编译期开了哪些后端挑目标（同时编入多个后端时静默选 Vulkan），在多设备下没法表达
-> "第几张卡"。改用 `to_device(Device)`（目标后端当前线程的当前卡）或
-> `to_device(DeviceId{kind, index})` / `to_device(kind, index)`（精确指定）。
-
 ## 🧪 测试
 
 ```sh
@@ -371,17 +366,29 @@ cmake -B build -DBACKEND_CPU=ON -DCMAKE_BUILD_TYPE=Release -DBUILD_TEST=ON && cm
 # cmake -B build -DBACKEND_SYCL=ON -DCMAKE_BUILD_TYPE=Release -DBUILD_TEST=ON && cmake --build build --parallel
 ```
 
-`tests/` 是头文件范式（`#include "tensorvia.hpp"`），mcpp 与 CMake 两条路径编译同一批文件。每个 `tests/*.cpp` 各自是一个独立的测试二进制：`device`（后端生命周期、多设备寻址、CUDA context/stream）、`view`（视图/offset/引用语义）、`ops`（算子与数值覆盖）、`contract`（FR-1/FR-2/FR-3 契约）、`p0`（P0 语义契约 FR-3..FR-7）、`p1`（FR-9..FR-12：N-D matmul、推理关键算子的跨后端一致性、搬运算子、不支持组合的显式报错）、`dim`、`async_contract`（隐式同步断言：提交阶段零等待，显式点各计一次）；共享夹具与助手在 `tests/test_support.hpp`。另有 `benchmark/bench.cpp`（基准，自带 main；`mcpp.toml` 的 `[test] discover` 与 `-DBUILD_BENCH=ON` 都会构建它；`bench [cpu\|cuda\|vulkan\|sycl]` 选后端，不传参时测本构建编译进来的后端）。上面的 lane 命令验证的是**该 lane 完整构建 + 公共测试通过**；各设备后端编入后的算子行为由消费方冒烟覆盖。测试通过 `[dev-dependencies]` 拿 GoogleTest——它只进测试二进制，不进 `libtensorvia.so`。模块导出面（`import tensorvia;` 的符号清单）由 `tools/gen_facade.py --check` 在每次 `mcpp build` 时守卫。
 
 ## 📊 性能基线
 
-`benchmark/bench.cpp` 把每次调用拆成 submit（调用返回）/ sync（`synchronize()` 耗时）/ total 三段，冷启动（JIT / 流水线创建）单独一列；吞吐按 total 计算。同机基线表（含硬件 / 驱动 / 编译器 / profile 与逐用例三段耗时）在 [`benchmark/baseline/`](benchmark/baseline/)；分类性能下限（FR-4.3 的校准百分比、不达标项与根因）在 [`docs/performance.md`](docs/performance.md)。性能结论以那两份文档与同机比值为准，本文不手写数字。
+`benchmark/bench.cpp` 把每次调用拆成 submit（调用返回）/ sync（`synchronize()` 耗时）/ total 三段，冷启动（JIT / 流水线创建）单独一列；吞吐按 total 计算。每个用例跑 11 次——第 1 次预热（含一次性成本，单独作为 `cold` 报告），其余 10 次**取均值**；整轮重复 6 次，表中是 60 次测算的均值。
 
-> **SYCL lane 的 llvm 构建需要 mcpp ≥ 2026.10.26.1**：该版本起 mcpp 把
-> libsycl 带来的 libstdc++ 识别为 C++ ABI island 并做链接后验证，`.so` 内
-> 异常类型恢复匹配（此前 llvm + SYCL lane 有 1 个 `View.
-> InPlaceRejectsNonContiguous` 异常类型失败，需 `--toolchain gcc@16.1.0`
-> 绕过；现已实测 23/23 全过）。
+下表是同机（i5-14600KF + RTX 4070 Ti SUPER）的一次快照，四个后端都在 2026-11-05 按同一口径采集，**CPU 后端为基准**：CPU 列是绝对值，其余三列是同一用例相对 CPU 的倍数。
+
+| 用例 | 度量 | CPU（基准） | CUDA | SYCL | Vulkan |
+| --- | --- | --- | --- | --- | --- |
+| add f32 16M | GB/s | 64.2 | 9.5× | 9.4× | 3.6× |
+| relu f32 16M | GB/s | 42.2 | 14.2× | 12.4× | 3.5× |
+| sum f32 16M | GB/s | 24.8 | 22.4× | 21.1× | 3.3× |
+| sum-axis1 4096x4096 | GB/s | 87.9 | 6.6× | 6.0× | 1.1× |
+| transpose2d 1024x1024 | GB/s | 32.0 | 23.2× | 19.0× | 0.5×＊ |
+| transpose3d 64^3 | GB/s | 8.0 | 46.3× | 20.5× | 0.7× |
+| gather permute 128x64x64 | GB/s | 2.66 | 77.2× | 99.3× | 3.9× |
+| where f32 16M | GB/s | 40.8 | 17.6× | 16.7× | 2.5× |
+| layer_norm f32 8192x4096 | GB/s | 86.0 | 13.5× | 13.5× | 5.0× |
+| rms_norm f32 8192x4096 | GB/s | 64.7 | 13.8× | 12.3× | 5.1× |
+| matmul f32 1024 | GFLOPS | 283 | 39.6× | 21.1× | 12.2× |
+| conv2d f32 8x64x56x56 | GFLOPS | 15.3 | 340× | 232× | 153× |
+
+＊ Vulkan 的 `transpose2d` 是纯固定开销用例（submit 0.27 + sync 0.28 ms），bench 里紧跟在 `sum-axis1` 之后，量值随前序负载漂移；同一份代码单独探针实测 0.398 ms（约 21 GB/s），见 Vulkan 基线的说明。
 
 ## 📄 许可证
 

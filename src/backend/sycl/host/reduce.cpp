@@ -69,12 +69,12 @@ AxisLayout axis_layout(const Tensor& a, int axis, const char* what) {
 //
 // 轴内核的几何是 outer x axis x inner，全归约展平后是 outer=inner=1、
 // axis=numel，于是 total=1：一个 work-group 里只有一个工作项在跑。改成先切成
-// kFlatReduceBlocks 段并行算部分值，再对这 B 个部分值折叠。段长取 ceil，末段
-// 短于段长，由内核按 numel 截断。
+// kFlatReduceBlocks 段，每段一个 work-group 合并读取并折成部分值，再对这 B 个
+// 部分值折叠。段长取 ceil，末段短于段长，由内核按 numel 截断。
 //
-// B 取 1024 足以饱和常见设备；每段 N/1024 个元素（16M 时 64 个/工作项）仍是
-// 访存受限而非 launch 受限。阈值以下不划算：单工作项串行只有数十 µs，多一次
-// 提交加一次 scratch 分配回不来。
+// B 取 1024 足以饱和常见设备；每段 N/1024 个元素（16M 时每段 16K、每工作项 64
+// 个）仍是访存受限而非 launch 受限。阈值以下不划算：单工作项串行只有数十 µs，
+// 多一次提交加一次 scratch 分配回不来。
 constexpr int64_t kFlatReduceBlocks   = 1024;
 constexpr int64_t kFlatReduceMinNumel = 1 << 16;
 
@@ -93,27 +93,23 @@ Tensor axis_reduce(const Tensor& a, int axis, DataType out_type, int op, const c
     const tvv::sycl::ReduceAxis& p = layout.params;
 
     if (flat_reduce_applies(p)) {
-        const int64_t chunk = (p.axis + kFlatReduceBlocks - 1) / kFlatReduceBlocks;
-        Tensor partial({kFlatReduceBlocks}, out_type, Device::SYCL);
+        // 段数不超过元素数：极小输入也得让每段至少有一个元素。
+        const int64_t blocks = p.axis < kFlatReduceBlocks ? p.axis : kFlatReduceBlocks;
+        Tensor partial({blocks}, out_type, Device::SYCL);
 
         // 趟 1：Mean 先算纯部分和——末段短于 chunk，先除会少算，分母留到趟 2。
         const int pass1_op = (op == tvv::sycl::kReduceMean) ? tvv::sycl::kReduceSum : op;
-        const tvv::sycl::ReduceAxis first{.outer = kFlatReduceBlocks,
-                                          .axis = chunk,
-                                          .inner = 1,
-                                          .numel = p.axis,
-                                          .mean_n = 0};
-        sycl_ufunc::check(::sycl_c_launch_reduce_axis(handle, src.data(), partial.data(),
-                                                     static_cast<int>(src.dtype()),
-                                                     static_cast<int>(out_type), pass1_op,
-                                                     &first),
+        sycl_ufunc::check(::sycl_c_launch_reduce_partial(handle, src.data(), partial.data(),
+                                                         p.axis, static_cast<int>(src.dtype()),
+                                                         static_cast<int>(out_type),
+                                                         pass1_op, blocks),
                           what);
 
         // 趟 2：折叠 B 个部分值。输入就是 partial，元素数恰好 B，截断恒等。
         const tvv::sycl::ReduceAxis second{.outer = 1,
-                                           .axis = kFlatReduceBlocks,
+                                           .axis = blocks,
                                            .inner = 1,
-                                           .numel = kFlatReduceBlocks,
+                                           .numel = blocks,
                                            .mean_n = (op == tvv::sycl::kReduceMean) ? p.axis : 0};
         sycl_ufunc::check(::sycl_c_launch_reduce_axis(handle, partial.data(), out.data(),
                                                       static_cast<int>(out_type),

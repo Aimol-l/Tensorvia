@@ -4,6 +4,250 @@ using namespace tvv::sycl_dev;
 
 namespace {
 
+// 分块几何（两个 tiled 内核共用）。与 CUDA 后端一致，是实测选出来的。
+constexpr int kConvTile       = 32;  // 输出 tile 的边长
+constexpr int kConvThreads    = 64;  // 8x8
+constexpr int kConvThreadTile = 4;   // 每工作项 4x4 输出
+constexpr int kConvThreadsX   = kConvTile / kConvThreadTile;  // 8
+constexpr int kConvThreadsY   = kConvTile / kConvThreadTile;  // 8
+constexpr int kConvMaxKernel  = 5;   // kh/kw 上限（patch 最大 36x36）
+constexpr int kConvMaxOcTile  = 4;   // 单个 work-group 的输出通道数上限
+
+template <class T>
+inline void conv2d_tiled3_kernel(::sycl::queue& q, const T* in, const T* weight,
+                                 const T* bias, T* out, const tvv::sycl::Conv2d& p) {
+    using Acc = promoted_t<T>;
+    constexpr int oc_tile = sizeof(Acc) >= 8 ? 2 : kConvMaxOcTile;
+    constexpr int kSide   = kConvThreadTile + 3 - 1;  // 6
+    constexpr int kPatchSide = kConvTile + 2;
+
+    const int64_t groups = (p.out_ch + oc_tile - 1) / oc_tile;
+    const size_t grid_x = static_cast<size_t>((p.out_w + kConvTile - 1) / kConvTile);
+    const size_t grid_y = static_cast<size_t>((p.out_h + kConvTile - 1) / kConvTile);
+
+    q.submit([&](::sycl::handler& h) {
+        ::sycl::local_accessor<T, 1> patch(::sycl::range<1>(kPatchSide * kPatchSide), h);
+        ::sycl::local_accessor<T, 1> wsh(::sycl::range<1>(oc_tile * 9), h);
+        // SYCL 的线性工作项下标以第 1 维最快，所以“列”放在 local_id(1)/
+        // group(1) 上，warp 内的装载才落在连续地址。
+        h.parallel_for(
+            ::sycl::nd_range<3>(
+                ::sycl::range<3>(grid_y * kConvThreadsY, grid_x * kConvThreadsX,
+                                 static_cast<size_t>(p.batch * groups)),
+                ::sycl::range<3>(kConvThreadsY, kConvThreadsX, 1)),
+            [=](::sycl::nd_item<3> item) {
+                const int ty  = static_cast<int>(item.get_local_id(0));
+                const int tx  = static_cast<int>(item.get_local_id(1));
+                const int tid = ty * kConvThreadsX + tx;
+
+                const int64_t plane = static_cast<int64_t>(item.get_group(2));
+                const int64_t g   = plane % groups;
+                const int64_t n   = plane / groups;
+                const int64_t oc0 = g * oc_tile;
+                const int64_t oy0 = static_cast<int64_t>(item.get_group(0)) * kConvTile;
+                const int64_t ox0 = static_cast<int64_t>(item.get_group(1)) * kConvTile;
+
+                const int64_t in_plane = p.in_h * p.in_w;
+
+                Acc acc[oc_tile][kConvThreadTile][kConvThreadTile];
+                for (int o = 0; o < oc_tile; ++o) {
+                    const int64_t oc = oc0 + o;
+                    const Acc init = (bias != nullptr && oc < p.out_ch)
+                                         ? to_compute<Acc>(bias[oc])
+                                         : Acc(0);
+                    for (int i = 0; i < kConvThreadTile; ++i)
+                        for (int j = 0; j < kConvThreadTile; ++j) acc[o][i][j] = init;
+                }
+
+                for (int64_t c = 0; c < p.in_ch; ++c) {
+                    const T* in_c = in + (n * p.in_ch + c) * in_plane;
+                    for (int64_t idx = tid; idx < kPatchSide * kPatchSide;
+                         idx += kConvThreads) {
+                        const int64_t py = idx / kPatchSide;
+                        const int64_t px = idx % kPatchSide;
+                        const int64_t iy = oy0 - p.padding + py;
+                        const int64_t ix = ox0 - p.padding + px;
+                        patch[py * kPatchSide + px] =
+                            (iy >= 0 && iy < p.in_h && ix >= 0 && ix < p.in_w)
+                                ? in_c[iy * p.in_w + ix]
+                                : T(0);
+                    }
+                    for (int64_t idx = tid; idx < oc_tile * 9; idx += kConvThreads) {
+                        const int64_t o  = idx / 9;
+                        const int64_t r  = idx % 9;
+                        const int64_t oc = oc0 + o;
+                        wsh[idx] = oc < p.out_ch ? weight[(oc * p.in_ch + c) * 9 + r] : T(0);
+                    }
+                    item.barrier(::sycl::access::fence_space::local_space);
+
+                    // 每个工作项只把 (4+3-1)^2 = 36 个输入收进寄存器，随后
+                    // 4 通道 x 9 tap x 16 输出 = 576 次 FMA 全部吃寄存器。
+                    Acc rp[kSide][kSide];
+                    #pragma unroll
+                    for (int i = 0; i < kSide; ++i)
+                        #pragma unroll
+                        for (int j = 0; j < kSide; ++j)
+                            rp[i][j] = to_compute<Acc>(
+                                patch[(ty * kConvThreadTile + i) * kPatchSide +
+                                      tx * kConvThreadTile + j]);
+
+                    #pragma unroll
+                    for (int o = 0; o < oc_tile; ++o) {
+                        #pragma unroll
+                        for (int i = 0; i < 3; ++i) {
+                            #pragma unroll
+                            for (int j = 0; j < 3; ++j) {
+                                const Acc wv = to_compute<Acc>(wsh[o * 9 + i * 3 + j]);
+                                #pragma unroll
+                                for (int di = 0; di < kConvThreadTile; ++di) {
+                                    #pragma unroll
+                                    for (int dj = 0; dj < kConvThreadTile; ++dj)
+                                        acc[o][di][dj] += rp[di + i][dj + j] * wv;
+                                }
+                            }
+                        }
+                    }
+                    item.barrier(::sycl::access::fence_space::local_space);
+                }
+
+                const int64_t out_plane = p.out_h * p.out_w;
+                for (int o = 0; o < oc_tile; ++o) {
+                    const int64_t oc = oc0 + o;
+                    if (oc >= p.out_ch) continue;
+                    T* out_c = out + (n * p.out_ch + oc) * out_plane;
+                    for (int di = 0; di < kConvThreadTile; ++di) {
+                        const int64_t oy = oy0 + ty * kConvThreadTile + di;
+                        if (oy >= p.out_h) continue;
+                        for (int dj = 0; dj < kConvThreadTile; ++dj) {
+                            const int64_t ox = ox0 + tx * kConvThreadTile + dj;
+                            if (ox >= p.out_w) continue;
+                            out_c[oy * p.out_w + ox] = store_as<T>(acc[o][di][dj]);
+                        }
+                    }
+                }
+            });
+    });
+}
+
+// 通用分块卷积：一个 work-group 算 (n, oc 组) 的一个 32x32 输出 tile，每个工作项
+// 算其中 4x4，同时算多个输出通道。
+//
+// 旧内核一输出一工作项：每个输出都要沿 C x kh x kw 重新从全局/缓存读一遍输入，
+// 工作项之间没有显式复用。现在每处理一个输入通道，整个 work-group 先把该通道
+// 覆盖到的 (32+kh-1) x (32+kw-1) 输入 patch 收进 local memory，之后组内所有输出
+// 都从 local 读；同一份 patch 再由多个输出通道复用，输入侧全局流量按通道组数
+// 等比下降。
+template <class T>
+inline void conv2d_tiled_kernel(::sycl::queue& q, const T* in, const T* weight,
+                                const T* bias, T* out, const tvv::sycl::Conv2d& p) {
+    using Acc = promoted_t<T>;
+    constexpr int oc_tile = sizeof(Acc) >= 8 ? 2 : kConvMaxOcTile;
+    constexpr int kPatchMax = kConvTile + kConvMaxKernel - 1;  // 36
+
+    const int64_t groups = (p.out_ch + oc_tile - 1) / oc_tile;
+    const size_t grid_x = static_cast<size_t>((p.out_w + kConvTile - 1) / kConvTile);
+    const size_t grid_y = static_cast<size_t>((p.out_h + kConvTile - 1) / kConvTile);
+
+    q.submit([&](::sycl::handler& h) {
+        ::sycl::local_accessor<T, 1> patch(::sycl::range<1>(kPatchMax * kPatchMax), h);
+        ::sycl::local_accessor<T, 1> wsh(
+            ::sycl::range<1>(oc_tile * kConvMaxKernel * kConvMaxKernel), h);
+        // SYCL 的线性工作项下标以第 1 维最快，所以“列”放在 local_id(1)/
+        // group(1) 上，warp 内的装载才落在连续地址。
+        h.parallel_for(
+            ::sycl::nd_range<3>(
+                ::sycl::range<3>(grid_y * kConvThreadsY, grid_x * kConvThreadsX,
+                                 static_cast<size_t>(p.batch * groups)),
+                ::sycl::range<3>(kConvThreadsY, kConvThreadsX, 1)),
+            [=](::sycl::nd_item<3> item) {
+                const int ty  = static_cast<int>(item.get_local_id(0));  // 负责 4 行
+                const int tx  = static_cast<int>(item.get_local_id(1));  // 负责 4 列
+                const int tid = ty * kConvThreadsX + tx;
+
+                const int64_t plane = static_cast<int64_t>(item.get_group(2));
+                const int64_t g   = plane % groups;
+                const int64_t n   = plane / groups;
+                const int64_t oc0 = g * oc_tile;
+                const int64_t oy0 = static_cast<int64_t>(item.get_group(0)) * kConvTile;
+                const int64_t ox0 = static_cast<int64_t>(item.get_group(1)) * kConvTile;
+
+                const int64_t patch_h  = kConvTile + p.kh - 1;
+                const int64_t patch_w  = kConvTile + p.kw - 1;
+                const int64_t in_plane = p.in_h * p.in_w;
+                const int64_t taps     = p.kh * p.kw;
+
+                Acc acc[oc_tile][kConvThreadTile][kConvThreadTile];
+                for (int o = 0; o < oc_tile; ++o) {
+                    const int64_t oc = oc0 + o;
+                    const Acc init = (bias != nullptr && oc < p.out_ch)
+                                         ? to_compute<Acc>(bias[oc])
+                                         : Acc(0);
+                    for (int i = 0; i < kConvThreadTile; ++i)
+                        for (int j = 0; j < kConvThreadTile; ++j) acc[o][i][j] = init;
+                }
+
+                for (int64_t c = 0; c < p.in_ch; ++c) {
+                    const T* in_c = in + (n * p.in_ch + c) * in_plane;
+                    for (int64_t idx = tid; idx < patch_h * patch_w; idx += kConvThreads) {
+                        const int64_t py = idx / patch_w;
+                        const int64_t px = idx % patch_w;
+                        const int64_t iy = oy0 - p.padding + py;
+                        const int64_t ix = ox0 - p.padding + px;
+                        patch[py * patch_w + px] =
+                            (iy >= 0 && iy < p.in_h && ix >= 0 && ix < p.in_w)
+                                ? in_c[iy * p.in_w + ix]
+                                : T(0);
+                    }
+                    for (int64_t idx = tid; idx < oc_tile * taps; idx += kConvThreads) {
+                        const int64_t o  = idx / taps;
+                        const int64_t r  = idx % taps;
+                        const int64_t oc = oc0 + o;
+                        wsh[idx] = oc < p.out_ch
+                                       ? weight[oc * p.in_ch * taps + c * taps + r]
+                                       : T(0);
+                    }
+                    item.barrier(::sycl::access::fence_space::local_space);
+
+                    for (int o = 0; o < oc_tile; ++o) {
+                        const T* w_c = wsh.get_pointer() + o * taps;
+                        for (int64_t i = 0; i < p.kh; ++i) {
+                            for (int64_t j = 0; j < p.kw; ++j) {
+                                const Acc wv = to_compute<Acc>(w_c[i * p.kw + j]);
+                                for (int di = 0; di < kConvThreadTile; ++di) {
+                                    for (int dj = 0; dj < kConvThreadTile; ++dj) {
+                                        acc[o][di][dj] +=
+                                            to_compute<Acc>(
+                                                patch[(ty * kConvThreadTile + di + i) *
+                                                          patch_w +
+                                                      tx * kConvThreadTile + dj + j]) *
+                                            wv;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    item.barrier(::sycl::access::fence_space::local_space);
+                }
+
+                const int64_t out_plane = p.out_h * p.out_w;
+                for (int o = 0; o < oc_tile; ++o) {
+                    const int64_t oc = oc0 + o;
+                    if (oc >= p.out_ch) continue;
+                    T* out_c = out + (n * p.out_ch + oc) * out_plane;
+                    for (int di = 0; di < kConvThreadTile; ++di) {
+                        const int64_t oy = oy0 + ty * kConvThreadTile + di;
+                        if (oy >= p.out_h) continue;
+                        for (int dj = 0; dj < kConvThreadTile; ++dj) {
+                            const int64_t ox = ox0 + tx * kConvThreadTile + dj;
+                            if (ox >= p.out_w) continue;
+                            out_c[oy * p.out_w + ox] = store_as<T>(acc[o][di][dj]);
+                        }
+                    }
+                }
+            });
+    });
+}
+
 template <class T>
 void conv2d_kernel(::sycl::queue& q, const T* in, const T* weight, const T* bias, T* out,
                    const tvv::sycl::Conv2d& p) {
@@ -57,10 +301,29 @@ int sycl_c_launch_conv2d(void* ctx, const void* in, const void* weight, const vo
         return tvv::sycl::kSyclInvalid;
     try {
         auto& q = queue_of(ctx);
+        // tiled 路径要求 stride == 1（patch 坐标按步长 1 推导）且核大小不超过
+        // local patch 的静态上限。
+        const bool tiled_geom = p->stride == 1 && p->kh > 0 && p->kw > 0 &&
+                                p->kh <= kConvMaxKernel && p->kw <= kConvMaxKernel &&
+                                p->in_ch > 0 && p->out_ch > 0;
         return dispatch_dtype(dtype, [&](auto tag) -> int {
             using T = typename decltype(tag)::type;
-            conv2d_kernel<T>(q, static_cast<const T*>(in), static_cast<const T*>(weight),
-                             static_cast<const T*>(bias), static_cast<T*>(out), *p);
+            if (tiled_geom) {
+                if (p->kh == 3 && p->kw == 3)
+                    conv2d_tiled3_kernel<T>(q, static_cast<const T*>(in),
+                                            static_cast<const T*>(weight),
+                                            static_cast<const T*>(bias),
+                                            static_cast<T*>(out), *p);
+                else
+                    conv2d_tiled_kernel<T>(q, static_cast<const T*>(in),
+                                           static_cast<const T*>(weight),
+                                           static_cast<const T*>(bias),
+                                           static_cast<T*>(out), *p);
+            } else {
+                conv2d_kernel<T>(q, static_cast<const T*>(in),
+                                 static_cast<const T*>(weight),
+                                 static_cast<const T*>(bias), static_cast<T*>(out), *p);
+            }
             return tvv::sycl::kSyclOk;
         });
     } catch (const std::exception& e) {

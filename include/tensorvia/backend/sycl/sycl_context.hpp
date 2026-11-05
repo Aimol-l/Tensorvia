@@ -4,9 +4,6 @@
 #include <memory>
 #include <string>
 
-// 不含 SYCL 的接口：queue 与 USM 分配器都在 src/backend/sycl/device/runtime.sycl
-// 创建的不透明句柄里。宿主驱动（.cpp）与设备单元都包含这个头，因此它必须避开
-// <sycl/sycl.hpp>。
 #include "tensorvia/types.hpp"
 #include "tensorvia/context.hpp"
 

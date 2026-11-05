@@ -5,45 +5,6 @@ namespace contract = tvv::sycl_dev::contract;
 
 namespace {
 
-// 扁平输出下标 -> 三侧元素偏移。广播维的步长为 0，偏移自带视图起点。
-inline int64_t bcast_offset3(int64_t idx, const tvv::sycl::Select& p,
-                             const int64_t* strides) {
-    int64_t off = 0;
-    for (int d = p.ndim - 1; d >= 0; --d) {
-        const int64_t dim = p.shape[d];
-        if (dim <= 0) continue;
-        off += (idx % dim) * strides[d];
-        idx /= dim;
-    }
-    return off;
-}
-
-// 非零即真，与 CPU 的 `cond[i] != C(0)` 一致（NaN 因此为真）。
-inline bool cond_truth(const void* p, int64_t i, int dtype) {
-    switch (dtype) {
-        case tvv::sycl::kBool:
-            return static_cast<const uint8_t*>(p)[i] != 0;
-        case tvv::sycl::kInt8:
-            return static_cast<const int8_t*>(p)[i] != 0;
-        case tvv::sycl::kInt16:
-            return static_cast<const int16_t*>(p)[i] != 0;
-        case tvv::sycl::kInt32:
-            return static_cast<const int32_t*>(p)[i] != 0;
-        case tvv::sycl::kInt64:
-            return static_cast<const int64_t*>(p)[i] != 0;
-        case tvv::sycl::kBfloat16:
-            return load_as_float(static_cast<const ::sycl::ext::oneapi::bfloat16*>(p)[i]) != 0.0f;
-        case tvv::sycl::kFloat16:
-            return load_as_float(static_cast<const ::sycl::half*>(p)[i]) != 0.0f;
-        case tvv::sycl::kFloat32:
-            return static_cast<const float*>(p)[i] != 0.0f;
-        case tvv::sycl::kFloat64:
-            return static_cast<const double*>(p)[i] != 0.0;
-        default:
-            return false;
-    }
-}
-
 // 索引只有 INT32/INT64 两种（公开入口已经拒绝其它 dtype）。
 inline int64_t load_index(const void* p, int64_t i, int dtype) {
     if (dtype == tvv::sycl::kInt64) return static_cast<const int64_t*>(p)[i];
@@ -66,16 +27,81 @@ inline T normalize_store(T v) {
     else return v;
 }
 
-template <class T>
-void select_kernel(::sycl::queue& q, const void* cond, const T* a, const T* b, T* out,
+// 非零即真，按类型静态化（对应 cond_truth 的设备分支）。
+template <class C>
+inline bool is_nonzero(C v) {
+    if constexpr (is_low_precision<C>::value) return load_as_float(v) != 0.0f;
+    else return v != C(0);
+}
+
+// 通用路径：三侧形状相同、步长各异（含广播的 0 步长）。坐标只解码一次，三侧各自
+// 点乘步长；旧写法对每一侧各跑一遍解码，每个元素要做三倍的 64 位除/模。
+template <class T, class C>
+void select_kernel(::sycl::queue& q, const C* cond, const T* a, const T* b, T* out,
                    const tvv::sycl::Select& p) {
     q.parallel_for(range_of(p.numel), [=](::sycl::id<1> idx) {
         const int64_t i = static_cast<int64_t>(idx[0]);
-        const bool pick_a = cond_truth(cond, p.off_c + bcast_offset3(i, p, p.sc),
-                                       p.cond_dtype);
-        const int64_t ia = p.off_a + bcast_offset3(i, p, p.sa);
-        const int64_t ib = p.off_b + bcast_offset3(i, p, p.sb);
-        out[p.off_o + i] = normalize_store(pick_a ? a[ia] : b[ib]);
+        int64_t rem = i;
+        int64_t oc = p.off_c;
+        int64_t oa = p.off_a;
+        int64_t ob = p.off_b;
+        for (int d = p.ndim - 1; d >= 0; --d) {
+            const int64_t dim = p.shape[d];
+            if (dim <= 0) continue;
+            const int64_t coord = rem % dim;
+            rem /= dim;
+            oc += coord * p.sc[d];
+            oa += coord * p.sa[d];
+            ob += coord * p.sb[d];
+        }
+        out[p.off_o + i] = normalize_store(is_nonzero<C>(cond[oc]) ? a[oa] : b[ob]);
+    });
+}
+
+// 三侧都是连续行主序：偏移恒等于扁平下标。逐元素解码三组多维坐标是这里唯一的
+// 开销来源（每个元素 6 次 64 位除/模），连续情形下它全是恒等运算。
+inline bool select_side_contiguous(const tvv::sycl::Select& p, const int64_t* strides) {
+    int64_t stride = 1;
+    for (int d = p.ndim - 1; d >= 0; --d) {
+        if (p.shape[d] <= 0) continue;
+        if (strides[d] != stride) return false;
+        stride *= p.shape[d];
+    }
+    return true;
+}
+
+template <class T, class C>
+void select_contig_kernel(::sycl::queue& q, const C* cond, const T* a, const T* b,
+                          T* out, const tvv::sycl::Select& p) {
+    q.parallel_for(range_of(p.numel), [=](::sycl::id<1> idx) {
+        const int64_t i = static_cast<int64_t>(idx[0]);
+        const bool pick_a = is_nonzero<C>(cond[p.off_c + i]);
+        out[p.off_o + i] = normalize_store(pick_a ? a[p.off_a + i] : b[p.off_b + i]);
+    });
+}
+
+// 一侧在全 0 步长下是“整侧一个值”（标量或整维广播）。
+inline bool select_side_constant(const tvv::sycl::Select& p, const int64_t* strides) {
+    for (int d = 0; d < p.ndim; ++d) {
+        if (p.shape[d] > 0 && strides[d] != 0) return false;
+    }
+    return true;
+}
+
+// 每侧要么就是扁平下标（连续），要么是单个常量（全 0 步长）——零维标量参与的
+// where 属于这一族。三个 kind 在整个网格上一致，不引入发散；相比通用路径省掉了
+// 逐元素多维解码和随之而来的结构体动态下标访问。
+template <class T, class C>
+void select_linear_kernel(::sycl::queue& q, const C* cond, const T* a, const T* b,
+                          T* out, const tvv::sycl::Select& p, int cond_lin,
+                          int a_lin, int b_lin) {
+    q.parallel_for(range_of(p.numel), [=](::sycl::id<1> idx) {
+        const int64_t i = static_cast<int64_t>(idx[0]);
+        const bool pick_a =
+            is_nonzero<C>(cond[p.off_c + (cond_lin ? i : int64_t{0})]);
+        const int64_t oa = p.off_a + (a_lin ? i : int64_t{0});
+        const int64_t ob = p.off_b + (b_lin ? i : int64_t{0});
+        out[p.off_o + i] = normalize_store(pick_a ? a[oa] : b[ob]);
     });
 }
 
@@ -147,9 +173,39 @@ int sycl_c_launch_select(void* ctx, const void* cond, const void* a, const void*
         auto& q = queue_of(ctx);
         return dispatch_dtype(out_dtype, [&](auto tag) -> int {
             using T = typename decltype(tag)::type;
-            select_kernel<T>(q, cond, static_cast<const T*>(a), static_cast<const T*>(b),
-                             static_cast<T*>(out), *p);
-            return tvv::sycl::kSyclOk;
+            const bool c_lin = select_side_contiguous(*p, p->sc);
+            const bool a_lin = select_side_contiguous(*p, p->sa);
+            const bool b_lin = select_side_contiguous(*p, p->sb);
+            if (c_lin && a_lin && b_lin) {
+                return dispatch_dtype(p->cond_dtype, [&](auto cond_tag) -> int {
+                    using C = typename decltype(cond_tag)::type;
+                    select_contig_kernel<T, C>(q, static_cast<const C*>(cond),
+                                               static_cast<const T*>(a),
+                                               static_cast<const T*>(b),
+                                               static_cast<T*>(out), *p);
+                    return tvv::sycl::kSyclOk;
+                });
+            }
+            const bool c_scalar = !c_lin && select_side_constant(*p, p->sc);
+            const bool a_scalar = !a_lin && select_side_constant(*p, p->sa);
+            const bool b_scalar = !b_lin && select_side_constant(*p, p->sb);
+            if ((c_lin || c_scalar) && (a_lin || a_scalar) && (b_lin || b_scalar)) {
+                return dispatch_dtype(p->cond_dtype, [&](auto cond_tag) -> int {
+                    using C = typename decltype(cond_tag)::type;
+                    select_linear_kernel<T, C>(
+                        q, static_cast<const C*>(cond), static_cast<const T*>(a),
+                        static_cast<const T*>(b), static_cast<T*>(out), *p,
+                        c_lin ? 1 : 0, a_lin ? 1 : 0, b_lin ? 1 : 0);
+                    return tvv::sycl::kSyclOk;
+                });
+            }
+            return dispatch_dtype(p->cond_dtype, [&](auto cond_tag) -> int {
+                using C = typename decltype(cond_tag)::type;
+                select_kernel<T, C>(q, static_cast<const C*>(cond),
+                                    static_cast<const T*>(a), static_cast<const T*>(b),
+                                    static_cast<T*>(out), *p);
+                return tvv::sycl::kSyclOk;
+            });
         });
     } catch (const std::exception& e) {
         return record_failure(e);

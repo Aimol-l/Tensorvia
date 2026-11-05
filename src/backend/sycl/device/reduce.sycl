@@ -5,10 +5,56 @@ namespace contract = tvv::sycl_dev::contract;
 
 namespace {
 
-template <class T, class Out>
+template <class T>
+inline constexpr bool prod_uses_wide_acc =
+    std::is_floating_point_v<T> || is_low_precision<T>::value;
+
+template <class T, class F>
+inline void with_reduce_acc(int op, F&& f) {
+    if constexpr (prod_uses_wide_acc<T>) {
+        if (op == tvv::sycl::kReduceProd) {
+            f(type_tag<double>{});
+            return;
+        }
+    }
+    (void)op;
+    f(type_tag<reduction_acc_t<T>>{});
+}
+
+template <class Acc>
+inline Acc identity_acc(int op) {
+    if (op == tvv::sycl::kReduceSum || op == tvv::sycl::kReduceMean) return Acc(0);
+    if (op == tvv::sycl::kReduceProd) return Acc(1);
+    if (op == tvv::sycl::kReduceMin) return max_finite<Acc>();
+    return lowest_finite<Acc>();
+}
+
+template <class Acc>
+inline Acc combine_acc(Acc a, Acc b, int op) {
+    if (op == tvv::sycl::kReduceSum || op == tvv::sycl::kReduceMean) return a + b;
+    if (op == tvv::sycl::kReduceProd) return a * b;
+    if (op == tvv::sycl::kReduceMin) return contract::min_contract(a, b);
+    return contract::max_contract(a, b);
+}
+
+// 一个 work-group 的树形归约。工作项数必须是 2 的幂（所有调用点都是 kWorkGroup）。
+template <class Acc>
+inline Acc block_reduce(sycl::nd_item<1> item, sycl::local_accessor<Acc, 1> scratch,
+                        Acc acc, int op) {
+    const size_t lid = item.get_local_id(0);
+    const size_t n = item.get_local_range(0);
+    scratch[lid] = acc;
+    item.barrier(sycl::access::fence_space::local_space);
+    for (size_t s = n / 2; s > 0; s >>= 1) {
+        if (lid < s) scratch[lid] = combine_acc(scratch[lid], scratch[lid + s], op);
+        item.barrier(sycl::access::fence_space::local_space);
+    }
+    return scratch[0];
+}
+
+template <class T, class Out, class Acc>
 void reduce_axis_kernel(sycl::queue& q, const T* in, Out* out,
                         const tvv::sycl::ReduceAxis& p, int op) {
-    using Acc = reduction_acc_t<T>;
     const int64_t total = p.outer * p.inner;
     // 轴循环按真实元素数截断：正常布局下恒等，只有两趟全归约的趟 1 末段会短于
     // axis。每个输出只多一次 min，不在内层循环里。
@@ -45,6 +91,63 @@ void reduce_axis_kernel(sycl::queue& q, const T* in, Out* out,
         } else {
             out[i] = store_as<Out>(acc);
         }
+    });
+}
+
+template <class T, class Out, class Acc>
+void reduce_axis_inner1_kernel(sycl::queue& q, const T* in, Out* out,
+                               const tvv::sycl::ReduceAxis& p, int op) {
+    const int64_t numel = p.numel > 0 ? p.numel : p.outer * p.axis;
+    const double denom =
+        p.mean_n > 0 ? static_cast<double>(p.mean_n) : static_cast<double>(p.axis);
+    const size_t n = kWorkGroup;
+    q.submit([&](sycl::handler& h) {
+        sycl::local_accessor<Acc, 1> scratch(sycl::range<1>(n), h);
+        h.parallel_for(
+            sycl::nd_range<1>(sycl::range<1>(static_cast<size_t>(p.outer) * n),
+                              sycl::range<1>(n)),
+            [=](sycl::nd_item<1> item) {
+                const size_t lid = item.get_local_id(0);
+                const int64_t row = static_cast<int64_t>(item.get_group(0));
+                const int64_t base = row * p.axis;
+                const int64_t limit = sycl::min(p.axis, numel - base);
+                Acc acc = identity_acc<Acc>(op);
+                for (int64_t i = static_cast<int64_t>(lid); i < limit;
+                     i += static_cast<int64_t>(n))
+                    acc = combine_acc(acc, to_compute<Acc>(in[base + i]), op);
+                acc = block_reduce<Acc>(item, scratch, acc, op);
+                if (lid == 0) {
+                    out[row] = (op == tvv::sycl::kReduceMean)
+                                   ? store_as<Out>(static_cast<double>(acc) / denom)
+                                   : store_as<Out>(acc);
+                }
+            });
+    });
+}
+
+// 全归约趟 1：`blocks` 段连续区间，每段一个 work-group。段内按工作项跨步读
+// （合并访存），组内树形归约后写出一个部分值。末段可能为空，写出的正是单位元。
+template <class T, class Out, class Acc>
+void reduce_partial_kernel(sycl::queue& q, const T* in, Out* out, int64_t numel,
+                           int64_t chunk, int64_t blocks, int op) {
+    const size_t n = kWorkGroup;
+    q.submit([&](sycl::handler& h) {
+        sycl::local_accessor<Acc, 1> scratch(sycl::range<1>(n), h);
+        h.parallel_for(
+            sycl::nd_range<1>(sycl::range<1>(static_cast<size_t>(blocks) * n),
+                              sycl::range<1>(n)),
+            [=](sycl::nd_item<1> item) {
+                const size_t lid = item.get_local_id(0);
+                const int64_t begin = static_cast<int64_t>(item.get_group(0)) * chunk;
+                const int64_t end = sycl::min(begin + chunk, numel);
+                Acc acc = identity_acc<Acc>(op);
+                for (int64_t i = begin + static_cast<int64_t>(lid); i < end;
+                     i += static_cast<int64_t>(n))
+                    acc = combine_acc(acc, to_compute<Acc>(in[i]), op);
+                acc = block_reduce<Acc>(item, scratch, acc, op);
+                if (lid == 0)
+                    out[item.get_group(0)] = store_as<Out>(acc);
+            });
     });
 }
 
@@ -155,8 +258,42 @@ int sycl_c_launch_reduce_axis(void* ctx, const void* in, void* out,
             using T = typename decltype(src_tag)::type;
             return dispatch_dtype(out_dtype, [&](auto dst_tag) -> int {
                 using Out = typename decltype(dst_tag)::type;
-                reduce_axis_kernel<T, Out>(q, static_cast<const T*>(in),
-                                           static_cast<Out*>(out), *p, op);
+                with_reduce_acc<T>(op, [&](auto acc_tag) -> void {
+                    using Acc = typename decltype(acc_tag)::type;
+                    if (p->inner == 1 && p->axis >= 64)
+                        reduce_axis_inner1_kernel<T, Out, Acc>(
+                            q, static_cast<const T*>(in), static_cast<Out*>(out), *p, op);
+                    else
+                        reduce_axis_kernel<T, Out, Acc>(
+                            q, static_cast<const T*>(in), static_cast<Out*>(out), *p, op);
+                });
+                return tvv::sycl::kSyclOk;
+            });
+        });
+    } catch (const std::exception& e) {
+        return record_failure(e);
+    } catch (...) {
+        return record_failure();
+    }
+}
+
+int sycl_c_launch_reduce_partial(void* ctx, const void* in, void* out, int64_t numel,
+                                 int in_dtype, int out_dtype, int op, int64_t blocks) {
+    if (ctx == nullptr || in == nullptr || out == nullptr || numel <= 0 || blocks <= 0)
+        return tvv::sycl::kSyclInvalid;
+    try {
+        auto& q = queue_of(ctx);
+        const int64_t chunk = (numel + blocks - 1) / blocks;
+        return dispatch_dtype(in_dtype, [&](auto src_tag) -> int {
+            using T = typename decltype(src_tag)::type;
+            return dispatch_dtype(out_dtype, [&](auto dst_tag) -> int {
+                using Out = typename decltype(dst_tag)::type;
+                with_reduce_acc<T>(op, [&](auto acc_tag) -> void {
+                    using Acc = typename decltype(acc_tag)::type;
+                    reduce_partial_kernel<T, Out, Acc>(
+                        q, static_cast<const T*>(in), static_cast<Out*>(out), numel,
+                        chunk, blocks, op);
+                });
                 return tvv::sycl::kSyclOk;
             });
         });

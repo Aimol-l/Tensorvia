@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <cstring>
+#include <memory>
 #include <mutex>
 #include <unordered_map>
 #include <vector>
@@ -12,15 +13,107 @@ using namespace tvv::sycl_dev;
 
 namespace {
 
-// 上下文 id 永不复用，已销毁上下文残留的线程私有条目不会误配到新上下文。
 std::atomic<uint64_t> g_next_context_id{1};
-
-// 每条（线程, 上下文）一条队列。线程私有：查表无需加锁，也没有线程能看到别的
-// 线程的队列；新创建的队列同时登记到 context，供 wait 与析构使用。
 thread_local std::unordered_map<uint64_t, ::sycl::queue*> tls_queue;
-
-// 最近一次失败的原始描述，线程私有（与队列的线程亲和一致）。
 thread_local std::string t_last_error;
+constexpr size_t kPoolMinBlock  = 512;              // 小请求按 512B 对齐，尺寸相近可复用
+constexpr size_t kPoolMaxCached = size_t{256} << 20;  // 单 context 缓存上限，超出直接归还
+
+struct BlockPool {
+    std::mutex mtx;
+    std::unordered_map<::sycl::queue*, std::unordered_map<size_t, std::vector<void*>>>
+        free_blocks;
+    std::unordered_map<void*, size_t> block_bytes;  // 活块 -> 对齐后的字节数
+    size_t cached_bytes = 0;
+};
+
+
+std::mutex& pools_mutex() {
+    static auto* m = new std::mutex;
+    return *m;
+}
+
+std::unordered_map<uint64_t, std::shared_ptr<BlockPool>>& pools() {
+    static auto* m = new std::unordered_map<uint64_t, std::shared_ptr<BlockPool>>;
+    return *m;
+}
+
+inline size_t round_block(size_t bytes) {
+    const size_t rounded = (bytes + kPoolMinBlock - 1) & ~(kPoolMinBlock - 1);
+    return rounded == 0 ? kPoolMinBlock : rounded;
+}
+
+std::shared_ptr<BlockPool> pool_of(uint64_t context_id) {
+    std::lock_guard<std::mutex> lock(pools_mutex());
+    std::shared_ptr<BlockPool>& slot = pools()[context_id];
+    if (!slot) slot = std::make_shared<BlockPool>();
+    return slot;
+}
+
+void* pool_take(BlockPool& pool, ::sycl::queue& q, size_t bytes) {
+    const size_t rounded = round_block(bytes);
+    {
+        std::lock_guard<std::mutex> lock(pool.mtx);
+        auto bucket = pool.free_blocks.find(&q);
+        if (bucket != pool.free_blocks.end()) {
+            auto slot = bucket->second.find(rounded);
+            if (slot != bucket->second.end() && !slot->second.empty()) {
+                void* ptr = slot->second.back();
+                slot->second.pop_back();
+                pool.cached_bytes -= rounded;
+                return ptr;
+            }
+        }
+    }
+    void* ptr = ::sycl::malloc_device(rounded, q);
+    if (ptr != nullptr) {
+        std::lock_guard<std::mutex> lock(pool.mtx);
+        pool.block_bytes[ptr] = rounded;
+    }
+    return ptr;
+}
+
+// 把块收回缓存；超过上限就直接还给驱动。调用点保证块已不被任何 kernel 引用。
+void pool_put(BlockPool& pool, ::sycl::queue& q, void* ptr) {
+    size_t bytes = 0;
+    {
+        std::lock_guard<std::mutex> lock(pool.mtx);
+        auto live = pool.block_bytes.find(ptr);
+        if (live == pool.block_bytes.end()) return;  // 不是本池发出的，无从释放
+        bytes = live->second;
+        if (pool.cached_bytes + bytes <= kPoolMaxCached) {
+            pool.free_blocks[&q][bytes].push_back(ptr);
+            pool.cached_bytes += bytes;
+            return;
+        }
+        pool.block_bytes.erase(live);
+    }
+    ::sycl::free(ptr, q);
+}
+
+// 直接释放（不入缓存）：入队失败的回退路径用。
+void pool_drop(BlockPool& pool, ::sycl::queue& q, void* ptr) {
+    {
+        std::lock_guard<std::mutex> lock(pool.mtx);
+        if (pool.block_bytes.erase(ptr) == 0) return;
+    }
+    ::sycl::free(ptr, q);
+}
+
+void pool_forget(uint64_t context_id) {
+    std::shared_ptr<BlockPool> pool;
+    {
+        std::lock_guard<std::mutex> lock(pools_mutex());
+        auto it = pools().find(context_id);
+        if (it == pools().end()) return;
+        pool = it->second;
+        pools().erase(it);
+    }
+    std::lock_guard<std::mutex> lock(pool->mtx);
+    pool->free_blocks.clear();
+    pool->block_bytes.clear();
+    pool->cached_bytes = 0;
+}
 
 }  // namespace
 
@@ -30,7 +123,9 @@ Context::Context(int device_index)
       id(g_next_context_id.fetch_add(1, std::memory_order_relaxed)) {}
 
 Context::~Context() {
-    // queue 析构会等待已提交的工作完成，因此 host_task 里的 sycl::free 一定先跑完。
+    // 只丢账本，不逐个归还：块会随 context 一起被运行时回收（见 pool_forget）。
+    pool_forget(id);
+    // queue 析构会等待已提交的工作完成，因此 host_task 里的归还一定先跑完。
     for (::sycl::queue* q : queues) {
         try {
             delete q;
@@ -173,7 +268,7 @@ void* sycl_c_malloc(void* ctx, void* queue, size_t bytes) {
         // malloc_device(0) 不可移植；零字节张量仍需有效句柄，好让析构与拷贝路径
         // 保持统一。没有句柄时退回调用线程的队列。
         ::sycl::queue& q = queue == nullptr ? queue_of(ctx) : queue_from_handle(queue);
-        return sycl::malloc_device(bytes == 0 ? 1 : bytes, q);
+        return pool_take(*pool_of(static_cast<const Context*>(ctx)->id), q, bytes);
     } catch (...) {
         return nullptr;
     }
@@ -183,13 +278,16 @@ void sycl_c_free(void* ctx, void* queue_handle, void* ptr) {
     if (ctx == nullptr || ptr == nullptr) return;
     if (queue_handle == nullptr) queue_handle = sycl_c_current_queue(ctx);
     if (queue_handle == nullptr) return;
-    // 释放交还给**分配该块的那条队列**：块可能仍被那条队列里尚未完成的 kernel
+    // 归还交还给**分配该块的那条队列**：块可能仍被那条队列里尚未完成的 kernel
     // 引用，in-order 特性保证这个 host task 排在它们之后。别的队列上的后续工作
     // 不在本契约内（跨线程交接本就要求显式同步）。
     auto& q = queue_from_handle(queue_handle);
+    // 句柄随 host task 一起活下去：即使 context 先析构，归还也只是写进一个没人
+    // 再用的池子，不会踩到已释放对象。
+    std::shared_ptr<BlockPool> pool = pool_of(static_cast<const Context*>(ctx)->id);
     try {
-        q.submit([ptr, &q](sycl::handler& h) {
-            h.host_task([ptr, &q] { sycl::free(ptr, q); });
+        q.submit([ptr, &q, pool](sycl::handler& h) {
+            h.host_task([ptr, &q, pool] { pool_put(*pool, q, ptr); });
         });
     } catch (...) {
         // 入队失败：先等队列清空再直接释放。慢，但不会释放仍在使用的内存。
@@ -197,11 +295,7 @@ void sycl_c_free(void* ctx, void* queue_handle, void* ptr) {
             q.wait_and_throw();
         } catch (...) {
         }
-        try {
-            sycl::free(ptr, q);
-        } catch (...) {
-            // 析构路径上的释放失败无计可施。
-        }
+        pool_drop(*pool, q, ptr);
     }
 }
 

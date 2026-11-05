@@ -6,17 +6,9 @@ using namespace tvv::sycl_dev;
 
 namespace {
 
-// 计算类型与逐元素路径一致：整型提升到 float；16 位浮点拓宽到 float；其余保持。
-// 不能用 reduction_acc_t：那个把窄整型留在整型里（归约不丢位即可），而归一化要
-// 求先有小数。
 template <class T>
 using norm_acc_t = std::conditional_t<std::is_integral<T>::value, float, promoted_t<T>>;
 
-// 单工作组的树形求和。kWorkGroup 是 2 的幂，逐级折半的写法才成立。
-//
-// 结果在最后一次屏障之前写入 scratch[0]，所以所有工作项读到同一个值；返回后
-// 再放行一次——下一次调用会覆盖 scratch，快的项不能赶在慢的项读到上一轮结果
-// 之前动手。
 template <class Acc>
 inline Acc wg_sum(const sycl::local_accessor<Acc, 1>& scratch, sycl::nd_item<1> item,
                   size_t local, Acc value) {
@@ -32,8 +24,6 @@ inline Acc wg_sum(const sycl::local_accessor<Acc, 1>& scratch, sycl::nd_item<1> 
     return result;
 }
 
-// 1 / sqrt(mean_square + eps)。均值在 Acc 里算，开方与倒数在 double 里做一次，
-// 与 CPU/CUDA 内核的 `1.0f / sqrt(var + eps)` 只差一次舍入。
 template <class Acc>
 inline Acc norm_inv_std(Acc mean_square, int64_t n, float eps) {
     const double denom =
@@ -41,12 +31,6 @@ inline Acc norm_inv_std(Acc mean_square, int64_t n, float eps) {
     return static_cast<Acc>(1.0 / sycl::sqrt(denom));
 }
 
-// 行驻留 local 的版本：一个工作组处理一行，行在组内被读三趟（RMS 两趟），全局
-// 只有一次加载和一次回写。GPU 上这是首选；CPU 设备上 local 是模拟的，多一次
-// 拷贝比重读一遍 L2 更贵，所以那里走下面的流式版本（见 launch_norm）。
-//
-// Rms 是模板参数而不是运行期标志：三个内层循环里各有一处 `Rms ? a : b`，留成
-// 运行期分支会挡住向量化。用到的那个特化才 JIT，另一份不会付编译时间。
 template <bool Rms, class T, class Out>
 void norm_shared_kernel(sycl::queue& q, const T* in, const Out* w, const Out* b, Out* out,
                         int64_t outer, int64_t n, float eps) {

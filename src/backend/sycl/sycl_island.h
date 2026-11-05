@@ -299,6 +299,10 @@ int sycl_c_launch_norm(void* ctx, const void* in, const void* weight, const void
 int sycl_c_launch_reduce_axis(void* ctx, const void* in, void* out,
                               int in_dtype, int out_dtype, int op,
                               const tvv::sycl::ReduceAxis* p);
+// 全归约趟 1：把 [0, numel) 切成 `blocks` 段，每段一个 work-group 合并读取并在
+// local memory 里折成一个部分值，写进 `out`（`blocks` 个 out_dtype 元素）。
+int sycl_c_launch_reduce_partial(void* ctx, const void* in, void* out, int64_t numel,
+                                 int in_dtype, int out_dtype, int op, int64_t blocks);
 int sycl_c_launch_arg_reduce(void* ctx, const void* in, void* out, int dtype,
                              int is_max, const tvv::sycl::ReduceAxis* p);
 // sort / topk：每列独立排序后取前 keep 个。`out_vals` 与 `out_idx` 都是
