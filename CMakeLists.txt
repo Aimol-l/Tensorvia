@@ -69,7 +69,7 @@ set(TVV_BASE_INPUTS
     src/core/factory.cpp
     src/core/copy.cpp
     src/core/dtype.cpp
-    src/init.cpp
+    src/init_cpu.cpp
     src/backend/cpu/cpu_context.cpp
     src/backend/cpu/cpu_tensor.cpp
 )
