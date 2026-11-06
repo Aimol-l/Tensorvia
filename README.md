@@ -59,8 +59,7 @@ prefill（整段 prompt 一次算完，K/V 写进 cache）→ decode（一次一
 因果掩码走 `Where`。`inference [cpu|cuda|vulkan|sycl] [prompt]` 指定后端与提示词。
 
 `examples/cnn_inference.cpp` 跑一个两层卷积网络：conv → relu → maxpool → conv → relu → maxpool
-→ 全连接 → softmax。卷积直接调 `Conv2d`，权重随机；程序会在宿主上按卷积的定义重算几个输出位置
-与算子结果比对。`cnn_inference [cpu|cuda|vulkan|sycl]` 指定后端。
+→ 全连接 → softmax，跑在库的默认设备上。
 
 ## 📦 依赖
 
