@@ -1,4 +1,4 @@
-// P1 — 推理算子覆盖。
+// 推理算子覆盖（specs/2026-10-30-inference-tensor-contract.md FR-9..FR-11）。
 //
 // FR-9：N-D 批处理 matmul + 广播，以及 bmm/addmm/linear。参考值由本文件里
 // 一份不依赖被测代码的朴素实现给出（按输出多索引直接求内积），所以 CPU lane

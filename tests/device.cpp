@@ -32,7 +32,7 @@ TEST(Backend, AvailableDevices) {
 
 
 // ---------- 0b. 设备相关用例：跑在本次编译启用的后端上 ----------
-// 夹具 DeviceOps 见 test_support.hpp（p0.cpp 也要用）。
+// 夹具 DeviceOps 见 test_support.hpp（semantics.cpp 也要用）。
 TEST_F(DeviceOps, ElementwiseAndMatMul) {
     std::vector<float> av{1, 2, 3, 4, 5, 6};  // 2x3
     std::vector<float> bv{6, 5, 4, 3, 2, 1};  // 2x3
@@ -627,7 +627,7 @@ TEST_F(MultiDevice, CurrentDeviceIsPerThreadPerIndex) {
 }
 
 
-// ---------- 0f. CUDA 流：current stream 按线程取值（P2） ----------
+// ---------- 0f. CUDA 流：current stream 按线程取值 ----------
 #if defined(BACKEND_CUDA)
 namespace {
 
@@ -669,7 +669,7 @@ TEST(CudaStream, OneLazyStreamPerThreadAndOpsStayCorrect) {
 #endif  // BACKEND_CUDA
 
 
-// ---------- 0f'. Vulkan 提交通道：每线程一条（P2） ----------
+// ---------- 0f'. Vulkan 提交通道：每线程一条 ----------
 #if defined(BACKEND_VULKAN)
 namespace {
 

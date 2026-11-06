@@ -84,7 +84,7 @@ void expect_close(const std::vector<T>& got, const std::vector<T>& want,
 }
 
 // 设备用例的夹具：跑在本次编译启用的后端上。CPU 参考值由同一份代码在 host
-// 算一遍再逐值对比；后端不可用时整组 SKIP。device.cpp 与 p0.cpp 共用。
+// 算一遍再逐值对比；后端不可用时整组 SKIP。device.cpp 与 semantics.cpp 共用。
 class DeviceOps : public ::testing::Test {
 protected:
     void SetUp() override {
