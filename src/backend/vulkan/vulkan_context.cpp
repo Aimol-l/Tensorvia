@@ -368,6 +368,7 @@ void VulkanContext::registerPipelines() {
     registerOp(OpType::Conv2d, FloatTypes, 4, sizeof(Conv2dParams));
     registerOp(OpType::MaxPool2d, FloatTypes, 2, sizeof(Pool2dParams));
     registerOp(OpType::AvgPool2d, FloatTypes, 2, sizeof(Pool2dParams));
+    registerOp(OpType::ConvPool, FloatTypes, 4, sizeof(ConvPoolParams));
 
     // 一种源 dtype 一条流水线；目标 dtype 由 push constant 选择写哪个别名绑定
     // （BOOL 的源以 INT8 流水线运行，值已规范化为 0/1）。

@@ -186,6 +186,10 @@ template <> struct MaxPool2dImpl<Device::VULKAN> {
 template <> struct AvgPool2dImpl<Device::VULKAN> {
     static Tensor execute(const Tensor& input, const Pool2dShape& shape);
 };
+template <> struct Conv2dReluMaxPool2dImpl<Device::VULKAN> {
+    static Tensor execute(const Tensor& input, const Tensor& weight, const Tensor* bias,
+                          const ConvPoolShape& shape);
+};
 
 template <> struct TypecastImpl<Device::VULKAN> {
     static void execute(Tensor& a, DataType dst_type);

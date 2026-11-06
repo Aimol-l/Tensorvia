@@ -144,7 +144,7 @@ enum class OpType {
     All, Any, Nonzero, Argmax, Argmin,
     // 条件选择、索引与累积和。也只有 Vulkan 需要把它们写进流水线键：其余后端
     // 直接跑实现，不查表。
-    Where, IndexSelect, Gather, Cumsum, Conv2d, MaxPool2d, AvgPool2d,
+    Where, IndexSelect, Gather, Cumsum, Conv2d, MaxPool2d, AvgPool2d, ConvPool,
     // 类型转换。目标 dtype 是运行的参数而不是流水线键，所以一种源 dtype 一条
     // 流水线（`typecast_<src>`），目标由 push constant 选择绑定。
     Typecast,
@@ -298,6 +298,7 @@ inline const char* op_to_string(OpType op) {
         case OpType::Conv2d:        return "conv2d";
         case OpType::MaxPool2d:     return "max_pool2d";
         case OpType::AvgPool2d:     return "avg_pool2d";
+        case OpType::ConvPool:      return "conv_pool";
         case OpType::Typecast:      return "typecast";
         case OpType::LayerNorm:     return "layernorm";
         case OpType::RmsNorm:       return "rmsnorm";

@@ -242,6 +242,25 @@ struct Pool2dParams {
     uint32_t out_w;
 };
 
+// conv_pool：融合块 Conv2d+Relu+MaxPool2d(2x2)。conv_h/conv_w 是卷积输出
+// （pool 的输入）。has_bias == 0 时着色器不读 binding 2。
+struct ConvPoolParams {
+    uint32_t batch;
+    uint32_t in_ch;
+    uint32_t in_h;
+    uint32_t in_w;
+    uint32_t out_ch;
+    uint32_t kh;
+    uint32_t kw;
+    uint32_t stride;
+    uint32_t padding;
+    uint32_t conv_h;
+    uint32_t conv_w;
+    uint32_t out_h;
+    uint32_t out_w;
+    uint32_t has_bias;
+};
+
 // typecast：目标 dtype 的编码。必须与 shader/typecast/*.comp 里的 dst_type
 // 分支一一对应——这里刻意不用 DataType 的枚举序号，避免枚举增删悄悄改变语义。
 struct TypecastParams {
