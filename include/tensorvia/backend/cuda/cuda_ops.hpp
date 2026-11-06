@@ -229,6 +229,12 @@ template <> struct Conv2dImpl<Device::CUDA> {
     static Tensor execute(const Tensor& input, const Tensor& weight, const Tensor* bias,
                           const Conv2dShape& shape);
 };
+template <> struct MaxPool2dImpl<Device::CUDA> {
+    static Tensor execute(const Tensor& input, const Pool2dShape& shape);
+};
+template <> struct AvgPool2dImpl<Device::CUDA> {
+    static Tensor execute(const Tensor& input, const Pool2dShape& shape);
+};
 
 // ---------------------------------------------------------------------------
 // 条件选择、索引与累积和。
