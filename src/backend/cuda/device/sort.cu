@@ -118,7 +118,10 @@ __global__ void sort_block_kernel(const T* in, T* out_vals, int64_t* out_idx,
             s[i].i = static_cast<int32_t>(i);
         } else {
             s[i].v = sentinel;
-            s[i].i = std::numeric_limits<int32_t>::max();
+            // INT32_MAX 而非 std::numeric_limits<int32_t>::max()：后者是宿主
+            // constexpr 函数，nvcc 拒绝从 __global__ 调用（见 common.cuh 的
+            // max_finite/lowest_finite 注释）。宏与语义一致，<cstdint> 已包含。
+            s[i].i = INT32_MAX;
         }
     }
     __syncthreads();

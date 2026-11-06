@@ -15,25 +15,27 @@ struct bytes_word {
                            std::conditional_t<Bytes == 4, uint32_t, uint64_t>>>;
 };
 
+// shape/strides 由宿主侧传入（Metadata 的 vector），kernel 是异步提交的：
+// 指针直穿进 kernel 就是让设备解引用 host 内存——提交间隙被覆写时读到垃圾
+// 步长，轻则算错、重则非法访问。与 concat 的 ConcatOne 同一模式：host 侧拷
+// 进值结构，kernel 按值捕获。
+struct RepackDims {
+    int64_t shape[kMaxDims]   = {};
+    int64_t strides[kMaxDims] = {};
+};
+
 // 通用路径：逐元素解码多维坐标。两侧步长都任意，只保证语义。
 template <class T>
 void repack_generic_kernel(sycl::queue& q, const T* src, T* dst, int64_t numel,
-                           int64_t offset, int32_t ndim, const int64_t* shape,
-                           const int64_t* strides) {
-    int64_t shape_v[kMaxDims] = {};
-    int64_t strides_v[kMaxDims] = {};
-    for (int32_t d = 0; d < ndim; ++d) {
-        shape_v[d] = shape[d];
-        strides_v[d] = strides[d];
-    }
+                           int64_t offset, int32_t ndim, const RepackDims& dims) {
     q.parallel_for(range_of(numel), [=](sycl::id<1> idx) {
         const int64_t i = static_cast<int64_t>(idx[0]);
         int64_t temp = i;
         int64_t src_offset = offset;
         for (int32_t d = ndim - 1; d >= 0; --d) {
-            const int64_t coord = temp % shape_v[d];
-            temp /= shape_v[d];
-            src_offset += coord * strides_v[d];
+            const int64_t coord = temp % dims.shape[d];
+            temp /= dims.shape[d];
+            src_offset += coord * dims.strides[d];
         }
         dst[i] = src[src_offset];
     });
@@ -43,8 +45,7 @@ void repack_generic_kernel(sycl::queue& q, const T* src, T* dst, int64_t numel,
 // 二维网格让 lane 沿这段连续区间走，读和写都合并。
 template <class T, int N>
 void repack_run_kernel(sycl::queue& q, const T* src, T* dst, int64_t offset,
-                       const int64_t* shape, const int64_t* strides,
-                       int64_t runs, int64_t run_len) {
+                       const RepackDims& dims, int64_t runs, int64_t run_len) {
     q.parallel_for(
         sycl::range<2>(static_cast<size_t>(runs), static_cast<size_t>(run_len)),
         [=](sycl::id<2> id) {
@@ -56,11 +57,11 @@ void repack_run_kernel(sycl::queue& q, const T* src, T* dst, int64_t offset,
             int64_t out_stride = run_len;
             // 除最内轴外的坐标：源按输入步长、目的按连续布局各自累加。
             for (int d = N - 2; d >= 0; --d) {
-                const int64_t dim = shape[d];
+                const int64_t dim = dims.shape[d];
                 if (dim <= 0) continue;
                 const int64_t coord = rem % dim;
                 rem /= dim;
-                src_base += coord * strides[d];
+                src_base += coord * dims.strides[d];
                 dst_base += coord * out_stride;
                 out_stride *= dim;
             }
@@ -73,7 +74,7 @@ void repack_run_kernel(sycl::queue& q, const T* src, T* dst, int64_t offset,
 // 写出时 lane 走输出连续轴，两侧全局访存都落在连续地址上。
 template <class T, int N>
 void repack_tiled_kernel(sycl::queue& q, const T* src, T* dst, int64_t offset,
-                         const int64_t* shape, const int64_t* strides, int j) {
+                         const RepackDims& dims, int j) {
     // j 是源里步长为 1 的轴；输出最内轴 N-1 在源里的步长是 strides[N-1]。
     int64_t len_s = 0;     // 沿 j 的长度
     int64_t stride_x = 0;  // 源沿输出最内轴的步长
@@ -81,17 +82,17 @@ void repack_tiled_kernel(sycl::queue& q, const T* src, T* dst, int64_t offset,
     int64_t acc = 1;
     for (int d = N - 1; d >= 0; --d) {
         out_stride[d] = acc;
-        acc *= shape[d];
+        acc *= dims.shape[d];
     }
     for (int k = 0; k < N; ++k)
-        if (k == j) len_s = shape[k];
-    const int64_t len_c = shape[N - 1];
-    stride_x = strides[N - 1];
+        if (k == j) len_s = dims.shape[k];
+    const int64_t len_c = dims.shape[N - 1];
+    stride_x = dims.strides[N - 1];
     const int64_t stride_y = out_stride[j];
 
     int64_t batches = 1;
     for (int d = 0; d < N; ++d)
-        if (d != j && d != N - 1) batches *= shape[d];
+        if (d != j && d != N - 1) batches *= dims.shape[d];
 
     const size_t grid_s = static_cast<size_t>((len_s + kTile - 1) / kTile);
     const size_t grid_c = static_cast<size_t>((len_c + kTile - 1) / kTile);
@@ -112,11 +113,11 @@ void repack_tiled_kernel(sycl::queue& q, const T* src, T* dst, int64_t offset,
                 int64_t dst_base = 0;
                 for (int d = N - 1; d >= 0; --d) {
                     if (d == j || d == N - 1) continue;
-                    const int64_t dim = shape[d];
+                    const int64_t dim = dims.shape[d];
                     if (dim <= 0) continue;
                     const int64_t c = rem % dim;
                     rem /= dim;
-                    src_base += c * strides[d];
+                    src_base += c * dims.strides[d];
                     dst_base += c * out_stride[d];
                 }
 
@@ -152,44 +153,43 @@ void repack_tiled_kernel(sycl::queue& q, const T* src, T* dst, int64_t offset,
 }
 
 // 找源里步长为 1 的轴；没有就返回 -1（走通用路径）。
-inline int contiguous_axis(int32_t ndim, const int64_t* shape, const int64_t* strides) {
+inline int contiguous_axis(int32_t ndim, const RepackDims& dims) {
     for (int d = ndim - 1; d >= 0; --d)
-        if (shape[d] > 1 && strides[d] == 1) return d;
+        if (dims.shape[d] > 1 && dims.strides[d] == 1) return d;
     return -1;
 }
 
 template <class T, int N>
 void repack_rank(sycl::queue& q, const T* src, T* dst, int64_t offset,
-                 const int64_t* shape, const int64_t* strides) {
-    const int j = contiguous_axis(N, shape, strides);
+                 const RepackDims& dims) {
+    const int j = contiguous_axis(N, dims);
     if (j < 0) {
         int64_t numel = 1;
-        for (int d = 0; d < N; ++d) numel *= shape[d];
-        repack_generic_kernel<T>(q, src, dst, numel, offset, N, shape, strides);
+        for (int d = 0; d < N; ++d) numel *= dims.shape[d];
+        repack_generic_kernel<T>(q, src, dst, numel, offset, N, dims);
         return;
     }
     if (j == N - 1) {
-        int64_t run_len = shape[N - 1];
+        int64_t run_len = dims.shape[N - 1];
         int64_t runs = 1;
-        for (int d = 0; d < N - 1; ++d) runs *= shape[d];
-        repack_run_kernel<T, N>(q, src, dst, offset, shape, strides, runs, run_len);
+        for (int d = 0; d < N - 1; ++d) runs *= dims.shape[d];
+        repack_run_kernel<T, N>(q, src, dst, offset, dims, runs, run_len);
         return;
     }
-    repack_tiled_kernel<T, N>(q, src, dst, offset, shape, strides, j);
+    repack_tiled_kernel<T, N>(q, src, dst, offset, dims, j);
 }
 
 // 秩 > 4 或元素宽度非 1/2/4/8 字节时，退回逐字节通用路径。
 template <class T>
 void repack_ranked(sycl::queue& q, const T* src, T* dst, int64_t numel,
-                   int64_t offset, int32_t ndim, const int64_t* shape,
-                   const int64_t* strides) {
+                   int64_t offset, int32_t ndim, const RepackDims& dims) {
     switch (ndim) {
-        case 1: repack_rank<T, 1>(q, src, dst, offset, shape, strides); return;
-        case 2: repack_rank<T, 2>(q, src, dst, offset, shape, strides); return;
-        case 3: repack_rank<T, 3>(q, src, dst, offset, shape, strides); return;
-        case 4: repack_rank<T, 4>(q, src, dst, offset, shape, strides); return;
+        case 1: repack_rank<T, 1>(q, src, dst, offset, dims); return;
+        case 2: repack_rank<T, 2>(q, src, dst, offset, dims); return;
+        case 3: repack_rank<T, 3>(q, src, dst, offset, dims); return;
+        case 4: repack_rank<T, 4>(q, src, dst, offset, dims); return;
         default:
-            repack_generic_kernel<T>(q, src, dst, numel, offset, ndim, shape, strides);
+            repack_generic_kernel<T>(q, src, dst, numel, offset, ndim, dims);
             return;
     }
 }
@@ -197,21 +197,15 @@ void repack_ranked(sycl::queue& q, const T* src, T* dst, int64_t numel,
 // 逐字节兜底：元素宽度不是 1/2/4/8 时用。
 void repack_byte_kernel(sycl::queue& q, const char* src, char* dst, int64_t numel,
                         int64_t offset, int32_t ndim, int32_t dtype_size,
-                        const int64_t* shape, const int64_t* strides) {
-    int64_t shape_v[kMaxDims] = {};
-    int64_t strides_v[kMaxDims] = {};
-    for (int32_t d = 0; d < ndim; ++d) {
-        shape_v[d] = shape[d];
-        strides_v[d] = strides[d];
-    }
+                        const RepackDims& dims) {
     q.parallel_for(range_of(numel), [=](sycl::id<1> idx) {
         const int64_t i = static_cast<int64_t>(idx[0]);
         int64_t temp = i;
         int64_t src_offset = offset;
-        for (int32_t d = ndim - 1; d >= 0; --d) {
-            const int64_t coord = temp % shape_v[d];
-            temp /= shape_v[d];
-            src_offset += coord * strides_v[d];
+        for (int d = ndim - 1; d >= 0; --d) {
+            const int64_t coord = temp % dims.shape[d];
+            temp /= dims.shape[d];
+            src_offset += coord * dims.strides[d];
         }
         const char* from = src + src_offset * dtype_size;
         char* to = dst + i * dtype_size;
@@ -221,10 +215,9 @@ void repack_byte_kernel(sycl::queue& q, const char* src, char* dst, int64_t nume
 
 template <class T>
 void repack_typed(sycl::queue& q, const void* in, void* out, int64_t numel,
-                  int64_t offset, int32_t ndim, const int64_t* shape,
-                  const int64_t* strides) {
+                  int64_t offset, int32_t ndim, const RepackDims& dims) {
     repack_ranked<T>(q, static_cast<const T*>(in), static_cast<T*>(out), numel,
-                     offset, ndim, shape, strides);
+                     offset, ndim, dims);
 }
 
 }  // namespace
@@ -241,15 +234,21 @@ int sycl_c_launch_repack(void* ctx, const void* in, void* out, int64_t numel,
     if (numel == 0) return tvv::sycl::kSyclOk;
     try {
         auto& q = queue_of(ctx);
+        // 宿主指针的内容在提交前拷进值结构：kernel 异步执行，不能解引用它们。
+        RepackDims dims;
+        for (int32_t i = 0; i < ndim; ++i) {
+            dims.shape[i]   = shape[i];
+            dims.strides[i] = strides[i];
+        }
         switch (dtype_size) {
-            case 1: repack_typed<uint8_t>(q, in, out, numel, offset, ndim, shape, strides); break;
-            case 2: repack_typed<uint16_t>(q, in, out, numel, offset, ndim, shape, strides); break;
-            case 4: repack_typed<uint32_t>(q, in, out, numel, offset, ndim, shape, strides); break;
-            case 8: repack_typed<uint64_t>(q, in, out, numel, offset, ndim, shape, strides); break;
+            case 1: repack_typed<uint8_t>(q, in, out, numel, offset, ndim, dims); break;
+            case 2: repack_typed<uint16_t>(q, in, out, numel, offset, ndim, dims); break;
+            case 4: repack_typed<uint32_t>(q, in, out, numel, offset, ndim, dims); break;
+            case 8: repack_typed<uint64_t>(q, in, out, numel, offset, ndim, dims); break;
             default:
                 repack_byte_kernel(q, static_cast<const char*>(in),
                                    static_cast<char*>(out), numel, offset, ndim,
-                                   dtype_size, shape, strides);
+                                   dtype_size, dims);
                 break;
         }
         return tvv::sycl::kSyclOk;
