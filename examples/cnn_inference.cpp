@@ -3,7 +3,7 @@ import tensorvia;
 
 // CNN 推理模拟：图像 -> [conv -> relu -> maxpool] x2 -> fc -> logits
 //
-//   image      程序在宿主画一张 32x32 的图（演示不依赖图片文件与解码库）
+//   image      随机生成的 32x32 灰度图（演示不依赖图片文件与解码库）
 //   ConvBlock  ops::Conv2d -> Relu -> 2x2 MaxPool2d
 //   Cnn        两层卷积块加一层全连接；权重随机，形状与数据通路是真的
 //
@@ -178,25 +178,11 @@ Device resolve_device(std::string_view name) {
 int main(int argc, char** argv) {
     const Device dev = argc > 1 ? resolve_device(argv[1]) : Device::CPU;
 
-    // ---- 1. 输入图：程序画一张，背景是渐变，前景一个圆块与一个方块 ----
-    std::vector<float> pixels(static_cast<std::size_t>(kH * kW));
-    for (std::int64_t y = 0; y < kH; ++y) {
-        for (std::int64_t x = 0; x < kW; ++x) {
-            float v = 0.4f * static_cast<float>(y) / static_cast<float>(kH - 1);  // 上暗下亮
-            if ((x - 10) * (x - 10) + (y - 22) * (y - 22) <= 36) v = 1.0f;    // 圆块
-            if (x >= 19 && x <= 26 && y >= 5 && y <= 12) v = 0.8f;             // 方块
-            pixels[static_cast<std::size_t>(y * kW + x)] = v;
-        }
-    }
-    Tensor image(pixels, {1, kH, kW});
-    image.to_device(dev);
+    // ---- 1. 输入图：随机灰度图，直接生成在目标设备上 ----
+    const Tensor image = ops::Random({1, kH, kW}, DataType::FLOAT32, 0.0f, 1.0f, dev);
 
     // ---- 2. 模型：权重随机，形状按 PyTorch 的卷积约定 ----
     const Cnn model(dev);
-    std::println("device {} | conv {}-{}-{} -> conv {}-{}-{} | fc {} -> {}",
-                 device_to_string(dev), kC1, kK, kK, kC2, kK, kK,
-                 kC2 * (kH / 4) * (kW / 4), kClasses);
-    std::println("parameters: {}K (random)", model.param_count() / 1000);
 
     // ---- 3. 前向：逐层打印激活统计，并按定义在宿主上重算做数值自检 ----
     const auto t0 = std::chrono::steady_clock::now();
