@@ -122,6 +122,17 @@ Tensor Conv2d(const Tensor& input, const Tensor& weight, int64_t stride = 1,
 Tensor Conv2d(const Tensor& input, const Tensor& weight, const Tensor& bias,
               int64_t stride = 1, int64_t padding = 0);
 
+// 2-D 池化。input 为 [N, C, H, W]，也接受不带 batch 的 [C, H, W]（此时输出不
+// 带 batch 维）；四个浮点 dtype，半精度在 FLOAT32 里累加（Avg）后写回。
+//   Hout = (H + 2 * padding - kh) / stride + 1，Wout 同理
+// `stride` 为 0 表示取 kernel 尺寸（PyTorch 的 stride=None 心智：2x2 池化默认
+// 步长 2）；为正时同时作用于 H/W。padding 区域不参与取值：Max 忽略，Avg 计 0
+// 且计入分母（与 PyTorch count_include_pad=True 一致）。窗口整体越界时输出 0。
+Tensor MaxPool2d(const Tensor& input, int64_t kh, int64_t kw, int64_t stride = 0,
+                 int64_t padding = 0);
+Tensor AvgPool2d(const Tensor& input, int64_t kh, int64_t kw, int64_t stride = 0,
+                 int64_t padding = 0);
+
 void Abs(Tensor& a);
 void Relu(Tensor& a);
 void Sin(Tensor& a);

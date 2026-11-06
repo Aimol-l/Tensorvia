@@ -101,6 +101,8 @@ Bmm
 Addmm
 Linear
 Conv2d
+MaxPool2d
+AvgPool2d
 Abs
 Relu
 Sin

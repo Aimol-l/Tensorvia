@@ -5,6 +5,9 @@
 // 与各设备 lane 校验的是同一套语义。
 #include "test_support.hpp"
 
+#include <algorithm>
+#include <limits>
+
 namespace {
 
 std::vector<int64_t> shape_of(const Tensor& t) {
@@ -22,6 +25,64 @@ std::vector<float> ramp(int64_t n, float step = 0.1f, float start = -1.0f) {
 template <typename T>
 Tensor from_values(std::vector<T> values, std::initializer_list<int64_t> shape) {
     return Tensor(values, shape);
+}
+
+// 池化的朴素参考：逐输出手算窗口，不经本库任何算子，锁的是语义而非实现。
+// ishape 为 [N,C,H,W] 或 [C,H,W]；stride 为 0 时每维取 kernel 尺寸；avg 的
+// 分母是 kh*kw（padding 计 0 计入，count_include_pad）；窗口整体越界输出 0。
+template <typename T>
+std::vector<T> pool_ref(const std::vector<T>& in, const std::vector<int64_t>& ishape,
+                        int64_t kh, int64_t kw, int64_t stride, int64_t padding, bool avg) {
+    const int64_t C = ishape[ishape.size() - 3];
+    const int64_t H = ishape[ishape.size() - 2];
+    const int64_t W = ishape[ishape.size() - 1];
+    const int64_t N = ishape.size() == 4 ? ishape[0] : 1;
+    const int64_t sh = stride > 0 ? stride : kh;
+    const int64_t sw = stride > 0 ? stride : kw;
+    const int64_t oh = (H + 2 * padding - kh) / sh + 1;
+    const int64_t ow = (W + 2 * padding - kw) / sw + 1;
+    std::vector<T> out(static_cast<size_t>(N * C * oh * ow));
+    for (int64_t n = 0; n < N; ++n)
+        for (int64_t c = 0; c < C; ++c)
+            for (int64_t oy = 0; oy < oh; ++oy)
+                for (int64_t ox = 0; ox < ow; ++ox) {
+                    T acc = avg ? T(0) : std::numeric_limits<T>::lowest();
+                    int64_t count = 0;
+                    for (int64_t i = 0; i < kh; ++i) {
+                        const int64_t y = oy * sh + i - padding;
+                        if (y < 0 || y >= H) continue;
+                        for (int64_t j = 0; j < kw; ++j) {
+                            const int64_t x = ox * sw + j - padding;
+                            if (x < 0 || x >= W) continue;
+                            const T v = in[static_cast<size_t>((n * C + c) * H * W + y * W + x)];
+                            if (avg) acc = static_cast<T>(acc + v);
+                            else acc = std::max(acc, v);
+                            ++count;
+                        }
+                    }
+                    const size_t o =
+                        static_cast<size_t>((n * C + c) * oh * ow + oy * ow + ox);
+                    out[o] = count == 0 ? T(0)
+                                        : (avg ? static_cast<T>(acc / static_cast<T>(kh * kw))
+                                               : acc);
+                }
+    return out;
+}
+
+// 构造 → 上设备 → 池化 → 形状/设备/数值对朴素参考。want 为完整输出形状
+// （3-D 输入时实现负责去掉 batch 维）。
+void check_pool(const std::vector<int64_t>& as, int64_t kh, int64_t kw, int64_t stride,
+                int64_t padding, bool avg, const std::vector<int64_t>& want) {
+    int64_t n = 1;
+    for (int64_t d : as) n *= d;
+    auto a = ramp(n);
+    const Tensor A = moved_to(Tensor(a, as), kTestDevice);
+    const Tensor C = avg ? ops::AvgPool2d(A, kh, kw, stride, padding)
+                         : ops::MaxPool2d(A, kh, kw, stride, padding);
+    EXPECT_EQ(shape_of(C), want) << (avg ? "avg_pool" : "max_pool");
+    EXPECT_EQ(C.device(), kTestDevice);
+    expect_close(host_values<float>(C), pool_ref(a, as, kh, kw, stride, padding, avg),
+                 avg ? "avg_pool" : "max_pool");
 }
 
 // 同一个算子先在 CPU 上算一遍作为参考，再在设备上算一遍：形状、dtype、设备
@@ -1217,4 +1278,66 @@ TEST_F(DeviceOps, UnsupportedOpsFailExplicitlyOnDevices) {
         EXPECT_NE(std::string(e.what()).find("masked_select"), std::string::npos)
             << e.what();
     }
+}
+
+// ---------- 池化（MaxPool2d / AvgPool2d） ----------
+
+TEST_F(DeviceOps, MaxPool2dMatchesReference) {
+    check_pool({3, 4, 6}, 2, 2, 0, 0, false, {3, 2, 3});       // 2x2 stride 2，非 batch
+    check_pool({2, 3, 4, 6}, 2, 2, 0, 0, false, {2, 3, 2, 3}); // 同上，带 batch
+    check_pool({2, 3, 5, 5}, 3, 3, 1, 0, false, {2, 3, 3, 3}); // 3x3 stride 1
+    check_pool({1, 2, 3, 3}, 3, 3, 1, 0, false, {1, 2, 1, 1}); // kernel 铺满
+}
+
+TEST_F(DeviceOps, AvgPool2dMatchesReference) {
+    check_pool({3, 4, 6}, 2, 2, 0, 0, true, {3, 2, 3});
+    check_pool({2, 3, 4, 6}, 2, 2, 0, 0, true, {2, 3, 2, 3});
+    check_pool({2, 3, 5, 5}, 3, 3, 1, 0, true, {2, 3, 3, 3});
+}
+
+TEST_F(DeviceOps, Pool2dStrideAndPadding) {
+    check_pool({1, 1, 4, 4}, 2, 2, 1, 0, false, {1, 1, 3, 3}); // stride < kernel：重叠窗口
+    check_pool({1, 1, 4, 4}, 3, 3, 0, 1, true, {1, 1, 2, 2});  // padding 1
+    check_pool({1, 2, 5, 5}, 2, 2, 0, 0, true, {1, 2, 2, 2});  // stride 缺省取 kernel
+    check_pool({1, 1, 3, 5}, 2, 3, 2, 0, false, {1, 1, 1, 2}); // kh != kw
+}
+
+TEST_F(DeviceOps, Pool2dFloat64MatchesReference) {
+    std::vector<double> a(static_cast<size_t>(2 * 3 * 4 * 6));
+    for (size_t i = 0; i < a.size(); ++i) a[i] = -1.0 + 0.1 * static_cast<double>(i);
+    const Tensor A = moved_to(Tensor(a, std::vector<int64_t>{2, 3, 4, 6}), kTestDevice);
+    const Tensor C = ops::MaxPool2d(A, 2, 2);
+    EXPECT_EQ(C.dtype(), DataType::FLOAT64);
+    EXPECT_EQ(shape_of(C), (std::vector<int64_t>{2, 3, 2, 3}));
+    expect_close(host_values<double>(C), pool_ref(a, std::vector<int64_t>{2, 3, 4, 6},
+                                                  2, 2, 0, 0, false),
+                 "max_pool f64");
+}
+
+TEST_F(DeviceOps, Pool2dHalfPrecisionSurface) {
+    // 半精度在 FLOAT32 里累加后写回原 dtype；量化误差与 F32 参考不可比，
+    // 这里只锁形状与 dtype 路径。
+    std::vector<float> v = ramp(2 * 3 * 4 * 6);
+    const Tensor A = moved_to(ops::Typecast(Tensor(v, std::vector<int64_t>{2, 3, 4, 6}),
+                                            DataType::FLOAT16),
+                              kTestDevice);
+    const Tensor C = ops::MaxPool2d(A, 2, 2);
+    EXPECT_EQ(C.dtype(), DataType::FLOAT16);
+    EXPECT_EQ(shape_of(C), (std::vector<int64_t>{2, 3, 2, 3}));
+}
+
+TEST_F(DeviceOps, Pool2dRejectsBadShapes) {
+    std::vector<float> v = ramp(12);
+    const Tensor rank2(v, std::vector<int64_t>{3, 4});
+    EXPECT_THROW(ops::MaxPool2d(rank2, 2, 2), std::runtime_error);
+    EXPECT_THROW(ops::AvgPool2d(rank2, 2, 2), std::runtime_error);
+
+    const Tensor ok(v, std::vector<int64_t>{3, 4, 4});
+    EXPECT_THROW(ops::MaxPool2d(ok, 0, 2), std::runtime_error);      // kernel 为 0
+    EXPECT_THROW(ops::MaxPool2d(ok, 2, 2, 1, -1), std::runtime_error); // 负 padding
+    EXPECT_THROW(ops::MaxPool2d(ok, 5, 5), std::runtime_error);      // 输出尺寸非正
+
+    std::vector<std::int32_t> iv(12, 1);
+    const Tensor ints(iv, std::vector<int64_t>{3, 4, 4});
+    EXPECT_THROW(ops::MaxPool2d(ints, 2, 2), std::runtime_error);    // 整型 dtype
 }

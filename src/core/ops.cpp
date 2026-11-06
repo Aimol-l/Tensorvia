@@ -882,6 +882,79 @@ Tensor Conv2d(const Tensor& input, const Tensor& weight, const Tensor& bias, int
     return conv2d_forward(input, weight, &bias, stride, padding);
 }
 
+namespace {
+
+// 池化的入口校验与形状推导：与 conv2d_forward 同一分工——四个后端拿到的已是
+// 4-D 连续 NCHW 与算好的几何，只做窗口算术。stride 为 0 时每维取 kernel 尺寸。
+Pool2dShape pool2d_shape_of(const Tensor& input, int64_t kh, int64_t kw, int64_t stride,
+                            int64_t padding) {
+    const auto in_shape = input.shape();
+    const size_t in_rank = in_shape.size();
+    if (in_rank != 3 && in_rank != 4)
+        throw std::runtime_error(std::format(
+            "pool2d: input must be 3-D [C, H, W] or 4-D [N, C, H, W], got {}D", in_rank));
+    if (kh <= 0 || kw <= 0)
+        throw std::runtime_error("pool2d: kernel size must be positive");
+    if (padding < 0) throw std::runtime_error("pool2d: padding must not be negative");
+    if (!is_floating_dtype(input.dtype()))
+        throw std::runtime_error(std::format("pool2d: dtype must be floating point, got {}",
+                                             dtype_to_string(input.dtype())));
+
+    Pool2dShape s;
+    s.batch    = in_rank == 4 ? in_shape[0] : 1;
+    s.channels = in_shape[in_rank - 3];
+    s.in_h     = in_shape[in_rank - 2];
+    s.in_w     = in_shape[in_rank - 1];
+    s.kh = kh;
+    s.kw = kw;
+    s.stride_h = stride > 0 ? stride : kh;
+    s.stride_w = stride > 0 ? stride : kw;
+    s.padding = padding;
+    if (s.in_h + 2 * padding - kh < 0 || s.in_w + 2 * padding - kw < 0)
+        throw std::runtime_error(std::format(
+            "pool2d: {0}x{1} kernel is larger than the {2}x{3} input plus padding",
+            kh, kw, s.in_h, s.in_w));
+    s.out_h = (s.in_h + 2 * padding - kh) / s.stride_h + 1;
+    s.out_w = (s.in_w + 2 * padding - kw) / s.stride_w + 1;
+    if (s.out_h <= 0 || s.out_w <= 0)
+        throw std::runtime_error(std::format(
+            "pool2d: {0}x{1} input with {2}x{3} kernel, stride {4}, padding {5} "
+            "yields a non-positive output size",
+            s.in_h, s.in_w, kh, kw, stride, padding));
+    return s;
+}
+
+Tensor pool2d_forward(const Tensor& input, int64_t kh, int64_t kw, int64_t stride,
+                      int64_t padding, bool average) {
+    require_live(input);
+    const Pool2dShape shape = pool2d_shape_of(input, kh, kw, stride, padding);
+
+    std::vector<int64_t> out_shape{shape.batch, shape.channels, shape.out_h, shape.out_w};
+    const size_t in_rank = input.shape().size();
+    if (shape.batch == 0 || shape.channels == 0)
+        return empty_on(input, out_shape, input.dtype());
+
+    // 内核线性寻址，所以吃连续、且不带视图 offset 的操作数。
+    Tensor in_hold;
+    Tensor plain = in_rank == 3 ? input.unsqueeze(0) : input;
+    const Tensor& src = linearize(plain, in_hold);
+
+    Tensor out = average ? execute_on<AvgPool2dImpl>(src.device_id(), "avg_pool2d", src, shape)
+                         : execute_on<MaxPool2dImpl>(src.device_id(), "max_pool2d", src, shape);
+    if (in_rank == 3) out = out.reshape({shape.channels, shape.out_h, shape.out_w});
+    return out;
+}
+
+}  // namespace
+
+Tensor MaxPool2d(const Tensor& input, int64_t kh, int64_t kw, int64_t stride, int64_t padding) {
+    return pool2d_forward(input, kh, kw, stride, padding, false);
+}
+
+Tensor AvgPool2d(const Tensor& input, int64_t kh, int64_t kw, int64_t stride, int64_t padding) {
+    return pool2d_forward(input, kh, kw, stride, padding, true);
+}
+
 Tensor Abs(const Tensor& a) {
     require_live(a);
     require_not_bool(a, "abs");

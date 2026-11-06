@@ -317,6 +317,34 @@ template <> struct Conv2dImpl<Device::CPU> {
                           const Conv2dShape& shape);
 };
 
+// 池化的公共几何描述：张量在进入实现单元之前已被规范化成 4-D NCHW 且连续。
+// stride_h/stride_w 由公共层算出（stride 参数为 0 时取 kernel 尺寸），各后端
+// 实现只做"输出下标 -> 输入窗口"的算术；Max 与 Avg 是两个 Impl，combine 不同。
+struct Pool2dShape {
+    int64_t batch    = 1;
+    int64_t channels = 0;
+    int64_t in_h     = 0;
+    int64_t in_w     = 0;
+    int64_t kh       = 0;
+    int64_t kw       = 0;
+    int64_t stride_h = 1;
+    int64_t stride_w = 1;
+    int64_t padding  = 0;
+    int64_t out_h    = 0;
+    int64_t out_w    = 0;
+    int64_t numel() const { return batch * channels * out_h * out_w; }
+};
+
+template <Device D> struct MaxPool2dImpl;
+template <> struct MaxPool2dImpl<Device::CPU> {
+    static Tensor execute(const Tensor& input, const Pool2dShape& shape);
+};
+
+template <Device D> struct AvgPool2dImpl;
+template <> struct AvgPool2dImpl<Device::CPU> {
+    static Tensor execute(const Tensor& input, const Pool2dShape& shape);
+};
+
 template <> struct EqualImpl<Device::CPU> {
     static Tensor execute(const Tensor& a, const Tensor& b);
     static Tensor execute(const Tensor& a, float val);

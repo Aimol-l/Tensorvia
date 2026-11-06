@@ -101,6 +101,8 @@ using ::ops::Bmm;
 using ::ops::Addmm;
 using ::ops::Linear;
 using ::ops::Conv2d;
+using ::ops::MaxPool2d;
+using ::ops::AvgPool2d;
 using ::ops::Abs;
 using ::ops::Relu;
 using ::ops::Sin;
