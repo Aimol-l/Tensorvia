@@ -268,7 +268,8 @@ int main() {
         }
         if (want_sycl && !sycl_in_accel) {
             std::cerr << "tensorvia: the `sycl` feature is on but this build names no "
-                         "sycl accelerator; build the consumer with --accel sycl, "
+                         "sycl accelerator; build the consumer with --accel "
+                         "\"sycl+{sm_89}\" (architectures are yours to choose), "
                          "or drop the feature\n";
             return 1;
         }

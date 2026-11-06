@@ -363,7 +363,7 @@ std::println("{}", device_id_to_string(t.device_id()));   // CUDA:1
 # mcpp：编译并运行 tests/**/*.cpp（dev-dependencies 里的 gtest 只在此时进图）
 mcpp test                                          # CPU（默认）
 #mcpp test --features vulkan                        # + Vulkan lane 的完整构建
-#mcpp test --features sycl --accel sycl             # + SYCL lane 的完整构建
+#mcpp test --features sycl --accel "sycl+{sm_89}"   # + SYCL lane 的完整构建（N 卡必须带架构集合：裸 sycl 产 SPIR-V，UR CUDA 不消费会落 CPU，见 mcpp#887）
 #mcpp test --features cuda --accel "cuda13.3+{sm_89}"  # + CUDA lane 的完整构建
 
 # CMake
