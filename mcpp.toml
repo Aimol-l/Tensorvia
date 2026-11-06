@@ -124,3 +124,6 @@ cxxflags = ["-march=x86-64-v3"]
 [target.'cfg(compiler = "gcc")'.build]
 ldflags  = ["-fopenmp"]
 cxxflags = ["-march=x86-64-v3"]
+[targets.cnn_inference]
+kind = "bin"
+main = "examples/cnn_inference.cpp"
