@@ -223,16 +223,14 @@ if(BUILD_TEST)
     )
     list(REMOVE_ITEM TVV_TEST_INPUTS
         "${PROJECT_SOURCE_DIR}/tests/bench.cpp"
-        "${PROJECT_SOURCE_DIR}/tests/facade_api.cpp")
+        "${PROJECT_SOURCE_DIR}/tests/facade_api.cpp"
+        # `import tensorvia;` 冒烟探针：模块导入是 mcpp lane 的契约，本 lane
+        # 是头文件消费（模块扫描关闭），编不了它；由 `mcpp test test` 跑。
+        "${PROJECT_SOURCE_DIR}/tests/test.cpp")
     set(TVV_TEST_SOURCES ${TVV_TEST_INPUTS})
     foreach(test_file ${TVV_TEST_SOURCES})
         get_filename_component(test_name ${test_file} NAME_WE)
-        # CTest reserves the target name "test" for the aggregate command.
-        if(test_name STREQUAL "test")
-            set(test_target tensorvia_test)
-        else()
-            set(test_target ${test_name})
-        endif()
+        set(test_target ${test_name})
 
         add_executable(${test_target} "${test_file}")
         set_target_properties(${test_target} PROPERTIES
