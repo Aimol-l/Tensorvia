@@ -1,6 +1,10 @@
 # 多后端成熟度实施计划（P0 覆盖一致性 + P1 性能下限）
 
 > 执行时逐项勾选 `- [ ]`；每个 Task 独立可回退，测试不通过不进入下一个 Task。
+>
+> 注：本文引用的 `docs/performance.md`（已于 `fa0b645` 删除）、`benchmark/baseline/` 与
+> `tools/coverage_matrix.py`（均已于 2026-11-05 删除）不在仓库中，内容可从 git 历史
+> 取回；当前性能数据见 README 的「性能基线」一节。
 
 **Goal:** 把 spec `specs/2026-11-01-multi-backend-maturity.md` 的 P0 / P1 落地：覆盖矩阵可生成可校验、CPU-only 例外收敛、同步语义可断言、性能有可信的度量与下限。
 

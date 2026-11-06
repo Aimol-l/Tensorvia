@@ -1,5 +1,9 @@
 # Specification: 全归约的并行化——三个设备后端的两趟归约
 
+> 注：本文引用的 `docs/performance.md`（已于 `fa0b645` 删除）、`benchmark/baseline/` 与
+> `tools/coverage_matrix.py`（均已于 2026-11-05 删除）不在仓库中，内容可从 git 历史
+> 取回；当前性能数据见 README 的「性能基线」一节。
+
 ## Metadata
 - **Version**: 1.0.1
 - **Status**: Implemented

@@ -1,5 +1,9 @@
 # Specification: Tensorvia 多后端成熟度——覆盖、性能下限与生态接入
 
+> 注：本文引用的 `docs/performance.md`（已于 `fa0b645` 删除）、`benchmark/baseline/` 与
+> `tools/coverage_matrix.py`（均已于 2026-11-05 删除）不在仓库中，内容可从 git 历史
+> 取回；当前性能数据见 README 的「性能基线」一节。
+
 ## Metadata
 - **Version**: 1.0.4
 - **Status**: Draft
