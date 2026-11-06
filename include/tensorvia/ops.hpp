@@ -133,6 +133,15 @@ Tensor MaxPool2d(const Tensor& input, int64_t kh, int64_t kw, int64_t stride = 0
 Tensor AvgPool2d(const Tensor& input, int64_t kh, int64_t kw, int64_t stride = 0,
                  int64_t padding = 0);
 
+// 融合块：MaxPool2d(Relu(Conv2d(x, w, b, stride, padding)), 2, 2) 的精确等价。
+// [N, C, H, W]（或 [C, H, W]）+ weight [Cout, C, kh, kw]（+ bias [Cout]） ->
+// [N, Cout, H', W']，pool 固定 2x2/stride 2：H' = (Hout - 2) / 2 + 1。
+// 与组合式逐位一致（测试锁定）；存在的理由是省掉两个算子的提交与同步往返。
+Tensor Conv2dReluMaxPool2d(const Tensor& input, const Tensor& weight,
+                           int64_t stride = 1, int64_t padding = 0);
+Tensor Conv2dReluMaxPool2d(const Tensor& input, const Tensor& weight,
+                           const Tensor& bias, int64_t stride = 1, int64_t padding = 0);
+
 void Abs(Tensor& a);
 void Relu(Tensor& a);
 void Sin(Tensor& a);

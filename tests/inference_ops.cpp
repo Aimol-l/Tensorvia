@@ -1341,3 +1341,68 @@ TEST_F(DeviceOps, Pool2dRejectsBadShapes) {
     const Tensor ints(iv, std::vector<int64_t>{3, 4, 4});
     EXPECT_THROW(ops::MaxPool2d(ints, 2, 2), std::runtime_error);    // 整型 dtype
 }
+
+// ---------- 融合块 Conv2dReluMaxPool2d ----------
+
+// 与组合式 MaxPool2d(Relu(Conv2d(...)), 2, 2) 逐位对比：组合式就是语义本身，
+// 四 lane 校验的是同一套。want 为完整输出形状（3-D 输入时实现负责去 batch 维）。
+void check_conv_pool(const std::vector<int64_t>& as, int64_t cout, int64_t kh, int64_t kw,
+                     int64_t stride, int64_t padding, bool with_bias,
+                     const std::vector<int64_t>& want) {
+    int64_t n = 1;
+    for (int64_t d : as) n *= d;
+    auto a = ramp(n);
+    auto wv = ramp(cout * as[as.size() - 3] * kh * kw, 0.013f, -0.5f);
+    auto bv = std::vector<float>(cout > 0 ? static_cast<size_t>(cout) : 0);
+    for (size_t i = 0; i < bv.size(); ++i) bv[i] = 0.01f * static_cast<float>(i) - 0.02f;
+
+    const Tensor A = moved_to(Tensor(a, as), kTestDevice);
+    const Tensor W = moved_to(Tensor(wv, {cout, as[as.size() - 3], kh, kw}), kTestDevice);
+    const Tensor B = moved_to(Tensor(bv, {cout}), kTestDevice);
+
+    const Tensor fused = with_bias ? ops::Conv2dReluMaxPool2d(A, W, B, stride, padding)
+                                   : ops::Conv2dReluMaxPool2d(A, W, stride, padding);
+    EXPECT_EQ(shape_of(fused), want) << "conv_pool shape";
+    EXPECT_EQ(fused.dtype(), A.dtype());
+    EXPECT_EQ(fused.device(), kTestDevice);
+
+    // 参考：同一输入的组合式（CPU 语义，与 lane 无关）。
+    const Tensor ref = ops::MaxPool2d(
+        ops::Relu(with_bias ? ops::Conv2d(A, W, B, stride, padding)
+                            : ops::Conv2d(A, W, stride, padding)),
+        2, 2);
+    expect_close(host_values<float>(fused), host_values<float>(ref), "conv_pool vs fused");
+}
+
+TEST_F(DeviceOps, Conv2dReluMaxPool2dMatchesComposition) {
+    check_conv_pool({2, 3, 8, 8}, 4, 3, 3, 1, 1, true, {2, 4, 4, 4});   // batch + bias
+    check_conv_pool({2, 3, 8, 8}, 4, 3, 3, 1, 1, false, {2, 4, 4, 4});  // 无 bias
+    check_conv_pool({3, 5, 9}, 2, 3, 3, 1, 1, true, {2, 2, 4});         // 非 batch
+    check_conv_pool({1, 2, 9, 9}, 3, 3, 3, 2, 1, true, {1, 3, 2, 2});   // stride 2
+    check_conv_pool({1, 2, 10, 10}, 3, 2, 2, 1, 0, true, {1, 3, 4, 4}); // 2x2 kernel
+    check_conv_pool({1, 2, 7, 7}, 3, 3, 3, 1, 0, true, {1, 3, 2, 2});   // 无 padding
+}
+
+TEST_F(DeviceOps, Conv2dReluMaxPool2dRejectsBadShapes) {
+    auto av = ramp(2 * 3 * 5 * 5);
+    auto wv = ramp(2 * 3 * 3 * 3);
+    auto wc = ramp(2 * 4 * 3 * 3);
+    auto small = ramp(2 * 3 * 3 * 3);
+    auto iv = std::vector<std::int32_t>(54, 1);
+    const Tensor A = moved_to(Tensor(av, {2, 3, 5, 5}), kTestDevice);
+    const Tensor W = moved_to(Tensor(wv, {2, 3, 3, 3}), kTestDevice);
+
+    // conv 输出非正：pool 侧的尺寸永远合法（conv 输出 >= 1 时 pool 输出 >= 1），
+    // 能被形状否决的只有 conv 自己——2x2 输入配 3x3 kernel 无 padding。
+    auto tiny = ramp(2 * 3 * 2 * 2);
+    const Tensor A3 = moved_to(Tensor(tiny, {2, 3, 2, 2}), kTestDevice);
+    const Tensor W3 = moved_to(Tensor(wv, {2, 3, 3, 3}), kTestDevice);
+    EXPECT_THROW(ops::Conv2dReluMaxPool2d(A3, W3, 1, 0), std::runtime_error);
+
+    EXPECT_THROW(ops::Conv2dReluMaxPool2d(A, W, 0, 1), std::runtime_error);   // stride 0
+    EXPECT_THROW(ops::Conv2dReluMaxPool2d(A, W, 1, -1), std::runtime_error);  // 负 padding
+    const Tensor Wi = moved_to(Tensor(iv, {2, 3, 3, 3}), kTestDevice);
+    EXPECT_THROW(ops::Conv2dReluMaxPool2d(A, Wi, 1, 1), std::runtime_error);  // 整型权重
+    const Tensor Wc = moved_to(Tensor(wc, {2, 4, 3, 3}), kTestDevice);
+    EXPECT_THROW(ops::Conv2dReluMaxPool2d(A, Wc, 1, 1), std::runtime_error);  // 通道不匹配
+}

@@ -345,6 +345,22 @@ template <> struct AvgPool2dImpl<Device::CPU> {
     static Tensor execute(const Tensor& input, const Pool2dShape& shape);
 };
 
+// 融合块 Conv2d+Relu+MaxPool2d 的几何：conv 的形状推导与 Conv2dShape 相同，
+// 再加 2x2/stride-2 池化后的输出尺寸。各后端实现一次算完，等价于
+// MaxPool2d(Relu(Conv2d(...)), 2, 2)。
+struct ConvPoolShape {
+    Conv2dShape conv;    // conv 输出是 conv.out_h x conv.out_w
+    int64_t     out_h = 0;  // pool 后的最终输出
+    int64_t     out_w = 0;
+    int64_t numel() const { return conv.batch * conv.out_ch * out_h * out_w; }
+};
+
+template <Device D> struct Conv2dReluMaxPool2dImpl;
+template <> struct Conv2dReluMaxPool2dImpl<Device::CPU> {
+    static Tensor execute(const Tensor& input, const Tensor& weight, const Tensor* bias,
+                          const ConvPoolShape& shape);
+};
+
 template <> struct EqualImpl<Device::CPU> {
     static Tensor execute(const Tensor& a, const Tensor& b);
     static Tensor execute(const Tensor& a, float val);

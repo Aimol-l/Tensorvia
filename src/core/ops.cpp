@@ -955,6 +955,116 @@ Tensor AvgPool2d(const Tensor& input, int64_t kh, int64_t kw, int64_t stride, in
     return pool2d_forward(input, kh, kw, stride, padding, true);
 }
 
+namespace {
+
+// 融合块的入口校验与形状推导：conv 部分与 conv2d_forward 同规则（4-D NCHW
+// 连续化、四浮点 dtype、stride/padding 标量广播），pool 固定 2x2/stride 2。
+ConvPoolShape conv_pool_shape_of(const Tensor& input, const Tensor& weight,
+                                 const Tensor* bias, int64_t stride, int64_t padding) {
+    const auto in_shape = input.shape();
+    const auto w_shape  = weight.shape();
+    const size_t in_rank = in_shape.size();
+    if (in_rank != 3 && in_rank != 4)
+        throw std::runtime_error(std::format(
+            "conv_pool: input must be 3-D [C, H, W] or 4-D [N, C, H, W], got {}D", in_rank));
+    if (w_shape.size() != 4)
+        throw std::runtime_error(std::format(
+            "conv_pool: weight must be 4-D [Cout, C, kh, kw], got {}D", w_shape.size()));
+    if (stride < 1) throw std::runtime_error("conv_pool: stride must be at least 1");
+    if (padding < 0) throw std::runtime_error("conv_pool: padding must not be negative");
+    if (!is_floating_dtype(input.dtype()))
+        throw std::runtime_error(std::format("conv_pool: dtype must be floating point, got {}",
+                                             dtype_to_string(input.dtype())));
+
+    ConvPoolShape s;
+    s.conv.batch   = in_rank == 4 ? in_shape[0] : 1;
+    s.conv.in_ch   = in_shape[in_rank - 3];
+    s.conv.in_h    = in_shape[in_rank - 2];
+    s.conv.in_w    = in_shape[in_rank - 1];
+    s.conv.out_ch  = w_shape[0];
+    s.conv.kh      = w_shape[2];
+    s.conv.kw      = w_shape[3];
+    if (w_shape[1] != s.conv.in_ch)
+        throw std::runtime_error(std::format(
+            "conv_pool: weight expects {} input channels but the input has {}",
+            w_shape[1], s.conv.in_ch));
+    if (weight.dtype() != input.dtype())
+        throw std::runtime_error(std::format(
+            "conv_pool: input and weight dtypes must match ({} vs {})",
+            dtype_to_string(input.dtype()), dtype_to_string(weight.dtype())));
+    if (s.conv.kh <= 0 || s.conv.kw <= 0)
+        throw std::runtime_error("conv_pool: kernel size must be positive");
+    s.conv.stride  = stride;
+    s.conv.padding = padding;
+    s.conv.out_h = (s.conv.in_h + 2 * padding - s.conv.kh) / stride + 1;
+    s.conv.out_w = (s.conv.in_w + 2 * padding - s.conv.kw) / stride + 1;
+    if (s.conv.out_h <= 0 || s.conv.out_w <= 0)
+        throw std::runtime_error(std::format(
+            "conv_pool: {0}x{1} input with {2}x{3} kernel, stride {4}, padding {5} "
+            "yields a non-positive conv output",
+            s.conv.in_h, s.conv.in_w, s.conv.kh, s.conv.kw, stride, padding));
+
+    // pool 固定 2x2/stride 2：conv 输出至少 2x2，否则池化无处可池。
+    s.out_h = (s.conv.out_h - 2) / 2 + 1;
+    s.out_w = (s.conv.out_w - 2) / 2 + 1;
+    if (s.out_h <= 0 || s.out_w <= 0)
+        throw std::runtime_error(std::format(
+            "conv_pool: conv output {}x{} is too small for the 2x2 pool",
+            s.conv.out_h, s.conv.out_w));
+    return s;
+}
+
+Tensor conv_pool_forward(const Tensor& input, const Tensor& weight, const Tensor* bias,
+                         int64_t stride, int64_t padding) {
+    require_live(input);
+    const ConvPoolShape shape = conv_pool_shape_of(input, weight, bias, stride, padding);
+
+    if (bias != nullptr) {
+        if (bias->dtype() != input.dtype())
+            throw std::runtime_error(std::format(
+                "conv_pool: bias dtype must match the input ({} vs {})",
+                dtype_to_string(bias->dtype()), dtype_to_string(input.dtype())));
+        if (bias->device_id() != input.device_id())
+            throw std::runtime_error("conv_pool: bias must live on the same device as the input");
+        if (bias->numel() != shape.conv.out_ch)
+            throw std::runtime_error(std::format(
+                "conv_pool: bias must have {} elements, got {}", shape.conv.out_ch,
+                bias->numel()));
+    }
+
+    const size_t in_rank = input.shape().size();
+    if (shape.conv.batch == 0 || shape.conv.out_ch == 0) {
+        std::vector<int64_t> out_shape{shape.conv.batch, shape.conv.out_ch, shape.out_h,
+                                       shape.out_w};
+        return empty_on(input, out_shape, input.dtype());
+    }
+
+    Tensor in_hold, w_hold, b_hold;
+    Tensor plain = in_rank == 3 ? input.unsqueeze(0) : input;
+    const Tensor& src = linearize(plain, in_hold);
+    const Tensor& w   = linearize(weight, w_hold);
+    const Tensor* bias_arg = nullptr;
+    if (bias != nullptr) bias_arg = &linearize(*bias, b_hold);
+
+    Tensor out = execute_on<Conv2dReluMaxPool2dImpl>(src.device_id(), "conv_pool", src, w,
+                                                     bias_arg, shape);
+    if (in_rank == 3)
+        out = out.reshape({shape.conv.out_ch, shape.out_h, shape.out_w});
+    return out;
+}
+
+}  // namespace
+
+Tensor Conv2dReluMaxPool2d(const Tensor& input, const Tensor& weight, int64_t stride,
+                           int64_t padding) {
+    return conv_pool_forward(input, weight, nullptr, stride, padding);
+}
+
+Tensor Conv2dReluMaxPool2d(const Tensor& input, const Tensor& weight, const Tensor& bias,
+                           int64_t stride, int64_t padding) {
+    return conv_pool_forward(input, weight, &bias, stride, padding);
+}
+
 Tensor Abs(const Tensor& a) {
     require_live(a);
     require_not_bool(a, "abs");

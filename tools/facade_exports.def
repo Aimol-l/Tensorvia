@@ -103,6 +103,7 @@ Linear
 Conv2d
 MaxPool2d
 AvgPool2d
+Conv2dReluMaxPool2d
 Abs
 Relu
 Sin
