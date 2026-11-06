@@ -127,3 +127,6 @@ cxxflags = ["-march=x86-64-v3"]
 [targets.cnn_inference]
 kind = "bin"
 main = "examples/cnn_inference.cpp"
+
+[target.'cfg(accelerator = "sycl")'.xlings.workspace]
+"xim:cuda-nvcc" = "12.9.86"
