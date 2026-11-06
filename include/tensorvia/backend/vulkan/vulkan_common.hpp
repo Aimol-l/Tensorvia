@@ -226,6 +226,22 @@ struct Conv2dParams {
     uint32_t has_bias;
 };
 
+// pool2d（Max / Avg）。stride_h/stride_w 由公共层换算成最终步长（stride 参数
+// 为 0 时取 kernel 尺寸）；Avg 的分母恒为 kh*kw（count_include_pad）。
+struct Pool2dParams {
+    uint32_t batch;
+    uint32_t channels;
+    uint32_t in_h;
+    uint32_t in_w;
+    uint32_t kh;
+    uint32_t kw;
+    uint32_t stride_h;
+    uint32_t stride_w;
+    uint32_t padding;
+    uint32_t out_h;
+    uint32_t out_w;
+};
+
 // typecast：目标 dtype 的编码。必须与 shader/typecast/*.comp 里的 dst_type
 // 分支一一对应——这里刻意不用 DataType 的枚举序号，避免枚举增删悄悄改变语义。
 struct TypecastParams {

@@ -1,0 +1,71 @@
+#version 460
+
+// 2-D 平均池化：一次调用算一个输出元素。输入/输出都是连续 NCHW。
+//
+// 不做寄存器分块或 shared tiling：每个输出只读 kh*kw 个输入、无跨输出复用，
+// 是带宽型操作，一 invocation 一输出即够（CUDA/SYCL 后端同一判断）。
+//
+// 半精度在 32 位浮点里累加/比较，只在写回时转回存储类型——半精度累加会丢
+// 有效位。边界：padding 区域不是真值，不参与取值；窗口整体越界时输出 0
+// （Avg 计 0 且计入分母，count_include_pad）。
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform Params {
+    uint batch;
+    uint channels;
+    uint in_h;
+    uint in_w;
+    uint kh;
+    uint kw;
+    uint stride_h;
+    uint stride_w;
+    uint padding;
+    uint out_h;
+    uint out_w;
+} params;
+
+layout(std430, binding = 0) buffer Input {
+    float data[];
+} src; // [batch, channels, in_h, in_w]
+
+layout(std430, binding = 1) buffer Output {
+    float data[];
+} dst; // [batch, channels, out_h, out_w]
+
+void main() {
+    const uint total = params.batch * params.channels * params.out_h * params.out_w;
+    const uint i = gl_GlobalInvocationID.x;
+    if (i >= total) return;
+
+    const uint ox = i % params.out_w;
+    uint rest     = i / params.out_w;
+    const uint oy = rest % params.out_h;
+    rest /= params.out_h;
+    const uint c  = rest % params.channels;
+    const uint n  = rest / params.channels;
+
+    const uint in_plane  = params.in_h * params.in_w;
+    const uint out_plane = params.out_h * params.out_w;
+    const uint base = (n * params.channels + c) * in_plane;
+
+    float acc = float(0);
+    float best = float(0);
+    bool first = true;
+    uint count = 0u;
+    for (uint ii = 0u; ii < params.kh; ++ii) {
+        const int y = int(oy * params.stride_h + ii) - int(params.padding);
+        if (y < 0 || y >= int(params.in_h)) continue;
+        for (uint jj = 0u; jj < params.kw; ++jj) {
+            const int x = int(ox * params.stride_w + jj) - int(params.padding);
+            if (x < 0 || x >= int(params.in_w)) continue;
+            const float v = float(src.data[base + uint(y) * params.in_w + uint(x)]);
+            acc += v;
+            ++count;
+        }
+    }
+
+    float result;
+    if (count == 0u) result = float(0);
+    else result = acc / float(params.kh * params.kw);  // 分母含 pad：count_include_pad
+    dst.data[(n * params.channels + c) * out_plane + oy * params.out_w + ox] = float(result);
+}
