@@ -9,8 +9,8 @@ import tensorvia;
 //
 // ops::Conv2d 的语义与 torch.nn.functional.conv2d 一致（NCHW、same padding、
 // stride 1）。各后端有自己的实现：CPU 直接卷积，CUDA/SYCL 一个线程一个输出元素，
-// Vulkan 一份 GLSL。maxpool 用现有算子拼出来：reshape + permute 把 2x2 的四个
-// 候选挪到最后一维，再 Max(axis=-1)。
+// Vulkan 一份 GLSL。maxpool 走 ops::MaxPool2d（四后端同语义，stride 缺省取
+// kernel 尺寸）。
 //
 // 权重布局沿用 PyTorch 的卷积约定 [Cout, C, kh, kw]。
 //
@@ -69,15 +69,9 @@ void print_ascii(Tensor t, std::int64_t channel) {
     }
 }
 
-// 2x2 最大池化，空间维减半。库没有 pool 算子，这里用 reshape/permute/Max 拼：
-// [C, H, W] -> [C, H/2, 2, W/2, 2] -> [C, H/2, W/2, 2, 2] -> [C, H/2, W/2, 4] -> Max。
+// 2x2 最大池化，空间维减半。stride 缺省取 kernel 尺寸，即 2x2/stride 2。
 Tensor maxpool2(const Tensor& x) {
-    const std::int64_t c = x.shape()[0];
-    const std::int64_t h = x.shape()[1];
-    const std::int64_t w = x.shape()[2];
-    return ops::Max(x.reshape({c, h / 2, 2, w / 2, 2}).permute({0, 1, 3, 2, 4})
-                        .reshape({c, h / 2, w / 2, 4}),
-                    3);
+    return ops::MaxPool2d(x, 2, 2);
 }
 
 // 一个卷积块：conv(3x3, same padding) -> relu -> 2x2 maxpool。

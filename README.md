@@ -40,7 +40,8 @@
 - 创建：`Zeros`、`Ones`、`Fill`、`Random`；生成器 `Arange`、`Linspace`、`Eye`、`Randn` 的
   `TensorOptions` 重载在宿主生成后一次性搬到目标设备（同一 seed 各后端取值相同）
 - 算术：`Add`、`Sub`、`Mul`、`Div`、`MatMul`（N-D batched + batch 广播）、`Bmm`、`Addmm`、`Linear`、
-  `Conv2d`（NCHW 的 2-D 卷积，stride/padding + 可选 bias，接受 `[N,C,H,W]` 与 `[C,H,W]`）
+  `Conv2d`（NCHW 的 2-D 卷积，stride/padding + 可选 bias，接受 `[N,C,H,W]` 与 `[C,H,W]`）、
+  `MaxPool2d`、`AvgPool2d`（NCHW 的 2-D 池化，stride 缺省取 kernel 尺寸；padding 不参与取值，Avg 计 0 入分母）
 - 一元：`Abs`、`Sin`、`Cos`、`Tan`、`Exp`、`Sqrt`、`Log`、`Pow`、`Clamp`
 - 激活：`Relu`、`Silu`、`Tanh`、`Sigmoid`、`Softmax`、`LogSoftmax`
 - 归一化/统计：`LayerNorm`、`RmsNorm`、`Var`、`Std`、`Norm`（设备端由上面的逐元素与归约算子组合实现，
