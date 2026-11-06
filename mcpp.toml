@@ -42,8 +42,6 @@ defines             = ['TENSORVIA_VERSION="0.3.0"']
 flags = [
     { glob = "src/**/*.cpp",   cxxflags = ["-fopenmp"] },
     { glob = "src/*.cpp",      cxxflags = ["-fopenmp"] },
-    # bench 的带宽上限参照要与被测内核同并行度（OpenMP）；CMake 路径的
-    # BUILD_BENCH 已经为 CPU 链 OpenMP::OpenMP_CXX，这里补上 mcpp 侧。
     { glob = "benchmark/**/*.cpp", cxxflags = ["-fopenmp"] },
 ]
 
@@ -108,7 +106,6 @@ gcc.libstdcxx = "16.1.0.1"
 
 [target.'cfg(accelerator = "vulkan")'.dependencies]
 compat.vulkan-runtime  = "2026.09.11"
-compat.vulkan-memory-allocator = "3.4.0"
 compat.vulkan-headers =  { version = "1.4.357.0", visibility = "private" }
 
 [target.'cfg(accelerator = "vulkan")'.xlings.workspace]

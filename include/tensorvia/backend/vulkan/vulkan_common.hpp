@@ -1,7 +1,10 @@
 #pragma once
 
 #include <vulkan/vulkan.hpp>
-#include <vk_mem_alloc.h>
+
+#define VMA_STATIC_VULKAN_FUNCTIONS  0
+#define VMA_DYNAMIC_VULKAN_FUNCTIONS 1
+#include "vk_mem_alloc.h"
 
 #include <array>
 #include <concepts>
@@ -17,10 +20,6 @@
 #include <utility>
 #include <vector>
 
-// Vulkan 公共词汇表：push constant 结构体（必须与 GLSL 布局逐字节一致）、
-// buffer+memory 的 RAII 持有者，以及把静默的 vk::Result 变成异常的检查函数。
-//
-// 只有这个分区包含 <vulkan/vulkan.hpp>；各算子实现单元从这里取 Vulkan 类型。
 #include "tensorvia/types.hpp"
 #include "tensorvia/tensor.hpp"
 
