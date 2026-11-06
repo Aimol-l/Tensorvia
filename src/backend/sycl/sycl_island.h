@@ -205,6 +205,24 @@ struct Pool2d {
     int64_t out_w    = 0;
 };
 
+// conv_pool：融合块 Conv2d+Relu+MaxPool2d(2x2)。conv_h/conv_w 是卷积输出
+// （pool 的输入），out_h/out_w 是池化后的最终输出。
+struct ConvPool {
+    int64_t batch   = 0;
+    int64_t in_ch   = 0;
+    int64_t in_h    = 0;
+    int64_t in_w    = 0;
+    int64_t out_ch  = 0;
+    int64_t kh      = 0;
+    int64_t kw      = 0;
+    int64_t stride  = 1;
+    int64_t padding = 0;
+    int64_t conv_h  = 0;
+    int64_t conv_w  = 0;
+    int64_t out_h   = 0;
+    int64_t out_w   = 0;
+};
+
 // gather：输出形状与 index 相同，非 dim 维坐标决定输入 base。
 struct Gather {
     int64_t numel       = 0;
@@ -224,6 +242,7 @@ static_assert(std::is_trivially_copyable_v<IndexAxis>, "seam POD");
 static_assert(std::is_trivially_copyable_v<Gather>, "seam POD");
 static_assert(std::is_trivially_copyable_v<Conv2d>, "seam POD");
 static_assert(std::is_trivially_copyable_v<Pool2d>, "seam POD");
+static_assert(std::is_trivially_copyable_v<ConvPool>, "seam POD");
 static_assert(std::is_trivially_copyable_v<ReduceAxis>, "seam POD");
 static_assert(std::is_trivially_copyable_v<SortAxis>, "seam POD");
 static_assert(std::is_trivially_copyable_v<Repack>, "seam POD");
@@ -367,6 +386,10 @@ int sycl_c_launch_conv2d(void* ctx, const void* in, const void* weight, const vo
 // pool2d：average 非 0 为 AvgPool，否则为 MaxPool。
 int sycl_c_launch_pool2d(void* ctx, const void* in, void* out, int dtype,
                          const tvv::sycl::Pool2d* p, int average);
+// conv_pool：融合块 Conv2d+Relu+MaxPool2d(2x2)；bias 可为空指针。
+int sycl_c_launch_conv_pool(void* ctx, const void* in, const void* weight,
+                            const void* bias, void* out, int dtype,
+                            const tvv::sycl::ConvPool* p);
 
 // 沿 axis 的累积和；输出与输入同形同 dtype。
 int sycl_c_launch_cumsum(void* ctx, const void* in, void* out, int dtype,

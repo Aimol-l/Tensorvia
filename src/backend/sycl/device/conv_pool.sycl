@@ -1,0 +1,97 @@
+// Device::SYCL 的融合块 Conv2d+Relu+MaxPool2d(2x2)。
+//
+// 一个工作项算一个最终输出（pool 输出）元素：它的 2x2 pool 窗口对应 conv
+// 输出的 4 个位置，每个位置一次 kh x kw 直接卷积，relu 后取 max。不搬
+// local memory——每输出只读 kh*kw*4*in_ch 个输入、无跨输出复用，带宽型；
+// 换来的是三个算子合成一次提交与一次同步。
+//
+// 半精度在 promoted_t<T>（float）里累加；Max 的哨兵用首值初始化而非
+// numeric_limits——宿主 constexpr 函数在设备代码里用不得（common.h 的
+// max_finite 注释）。
+#include "common.h"
+
+using namespace tvv::sycl_dev;
+
+namespace {
+
+template <class T>
+void conv_pool_kernel(::sycl::queue& q, const T* in, const T* w, const T* bias, T* out,
+                      const tvv::sycl::ConvPool& p) {
+    using Acc = promoted_t<T>;
+    const int64_t total = p.batch * p.out_ch * p.out_h * p.out_w;
+    q.parallel_for(range_of(total), [=](::sycl::id<1> idx) {
+        const int64_t i = static_cast<int64_t>(idx[0]);
+        const int64_t opx = i % p.out_w;
+        int64_t rest      = i / p.out_w;
+        const int64_t opy = rest % p.out_h;
+        rest /= p.out_h;
+        const int64_t oc = rest % p.out_ch;
+        const int64_t n  = rest / p.out_ch;
+
+        const int64_t in_plane = p.in_h * p.in_w;
+        const int64_t kplane   = p.kh * p.kw;
+        const Acc b = bias != nullptr ? to_compute<Acc>(bias[oc]) : Acc(0);
+
+        // pool 窗口的 2x2 个 conv 输出位置，各做一次卷积后 relu，取 max。
+        Acc best  = Acc(0);
+        bool first = true;
+        for (int64_t di = 0; di < 2; ++di) {
+            const int64_t oy = opy * 2 + di;  // pool stride 固定 2
+            for (int64_t dj = 0; dj < 2; ++dj) {
+                const int64_t ox = opx * 2 + dj;
+                Acc acc = b;
+                for (int64_t ci = 0; ci < p.in_ch; ++ci) {
+                    const T* in_c = in + (n * p.in_ch + ci) * in_plane;
+                    const T* w_c  = w + (oc * p.in_ch + ci) * kplane;
+                    for (int64_t ii = 0; ii < p.kh; ++ii) {
+                        const int64_t y = oy * p.stride + ii - p.padding;
+                        if (y < 0 || y >= p.in_h) continue;
+                        const T* in_row = in_c + y * p.in_w;
+                        for (int64_t jj = 0; jj < p.kw; ++jj) {
+                            const int64_t x = ox * p.stride + jj - p.padding;
+                            if (x < 0 || x >= p.in_w) continue;
+                            acc += to_compute<Acc>(in_row[x]) *
+                                   to_compute<Acc>(w_c[ii * p.kw + jj]);
+                        }
+                    }
+                }
+                const Acc v = acc > Acc(0) ? acc : Acc(0);  // relu
+                if (first || v > best) {
+                    best  = v;
+                    first = false;
+                }
+            }
+        }
+        out[(n * p.out_ch + oc) * (p.out_h * p.out_w) + opy * p.out_w + opx] =
+            store_as<T>(best);
+    });
+}
+
+}  // namespace
+
+extern "C" {
+
+int sycl_c_launch_conv_pool(void* ctx, const void* in, const void* weight,
+                            const void* bias, void* out, int dtype,
+                            const tvv::sycl::ConvPool* p) {
+    if (ctx == nullptr || in == nullptr || weight == nullptr || out == nullptr ||
+        p == nullptr)
+        return tvv::sycl::kSyclInvalid;
+    try {
+        auto& q = queue_of(ctx);
+        // *p 解引用成值再进 kernel 包装函数：lambda 按值捕获的是这份拷贝，
+        // 设备不碰宿主指针（repack 的 shape/strides 直穿是反例）。
+        return dispatch_dtype(dtype, [&](auto tag) -> int {
+            using T = typename decltype(tag)::type;
+            conv_pool_kernel<T>(q, static_cast<const T*>(in), static_cast<const T*>(weight),
+                                static_cast<const T*>(bias), static_cast<T*>(out), *p);
+            return tvv::sycl::kSyclOk;
+        });
+    } catch (const std::exception& e) {
+        return record_failure(e);
+    } catch (...) {
+        return record_failure();
+    }
+}
+
+}  // extern "C"

@@ -239,6 +239,10 @@ template <> struct MaxPool2dImpl<Device::SYCL> {
 template <> struct AvgPool2dImpl<Device::SYCL> {
     static Tensor execute(const Tensor& input, const Pool2dShape& shape);
 };
+template <> struct Conv2dReluMaxPool2dImpl<Device::SYCL> {
+    static Tensor execute(const Tensor& input, const Tensor& weight, const Tensor* bias,
+                          const ConvPoolShape& shape);
+};
 
 // ---------------------------------------------------------------------------
 // 条件选择、索引与累积和。
