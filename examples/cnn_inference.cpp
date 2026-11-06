@@ -27,10 +27,6 @@ constexpr std::int64_t kK = 3;
 constexpr std::int64_t kPad = 1;
 constexpr std::int64_t kClasses = 10;
 
-Tensor rand_param(std::vector<std::int64_t> shape, Device dev, float spread) {
-    return ops::Randn(shape, DataType::FLOAT32, 0.0f, spread, dev);
-}
-
 std::string shape_str(const Tensor& t) {
     std::string s = "[";
     for (std::size_t i = 0; i < t.dims(); ++i) {
@@ -60,9 +56,9 @@ class ConvBlock {
 public:
     ConvBlock(Device dev, std::int64_t in_ch, std::int64_t out_ch, std::int64_t kernel,
               std::int64_t pad)
-        : w_(rand_param({out_ch, in_ch, kernel, kernel}, dev,
-                         1.0f / std::sqrt(static_cast<float>(in_ch * kernel * kernel)))),
-          b_(rand_param({out_ch}, dev, 0.01f)),
+        : w_(ops::Randn({out_ch, in_ch, kernel, kernel}, DataType::FLOAT32, 0.0f,
+                        1.0f / std::sqrt(static_cast<float>(in_ch * kernel * kernel)), dev)),
+          b_(ops::Randn({out_ch}, DataType::FLOAT32, 0.0f, 0.01f, dev)),
           in_ch_(in_ch),
           kernel_(kernel),
           pad_(pad) {}
@@ -135,9 +131,9 @@ public:
 
         // 每个卷积块把 H/W 各减半一次，全连接的输入长度由此确定。
         features_ = blocks_.back().out_ch() * (kH / 4) * (kW / 4);
-        fc_w_ = rand_param({kClasses, features_}, dev,
-                           1.0f / std::sqrt(static_cast<float>(features_)));
-        fc_b_ = rand_param({kClasses}, dev, 0.01f);
+        fc_w_ = ops::Randn({kClasses, features_}, DataType::FLOAT32, 0.0f,
+                            1.0f / std::sqrt(static_cast<float>(features_)), dev);
+        fc_b_ = ops::Randn({kClasses}, DataType::FLOAT32, 0.0f, 0.01f, dev);
     }
 
     const std::vector<ConvBlock>& blocks() const { return blocks_; }
@@ -188,14 +184,10 @@ int main(int argc, char** argv) {
     const auto t0 = std::chrono::steady_clock::now();
     Tensor x = image;
     float worst = 0.0f;
-    std::int64_t layer = 0;
     for (const ConvBlock& block : model.blocks()) {
-        ++layer;
         const Tensor conv = block.convolve(x);
-        print_stats(std::format("conv{}", layer), conv);
         worst = std::max(worst, block.max_delta(conv, x));
         x = block.activate(conv);
-        print_stats(std::format("relu+pool{}", layer), x);
     }
     const Tensor logits = model.logits(x);
     print_stats("fc", logits);  // [classes]
