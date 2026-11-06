@@ -1,9 +1,22 @@
+// 分块矩阵乘法。A 视为 [batch, rows, k]，B 视为 [batch, k, cols]；二维调用就是
+// batch=1 的情形。宿主把两个操作数和目标提升到公共 dtype 并物化为连续 buffer，
+// 所以这里每次启动只需一种标量类型。
+//
+// 算法与 CUDA 后端（src/backend/cuda/device/matmul.cu）逐行同构：64x64 tile、
+// 64 个工作项、每项 8x8 累加器、kBlockK=32；小网格退回 16x16 tile、每项一个
+// 输出。分块参数的理由（算术强度、占用率实测）见 CUDA 侧的注释，不重复。
+//
+// 索引表达比 CUDA 保守：CUDA 的 grid 是 (x=列, y=行, z=batch) 三维，这里把
+// (行 tile, 列 tile, batch) 全部编码进一维 group，在内核里解算——避开多维
+// nd_range 在不同后端的维度映射差异，代价是几次整数除余。
 #include "common.h"
 
 using namespace tvv::sycl_dev;
 
 namespace {
 
+// 两个提升后标量之和遵循整型提升规则，所以窄整型操作数在 int（而不是其存储
+// 类型）中累加。
 template <class T>
 using accum_t = decltype(promoted_t<T>() + promoted_t<T>());
 
@@ -16,30 +29,54 @@ constexpr int kThreadsX = kBlockN / kThreadN;          // 8
 constexpr int kThreadsY = kBlockM / kThreadM;          // 8
 constexpr int kBlockWorkers = kThreadsX * kThreadsY;   // 64
 
+constexpr int kSmallTile = 16;
+
+// 把一个一维 group 下标解算成 (batch, 行 tile, 列 tile)。
+// 布局：g = (行 tile * col_tiles + 列 tile) * batches + batch。
+struct grid_xyz {
+    int64_t batch;
+    int64_t tile_row;
+    int64_t tile_col;
+};
+
+inline grid_xyz split_group(int64_t g, int64_t col_tiles, int64_t batches) {
+    grid_xyz r;
+    r.batch    = g % batches;
+    const int64_t t = g / batches;
+    r.tile_col = t % col_tiles;
+    r.tile_row = t / col_tiles;
+    return r;
+}
+
+// 大内核：一个 group 算 [tile_row*64, +64) x [tile_col*64, +64)，64 个工作项，
+// tid = ty*kThreadsX + tx（tx 是最快维，与 CUDA 的 threadIdx.x 一致，warp 内
+// 的共享装载落在连续地址上）。
 template <class T>
 void matmul_tiled_kernel(sycl::queue& q, const T* a, const T* b, T* out,
                          int64_t batch, int64_t rows, int64_t cols, int64_t k) {
     using Acc = accum_t<T>;
-    const size_t col_tiles = static_cast<size_t>((cols + kBlockN - 1) / kBlockN);
-    const size_t row_tiles = static_cast<size_t>((rows + kBlockM - 1) / kBlockM);
-    const size_t batches   = static_cast<size_t>(batch > 0 ? batch : 1);
+    const int64_t col_tiles = (cols + kBlockN - 1) / kBlockN;
+    const int64_t row_tiles = (rows + kBlockM - 1) / kBlockM;
+    const int64_t batches   = batch > 0 ? batch : 1;
+    const int64_t groups    = row_tiles * col_tiles * batches;
 
     q.submit([&](sycl::handler& h) {
+        // [kBlockK][kBlockM+1] / [kBlockK][kBlockN+1]：行 padding 避开 bank
+        // conflict，与 CUDA 的 __shared__ 布局一致。
         sycl::local_accessor<T, 1> tile_a(sycl::range<1>(kBlockK * (kBlockM + 1)), h);
         sycl::local_accessor<T, 1> tile_b(sycl::range<1>(kBlockK * (kBlockN + 1)), h);
         h.parallel_for(
-            // SYCL 的线性工作项下标以第 1 维最快：让“列组”落在 local_id(1)/
-            // group(1) 上，tid 才等于线性下标，同一 warp 的装载落在连续地址。
-            sycl::nd_range<3>(
-                sycl::range<3>(row_tiles * kThreadsY, col_tiles * kThreadsX, batches),
-                sycl::range<3>(kThreadsY, kThreadsX, 1)),
-            [=](sycl::nd_item<3> item) {
-                const int ty = static_cast<int>(item.get_local_id(0));
-                const int tx = static_cast<int>(item.get_local_id(1));
-                const int tid = ty * kThreadsX + tx;
-                const int64_t z = static_cast<int64_t>(item.get_group(2));
-                const int64_t block_row = static_cast<int64_t>(item.get_group(0)) * kBlockM;
-                const int64_t block_col = static_cast<int64_t>(item.get_group(1)) * kBlockN;
+            sycl::nd_range<1>(sycl::range<1>(static_cast<size_t>(groups * kBlockWorkers)),
+                              sycl::range<1>(kBlockWorkers)),
+            [=](sycl::nd_item<1> item) {
+                const int tid = static_cast<int>(item.get_local_id(0));
+                const int ty  = tid / kThreadsX;
+                const int tx  = tid % kThreadsX;
+                const grid_xyz g =
+                    split_group(static_cast<int64_t>(item.get_group(0)), col_tiles, batches);
+
+                const int64_t block_row = g.tile_row * kBlockM;
+                const int64_t block_col = g.tile_col * kBlockN;
                 const int64_t row0 = block_row + ty * kThreadM;
                 const int64_t col0 = block_col + tx * kThreadN;
 
@@ -60,7 +97,9 @@ void matmul_tiled_kernel(sycl::queue& q, const T* a, const T* b, T* out,
                         const int64_t gm = block_row + mm;
                         const int64_t gk = k0 + kk;
                         tile_a[kk * (kBlockM + 1) + mm] =
-                            (gm < rows && gk < k) ? a[z * rows * k + gm * k + gk] : T(0);
+                            (gm < rows && gk < k)
+                                ? a[g.batch * rows * k + gm * k + gk]
+                                : T(0);
                     }
                     // B: idx 的低位是输出列 → 合并读。
                     for (int idx = tid; idx < kBlockK * kBlockN; idx += kBlockWorkers) {
@@ -69,7 +108,9 @@ void matmul_tiled_kernel(sycl::queue& q, const T* a, const T* b, T* out,
                         const int64_t gn = block_col + nn;
                         const int64_t gk = k0 + kk;
                         tile_b[kk * (kBlockN + 1) + nn] =
-                            (gk < k && gn < cols) ? b[z * k * cols + gk * cols + gn] : T(0);
+                            (gk < k && gn < cols)
+                                ? b[g.batch * k * cols + gk * cols + gn]
+                                : T(0);
                     }
                     item.barrier(sycl::access::fence_space::local_space);
 
@@ -79,14 +120,17 @@ void matmul_tiled_kernel(sycl::queue& q, const T* a, const T* b, T* out,
                         Acc vb[kThreadN];
                         #pragma unroll
                         for (int i = 0; i < kThreadM; ++i)
-                            va[i] = to_compute<Acc>(tile_a[kk * (kBlockM + 1) + ty * kThreadM + i]);
+                            va[i] = to_compute<Acc>(
+                                tile_a[kk * (kBlockM + 1) + ty * kThreadM + i]);
                         #pragma unroll
                         for (int j = 0; j < kThreadN; ++j)
-                            vb[j] = to_compute<Acc>(tile_b[kk * (kBlockN + 1) + tx * kThreadN + j]);
+                            vb[j] = to_compute<Acc>(
+                                tile_b[kk * (kBlockN + 1) + tx * kThreadN + j]);
                         #pragma unroll
                         for (int i = 0; i < kThreadM; ++i)
                             #pragma unroll
-                            for (int j = 0; j < kThreadN; ++j) acc[i][j] += va[i] * vb[j];
+                            for (int j = 0; j < kThreadN; ++j)
+                                acc[i][j] += va[i] * vb[j];
                     }
                     item.barrier(sycl::access::fence_space::local_space);
                 }
@@ -99,67 +143,69 @@ void matmul_tiled_kernel(sycl::queue& q, const T* a, const T* b, T* out,
                     for (int j = 0; j < kThreadN; ++j) {
                         const int64_t gc = col0 + j;
                         if (gc >= cols) continue;
-                        out[z * rows * cols + gr * cols + gc] = store_as<T>(acc[i][j]);
+                        out[g.batch * rows * cols + gr * cols + gc] =
+                            store_as<T>(acc[i][j]);
                     }
                 }
             });
     });
 }
 
-// 小输出尺寸用：16x16 tile、每工作项一个输出。64x64 tile 在 256x256 上只有
-// 16 个 work-group，填不满设备；这个几何有 256 个，靠并行度取胜。
-constexpr int kTile = 16;
-
+// 小内核：16x16 tile、每工作项一个输出。64x64 tile 在 256x256 上只有 16 个
+// group，填不满设备；这个几何有 256 个，靠并行度取胜。
 template <class T>
 void matmul_kernel(sycl::queue& q, const T* a, const T* b, T* out,
                    int64_t batch, int64_t rows, int64_t cols, int64_t k) {
     using Acc = accum_t<T>;
-    const size_t col_tiles = static_cast<size_t>((cols + kTile - 1) / kTile);
-    const size_t row_tiles = static_cast<size_t>((rows + kTile - 1) / kTile);
-    const size_t batches   = static_cast<size_t>(batch > 0 ? batch : 1);
+    const int64_t col_tiles = (cols + kSmallTile - 1) / kSmallTile;
+    const int64_t row_tiles = (rows + kSmallTile - 1) / kSmallTile;
+    const int64_t batches   = batch > 0 ? batch : 1;
+    const int64_t groups    = row_tiles * col_tiles * batches;
 
     q.submit([&](sycl::handler& h) {
-        sycl::local_accessor<T, 1> tile_a(sycl::range<1>(kTile * kTile), h);
-        sycl::local_accessor<T, 1> tile_b(sycl::range<1>(kTile * kTile), h);
+        sycl::local_accessor<T, 1> tile_a(sycl::range<1>(kSmallTile * (kSmallTile + 1)), h);
+        sycl::local_accessor<T, 1> tile_b(sycl::range<1>(kSmallTile * (kSmallTile + 1)), h);
         h.parallel_for(
-            sycl::nd_range<3>(sycl::range<3>(row_tiles * kTile, col_tiles * kTile, batches),
-                              sycl::range<3>(kTile, kTile, 1)),
-            [=](sycl::nd_item<3> item) {
-                const size_t ty = item.get_local_id(0);
-                const size_t tx = item.get_local_id(1);
-                const int64_t row = static_cast<int64_t>(item.get_group(0) * kTile + ty);
-                const int64_t col = static_cast<int64_t>(item.get_group(1) * kTile + tx);
-                const int64_t bz  = static_cast<int64_t>(item.get_group(2));
+            sycl::nd_range<1>(
+                sycl::range<1>(static_cast<size_t>(groups * kSmallTile * kSmallTile)),
+                sycl::range<1>(kSmallTile * kSmallTile)),
+            [=](sycl::nd_item<1> item) {
+                const int tid = static_cast<int>(item.get_local_id(0));
+                const int ty  = tid / kSmallTile;
+                const int tx  = tid % kSmallTile;
+                const grid_xyz g =
+                    split_group(static_cast<int64_t>(item.get_group(0)), col_tiles, batches);
+
+                const int64_t row = g.tile_row * kSmallTile + ty;
+                const int64_t col = g.tile_col * kSmallTile + tx;
 
                 Acc sum = Acc(0);
-                const int64_t num_tiles = (k + kTile - 1) / kTile;
+                const int64_t num_tiles = (k + kSmallTile - 1) / kSmallTile;
                 for (int64_t tile_idx = 0; tile_idx < num_tiles; ++tile_idx) {
-                    const int64_t a_k = tile_idx * kTile + static_cast<int64_t>(tx);
-                    tile_a[ty * kTile + tx] =
+                    const int64_t a_k = tile_idx * kSmallTile + tx;
+                    tile_a[ty * (kSmallTile + 1) + tx] =
                         (row < rows && a_k < k)
-                            ? a[bz * rows * k + row * k + a_k]
+                            ? a[g.batch * rows * k + row * k + a_k]
                             : T(0);
-                    const int64_t b_k = tile_idx * kTile + static_cast<int64_t>(ty);
-                    tile_b[ty * kTile + tx] =
+                    const int64_t b_k = tile_idx * kSmallTile + ty;
+                    tile_b[ty * (kSmallTile + 1) + tx] =
                         (b_k < k && col < cols)
-                            ? b[bz * k * cols + b_k * cols + col]
+                            ? b[g.batch * k * cols + b_k * cols + col]
                             : T(0);
                     item.barrier(sycl::access::fence_space::local_space);
                     #pragma unroll
-                    for (int i = 0; i < kTile; ++i) {
-                        sum += static_cast<Acc>(to_compute<Acc>(tile_a[ty * kTile + i])) *
-                               static_cast<Acc>(to_compute<Acc>(tile_b[i * kTile + tx]));
-                    }
+                    for (int i = 0; i < kSmallTile; ++i)
+                        sum += static_cast<Acc>(to_compute<Acc>(tile_a[ty * (kSmallTile + 1) + i])) *
+                               static_cast<Acc>(to_compute<Acc>(tile_b[i * (kSmallTile + 1) + tx]));
                     item.barrier(sycl::access::fence_space::local_space);
                 }
-                if (row < rows && col < cols) {
-                    out[bz * rows * cols + row * cols + col] = store_as<T>(sum);
-                }
+                if (row < rows && col < cols)
+                    out[g.batch * rows * cols + row * cols + col] = store_as<T>(sum);
             });
     });
 }
 
-// 64x64 tile 不足 32 个时并行度不够（256^3 只有 16 个），换 16x16 内核。
+// 64x64 tile 不足 32 个时并行度不够，换 16x16 内核（与 CUDA 同一阈值）。
 constexpr int64_t kTiledMinBlocks = 32;
 
 }  // namespace
