@@ -35,8 +35,7 @@
 | **SYCL** | Clang（host）+ DPC++（设备） | C++23 host + SYCL 设备单元 | SYCL（USM，自动选择设备） | ✅ 可选启用 |
 
 设备枚举为 `Device::CPU`、`Device::VULKAN`、`Device::CUDA` 和 `Device::SYCL`。CPU 后端实现完整的
-`ops` API；Vulkan、CUDA 与 SYCL 覆盖下面这组算子（少数算子仍为 CPU-only，设备上调用会显式报错，
-完整覆盖矩阵见 [docs/coverage.md](docs/coverage.md)：
+`ops` API；Vulkan、CUDA 与 SYCL 覆盖下面这组算子（少数算子仍为 CPU-only，设备上调用会显式报错）：
 
 - 创建：`Zeros`、`Ones`、`Fill`、`Random`；生成器 `Arange`、`Linspace`、`Eye`、`Randn` 的
   `TensorOptions` 重载在宿主生成后一次性搬到目标设备（同一 seed 各后端取值相同）
@@ -51,14 +50,8 @@
 - 条件/索引/扫描：`Where`（三路广播）、`IndexSelect`、`Gather`（embedding 取行与逐元素取址）、`Cumsum`
 - 形状/搬移/类型：`Concat`、`Transpose`、`Slice`、`Split`、`Chunk`、`Stack`、`Pad`、`Repeat`、`Flip`、`Roll`、`Typecast`
 
-以上分组是便于阅读的摘要。权威的覆盖矩阵在 [docs/coverage.md](docs/coverage.md)：算子 × 后端逐格标注
-native / emulated（组合实现）/ unsupported（显式拒绝），由 `tools/coverage_matrix.py` 从源码与
-`tools/coverage_overrides.toml` 生成，CI 守漂移——那份矩阵取代了这里的手写清单。
-
-设备端未覆盖的算子（在设备张量上调用会带算子名抛错，不会静默回退 CPU）不在这里手写清单：
-以 [docs/coverage.md](docs/coverage.md) 的矩阵为准，其中 `unsupported` 的每一格都注明拒绝位置
-（`require_cpu` 或 `execute_on` 的“后端未实现”路径）。算子提交的同步语义（哪些调用会让宿主
-等待设备）见 [docs/async-semantics.md](docs/async-semantics.md)。
+以上分组是便于阅读的摘要。设备端未覆盖的算子在设备张量上调用会带算子名抛错，不会静默回退 CPU
+（`require_cpu` 或 `execute_on` 的“后端未实现”路径）。
 `examples/inference.cpp` 按真实推理引擎的分段跑一次前向：text → tokens → embedding →
 prefill（整段 prompt 一次算完，K/V 写进 cache）→ decode（一次一个 token，复用 cache）→ logits。
 模型是随机权重的两层 decoder-only Transformer：词表与位置查表走 `IndexSelect`，多头注意力的
@@ -75,7 +68,7 @@ prefill（整段 prompt 一次算完，K/V 写进 cache）→ decode（一次一
 | mcpp | 仅 [mcpp](https://github.com/mcpp-community/mcpp)（自带隔离工具链） |
 | CMake | CMake ≥ 3.28、支持 C++23 的 GCC/Clang、OpenMP |
 | 测试 | GoogleTest（`BUILD_TEST=ON` 或 `mcpp test`） |
-| Vulkan | Vulkan 1.4 头文件/loader；shader 编译器由 mcpp 按需安装（`xim:shaderc`，即 `glslc`）。CMake 构建需自行提供 Python 3 + 支持 `GL_EXT_bfloat16` 的 `glslangValidator`（≥ 16.5） |
+| Vulkan | Vulkan 1.4 头文件/loader；shader 编译器由 mcpp 按需安装（`xim:shaderc`，即 `glslc`），CMake 路径经 `build.py` 提供 `glslangValidator`（≥ 16.5，需 Python 3）。VulkanMemoryAllocator 已随仓库（`include/tensorvia/backend/vulkan/vk_mem_alloc.h`，3.4.0），无需另装 |
 | CUDA | CUDA Toolkit（mcpp 按 `--accel` 声明的线自动安装 payload；CMake 需自行提供 `nvcc`） |
 | SYCL | DPC++（mcpp 自动安装 `dpcpp` payload；CMake 需 `icpx` 在 `PATH` 上）与 SYCL 运行时 |
 
@@ -235,8 +228,10 @@ Python，也不需要宿主机上装 shader 编译器）；规则从 `[build] so
 | `CMAKE_BUILD_TYPE` | 构建类型 (Release/Debug) | Release |
 
 Vulkan 后端需要 `glslangValidator`（≥ 16.5，`GL_EXT_bfloat16`）与 Vulkan 头文件；
-这条路径用 `tools/gen_spv.py` 生成 SPIR-V 登记表（CMake 没有规则引擎），mcpp
-那条路径则由 `mcpp.rules.spirv` 编译 shader，两者共用同一个运行时接口；SYCL 需要
+这条路径必须经 `build.py` 构建——`python3 build.py -b vulkan` 在每次 configure
+前编译 shader 并生成 SPIR-V 登记表（`-gen-spv` 可单独生成），CMake 只消费
+`<build>/gen/spirv/spv_registry.cpp`、缺失即报错；mcpp 那条路径则由
+`mcpp.rules.spirv` 编译 shader，两者共用同一个运行时接口；SYCL 需要
 `icpx` 可被 `find_program` 找到（或在 `PATH` 上）。`-march=x86-64-v3` 随库的
 PUBLIC 编译选项传给使用方。
 
@@ -251,8 +246,8 @@ cmake -B build -DBACKEND_CPU=ON -DCMAKE_BUILD_TYPE=Release && cmake --build buil
 # 使用CUDA后端构建
 # cmake -B build -DBACKEND_CUDA=ON -DCMAKE_BUILD_TYPE=Release && cmake --build build --parallel
 
-# 使用Vulkan后端构建（SPIR-V 由构建系统自动编译，见下）
-# cmake -B build -DBACKEND_VULKAN=ON -DCMAKE_BUILD_TYPE=Release && cmake --build build --parallel
+# 使用Vulkan后端构建（shader 须先由 build.py 生成，裸 cmake 会报缺产物错，见 2.2）
+# python3 build.py -b vulkan
 
 # 使用SYCL后端构建（icpx 需在 PATH 上，或显式 -DTVV_SYCL_COMPILER=…）
 # cmake -B build -DBACKEND_SYCL=ON -DCMAKE_BUILD_TYPE=Release && cmake --build build --parallel
@@ -260,19 +255,30 @@ cmake -B build -DBACKEND_CPU=ON -DCMAKE_BUILD_TYPE=Release && cmake --build buil
 
 ### 2.2 使用构建脚本
 
+`build.py` 是 CMake 路径的唯一入口，编译与打包走同一份后端参数（编译器、CUDA 架构、
+SYCL 设备目标），不会出现"能编不能打"的分叉。
+
 | 参数 | 作用 |
 |------|------|
-| `-b, --backend <cpu\|cuda\|sycl\|vulkan>` | 配置、编译并安装该后端到 `build-<backend>/`。 |
-| `-test on\|off` | 是否同时构建测试（默认 `off`）。 |
-| `-o, --out-dir DIR` | 生成产物的根目录（默认 `./build`，**不写源码树**）。 |
-| `--glslang PATH` | `glslangValidator` 路径（默认从 `PATH` 查找）。 |
-| `-pkg, --package arch\|deb\|rpm` | 生成不同发行版的系统包|
-| `-c, --clean [build\|pkg\|dist\|all]` | 清理产物：`build`（默认，各 `build-*/` 与 `build/`）、`pkg`（`build-pkg/`）、`dist`（`dist/`）、`all`。配 `-b` 只清该后端。 |
-```python
-python3 build.py -pkg arch -b cpu -test on      # 编译生成CPU后端的张量库，同时自动打arch包
-# python3 build.py -pkg arch -b sycl -test on   # 编译生成SYCL后端的张量库，同时自动打arch包
-# python3 build.py -pkg deb -b cuda -test on    # 编译生成CUDA后端的张量库，同时自动打deb包
-# python3 build.py -pkg rpm -b vulkan -test on  # 编译生成Vulkan后端的张量库，同时自动打rpm包
+| `-b, --backend <cpu\|cuda\|sycl\|vulkan>` | 配置、编译该后端（默认 `cpu`）。**一次只编一个后端**，CPU 始终在内。 |
+| `-test on\|off` | 是否同时构建并运行 `tests/`（`ctest`，默认 `off`）。 |
+| `-pkg, --package <arch\|deb\|rpm\|all>` | 编译后再打对应发行版的系统包到 `dist/`。不给则只编译并安装。 |
+| `-n, --dry-run` | 只打印将要执行的命令，不动文件系统。 |
+| `-gen-spv --out <目录>` | 单独生成 Vulkan 的 SPIR-V 登记表（`<目录>/spirv/spv_registry.cpp`）；`-b vulkan` 每次构建前会自动执行，打包路径也调用它。 |
+
+产物布局：构建树 `build-<backend>/`，本地安装前缀 `build-<backend>/install/`（仅不打包时），
+打包中间物 `build-pkg/`，安装包 `dist/`。
+
+几个后端参数是自动推导的，不需要手填：CUDA 架构取自 `nvidia-smi`（取不到退回 `89`）；
+SYCL 用 `icpx` 并按其自身运行时固定 OpenMP 三项，检测到 N 卡时把设备代码编成
+`nvptx64-nvidia-cuda` + 对应 `sm_XX`（没有 N 卡则保持 `spir64` 默认目标）。
+
+```bash
+python3 build.py -b cpu -test on                # 编译 + ctest + 安装到 build-cpu/install
+python3 build.py -b cuda                        # 只编译并安装
+python3 build.py -pkg arch -b cpu -test on      # 编译测试，再打 arch 包
+python3 build.py -pkg deb -b cuda               # 编译，再打 deb 包
+python3 build.py -pkg all -b vulkan             # 一次出 arch / deb / rpm
 ```
 
 ### 2.3 安装张量包
@@ -388,7 +394,7 @@ cmake -B build -DBACKEND_CPU=ON -DCMAKE_BUILD_TYPE=Release -DBUILD_TEST=ON && cm
 | matmul f32 1024 | GFLOPS | 283 | 39.6× | 21.1× | 12.2× |
 | conv2d f32 8x64x56x56 | GFLOPS | 15.3 | 340× | 232× | 153× |
 
-＊ Vulkan 的 `transpose2d` 是纯固定开销用例（submit 0.27 + sync 0.28 ms），bench 里紧跟在 `sum-axis1` 之后，量值随前序负载漂移；同一份代码单独探针实测 0.398 ms（约 21 GB/s），见 Vulkan 基线的说明。
+＊ Vulkan 的 `transpose2d` 是纯固定开销用例（submit 0.27 + sync 0.28 ms），bench 里紧跟在 `sum-axis1` 之后，量值随前序负载漂移；同一份代码单独探针实测 0.398 ms（约 21 GB/s）。
 
 ## 📄 许可证
 

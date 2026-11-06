@@ -654,83 +654,14 @@ footer code{font-family:var(--font-mono);font-size:12px}
       <figcaption>
         连续输入不再为 strided 解码付代价：<code>linearizable</code> 为真时主机端把参数的 <code>ndim</code> 置 0，
         三个后端的内核都据此走一维分支；广播与跨步才进通用路径。一致性由
-        <code>tests/p1.cpp</code> 的 <code>ContiguousAndStridedPathsAgree</code> 逐元素锁定，
+        <code>tests/inference_ops.cpp</code> 的 <code>ContiguousAndStridedPathsAgree</code> 逐元素锁定，
         收益分后端（SYCL 约 6×、Vulkan +9~15%、CUDA 持平——该尺寸受内存限制）。
       </figcaption>
     </figure>
   </section>
 
   <section>
-    <div class="sec-head"><span class="sec-num">05</span><h2>覆盖矩阵：支持性是被守门的</h2><span class="sec-rule"></span></div>
-
-    <figure class="fig">
-      <div class="fig-scroll">
-        <svg viewBox="0 0 1140 396" role="img" aria-label="覆盖矩阵的生成与守门：ops.hpp 与四份后端 ops 头的 Impl 特化加人工标注，经 coverage_matrix.py 生成入库的 coverage.md，CI 的 --check 对漂移失败并指名算子与后端">
-          <defs>
-            <marker id="f5a-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 Z" style="fill:var(--accent)"/></marker>
-          </defs>
-
-          <text x="24" y="36" class="t-label">源码事实</text>
-          <rect class="box" x="24" y="46" width="296" height="76" rx="10"/>
-          <text x="42" y="70" class="t-mono" style="font-size:11.5px">include/tensorvia/ops.hpp</text>
-          <text x="42" y="90" class="t-body">公开算子名（重载按名字收敛）</text>
-          <text x="42" y="110" class="t-body">多行声明 / 模板函数 / 结果类型都要解析到</text>
-
-          <rect class="box" x="24" y="138" width="296" height="104" rx="10"/>
-          <text x="42" y="162" class="t-mono" style="font-size:11.5px">四份后端 ops 头</text>
-          <text x="42" y="180" class="t-mono-s">backend/{cpu,cuda,sycl,vulkan}/*_ops.hpp</text>
-          <text x="42" y="200" class="t-body">template &lt;&gt; struct XxxImpl&lt;Device::X&gt;</text>
-          <text x="42" y="220" class="t-body">注释掉的不算；偏特化直接报错</text>
-          <text x="42" y="238" class="t-body">（不满足派发概念）</text>
-
-          <line class="flow" x1="320" y1="84" x2="392" y2="96" marker-end="url(#f5a-accent)"/>
-          <line class="flow" x1="320" y1="190" x2="392" y2="140" marker-end="url(#f5a-accent)"/>
-
-          <text x="24" y="286" class="t-label">人工标注（唯一来源，不靠猜）</text>
-          <rect class="box" x="24" y="296" width="296" height="76" rx="10"/>
-          <text x="42" y="320" class="t-mono" style="font-size:11.5px">tools/coverage_overrides.toml</text>
-          <text x="42" y="340" class="t-body">组合实现（parts 可校验）· 显式拒绝</text>
-          <text x="42" y="360" class="t-body">（附 file:line 证据）· 异步状态</text>
-
-          <line class="flow" x1="320" y1="334" x2="392" y2="212" marker-end="url(#f5a-accent)"/>
-
-          <rect class="box-accent" x="396" y="96" width="264" height="140" rx="10"/>
-          <text x="414" y="124" class="t-mono" style="font-size:12px">tools/coverage_matrix.py</text>
-          <text x="414" y="146" class="t-body">解析 → 生成 → --check</text>
-          <text x="414" y="166" class="t-body">一格既无 Impl 又无标注</text>
-          <text x="414" y="184" class="t-body">⇒ 报错，指名算子与后端</text>
-          <text x="414" y="204" class="t-body">与 native 格冲突的标注 ⇒ 报错</text>
-          <text x="414" y="226" class="t-mono-s">算子 × 4 后端 = 77 × 4 格</text>
-
-          <line class="flow" x1="660" y1="166" x2="712" y2="166" marker-end="url(#f5a-accent)"/>
-
-          <rect class="box" x="716" y="60" width="400" height="110" rx="10"/>
-          <text x="734" y="84" class="t-mono" style="font-size:12px">docs/coverage.md（入库）</text>
-          <text x="734" y="106" class="t-body">矩阵 + 每后端支持率 + 异步状态</text>
-          <text x="734" y="128" class="t-mono-s">CPU 100% · 设备端各 51 native</text>
-          <text x="734" y="146" class="t-mono-s">+ 21 emulated + 5 unsupported</text>
-          <text x="734" y="164" class="t-mono-s">= 93.5%</text>
-
-          <rect class="box" x="716" y="196" width="400" height="110" rx="10"/>
-          <text x="734" y="220" class="t-mono" style="font-size:12px">CI · coverage job</text>
-          <text x="734" y="242" class="t-body">python3 -I tools/coverage_matrix.py --check</text>
-          <text x="734" y="264" class="t-body">漂移即失败；README 不再维护第二份清单</text>
-          <text x="734" y="286" class="t-body">标注为支持的组合，测试在对应 lane 真实执行</text>
-
-          <rect class="box" x="716" y="330" width="400" height="46" rx="10"/>
-          <text x="734" y="358" class="t-body">删掉一个后端特化再跑：失败信息指名该算子与该后端</text>
-        </svg>
-      </div>
-      <figcaption>
-        覆盖矩阵是 FR-1 的守门人：事实源只有两个——源码里的 <code>Impl</code> 特化与
-        <code>coverage_overrides.toml</code> 的人工标注；矩阵文档由生成器产出、入库、被 CI 校验。
-        组合实现与“不支持”必须显式标注（附证据行），推不出来的格子直接让构建失败。
-      </figcaption>
-    </figure>
-  </section>
-
-  <section>
-    <div class="sec-head"><span class="sec-num">06</span><h2>异步执行的时间线</h2><span class="sec-rule"></span></div>
+    <div class="sec-head"><span class="sec-num">05</span><h2>异步执行的时间线</h2><span class="sec-rule"></span></div>
 
     <figure class="fig">
       <div class="fig-scroll">
@@ -741,7 +672,7 @@ footer code{font-family:var(--font-mono);font-size:12px}
           </defs>
 
           <text x="196" y="40" class="t-body">入队四次：宿主只付提交开销</text>
-          <text x="1096" y="40" class="t-label" text-anchor="end">同机实测 submit（benchmark/baseline）：CUDA 约 2 µs，Vulkan 约 0.25 ms</text>
+          <text x="1096" y="40" class="t-label" text-anchor="end">同机实测 submit：CUDA 约 2 µs，Vulkan 约 0.25 ms</text>
 
           <line class="edge" x1="496" y1="52" x2="496" y2="246" stroke-dasharray="5 4" stroke="var(--accent)" stroke-width="1.4"/>
           <text x="502" y="62" class="t-body" style="fill:var(--accent)">同步点</text>
@@ -784,13 +715,13 @@ footer code{font-family:var(--font-mono);font-size:12px}
         （<code>to_device</code> 经宿主中转）。“提交阶段零等待”不是计时断言，而是可观测计数器的断言：
         每次宿主真正等待设备就记一次（<code>include/_sync_counters.h</code>），
         <code>tests/async_contract.cpp</code> 在四条 lane 上断言提交阶段为 0、显式点各计一次；
-        清单与理由见 <code>docs/async-semantics.md</code>。张量是线程亲和的，跨线程移交前必须显式同步。
+        张量是线程亲和的，跨线程移交前必须显式同步。
       </figcaption>
     </figure>
   </section>
 
   <section>
-    <div class="sec-head"><span class="sec-num">07</span><h2>后端对照</h2><span class="sec-rule"></span></div>
+    <div class="sec-head"><span class="sec-num">06</span><h2>后端对照</h2><span class="sec-rule"></span></div>
     <div class="table-wrap">
       <table>
         <thead>
@@ -835,7 +766,7 @@ footer code{font-family:var(--font-mono);font-size:12px}
   </section>
 
   <section>
-    <div class="sec-head"><span class="sec-num">08</span><h2>两条构建路径</h2><span class="sec-rule"></span></div>
+    <div class="sec-head"><span class="sec-num">07</span><h2>两条构建路径</h2><span class="sec-rule"></span></div>
     <div class="cards">
       <div class="card">
         <h3>mcpp<span class="tag">import tensorvia;</span></h3>
@@ -845,27 +776,28 @@ footer code{font-family:var(--font-mono);font-size:12px}
           <code>.comp</code> 分别由 rules-cuda、rules-sycl、rules-spirv 路由，SPIR-V 在构建期嵌入注册表。</p>
         <p>测试：<code>mcpp test --features … --accel …</code>，<code>tests/</code> 下一个文件一个二进制；
           <code>benchmark/bench.cpp</code> 同路径被发现，输出 submit / sync / total 三段与冷启动。</p>
-        <p>CI 的 coverage job 跑 <code>tools/coverage_matrix.py --check</code> 与该工具自己的 unittest——
-          只跑 Python，不构建。</p>
       </div>
       <div class="card">
         <h3>CMake<span class="tag">#include &lt;tensorvia.hpp&gt;</span></h3>
         <p>直接构建头文件形态：模块扫描关闭，消费方只需普通的 <code>include</code> 与链接，
-          不要求工具链支持模块。</p>
-        <p>Vulkan 着色器由 <code>glslangValidator</code> 编译为 SPIR-V，并生成 <code>spv_registry.cpp</code>；
-          后端由 <code>-DBACKEND_CUDA=ON</code> 等开关选择。</p>
+          不要求工具链支持模块。入口是 <code>python3 build.py -b cpu|vulkan|cuda|sycl</code>，
+          编译与打包共用同一份后端参数。</p>
+        <p>Vulkan 的着色器由 <code>build.py</code> 在 configure 前用 <code>glslangValidator</code>
+          编译并生成 <code>spv_registry.cpp</code>（<code>-gen-spv</code> 可单独生成，打包路径
+          同样调用它）；CMake 只消费这份产物，configure 时缺失即报错——因此 vulkan 后端
+          必须经 <code>build.py</code> 构建。后端也可由 <code>-DBACKEND_CUDA=ON</code> 等开关
+          直接选择。</p>
         <p>两条路径跑的是同一份头文件、同一个 SYCL 接缝与同一套着色器。</p>
       </div>
     </div>
   </section>
 
   <section>
-    <div class="sec-head"><span class="sec-num">09</span><h2>贯穿全库的约束</h2><span class="sec-rule"></span></div>
+    <div class="sec-head"><span class="sec-num">08</span><h2>贯穿全库的约束</h2><span class="sec-rule"></span></div>
     <ul class="invariants">
       <li><span class="k">dispatch</span><span><strong>派发在编译期决定。</strong>没编入的后端不参与链接、不探测硬件、不加载驱动；请求它创建张量会直接报错。</span></li>
       <li><span class="k">errors</span><span><strong>不支持就是报错。</strong>未实现的算子与组合在调用点抛 <code>runtime_error</code>，错误信息点明后端，绝不静默回退 CPU。</span></li>
-      <li><span class="k">coverage</span><span><strong>支持性有单一事实源。</strong>算子 × 后端的矩阵由源码生成、CI 守漂移；一格推不出来就让构建失败，组合实现与显式拒绝必须带标注与证据。</span></li>
-      <li><span class="k">async</span><span><strong>同步只发生在显式点。</strong>提交阶段零等待由计数器断言，不靠计时；四个显式点与理由写在 <code>docs/async-semantics.md</code>。</span></li>
+      <li><span class="k">async</span><span><strong>同步只发生在显式点。</strong>提交阶段零等待由计数器断言，不靠计时。</span></li>
       <li><span class="k">threads</span><span><strong>张量线程亲和。</strong>张量归创建它的线程所有；跨线程移交前必须先在原线程 <code>ops::synchronize()</code>，库不检测这种误用。</span></li>
       <li><span class="k">memory</span><span><strong>按流分池。</strong>缓存块只在释放它的流上复用；没有 <code>record_stream</code>，也没有公开的 Stream / Event 抽象。</span></li>
     </ul>
@@ -874,9 +806,8 @@ footer code{font-family:var(--font-mono);font-size:12px}
   <footer>
     依据仓库当前 HEAD（<code>main</code>，多后端成熟度 P0/P1 已合入）整理。图中的路径、类型名与
     注册接口都能在 <code>include/tensorvia/</code>、<code>src/core/</code>、<code>src/backend/</code> 与
-    <code>specs/2026-11-01-multi-backend-maturity.md</code> 里找到对应实现。三份同步维护的文档：
-    覆盖矩阵 <code>docs/coverage.md</code>（生成物）、同步语义 <code>docs/async-semantics.md</code>、
-    性能下限与基线 <code>docs/performance.md</code> 与 <code>benchmark/baseline/</code>。
+    <code>specs/2026-11-01-multi-backend-maturity.md</code> 里找到对应实现。性能快照见 README 的
+    「性能基线」一节。
   </footer>
 
 </div>
