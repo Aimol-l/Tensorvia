@@ -1351,10 +1351,10 @@ void check_conv_pool(const std::vector<int64_t>& as, int64_t cout, int64_t kh, i
                      const std::vector<int64_t>& want) {
     int64_t n = 1;
     for (int64_t d : as) n *= d;
-    auto a = ramp(n);
-    auto wv = ramp(cout * as[as.size() - 3] * kh * kw, 0.013f, -0.5f);
+    auto a = ramp(n, 0.001f, -0.5f);
+    auto wv = ramp(cout * as[as.size() - 3] * kh * kw, 0.002f, -0.5f);
     auto bv = std::vector<float>(cout > 0 ? static_cast<size_t>(cout) : 0);
-    for (size_t i = 0; i < bv.size(); ++i) bv[i] = 0.01f * static_cast<float>(i) - 0.02f;
+    for (size_t i = 0; i < bv.size(); ++i) bv[i] = 0.001f * static_cast<float>(i) - 0.002f;
 
     const Tensor A = moved_to(Tensor(a, as), kTestDevice);
     const Tensor W = moved_to(Tensor(wv, {cout, as[as.size() - 3], kh, kw}), kTestDevice);
@@ -1366,12 +1366,25 @@ void check_conv_pool(const std::vector<int64_t>& as, int64_t cout, int64_t kh, i
     EXPECT_EQ(fused.dtype(), A.dtype());
     EXPECT_EQ(fused.device(), kTestDevice);
 
-    // 参考：同一输入的组合式（CPU 语义，与 lane 无关）。
-    const Tensor ref = ops::MaxPool2d(
-        ops::Relu(with_bias ? ops::Conv2d(A, W, B, stride, padding)
-                            : ops::Conv2d(A, W, stride, padding)),
-        2, 2);
-    expect_close(host_values<float>(fused), host_values<float>(ref), "conv_pool vs fused");
+    // 参考：纯 host 手算（conv_reference -> relu -> pool_ref），不经过库里
+    // 任何算子——组合式参考会把 conv2d 自身的 bug 算进基准。
+    const int64_t n_b = as.size() == 4 ? as[0] : 1;
+    const int64_t c_b = as[as.size() - 3];
+    const int64_t h_b = as[as.size() - 2];
+    const int64_t w_b = as[as.size() - 1];
+    const int64_t conv_h = (h_b + 2 * padding - kh) / stride + 1;
+    const int64_t conv_w = (w_b + 2 * padding - kw) / stride + 1;
+    // 参考：纯 host 手算（conv_reference -> relu -> pool_ref），不经过库里
+    // 任何算子。数据量级压在 1 以内：host 参考是 double 累加、设备是 float，
+    // 量级大了 kEps 比较的就变成累加顺序而不是语义。
+    const std::vector<float> conv = conv_reference(a, n_b, c_b, h_b, w_b, wv,
+                                                   with_bias ? &bv : nullptr, cout, kh, kw,
+                                                   stride, padding);
+    std::vector<float> relu(conv.size());
+    for (size_t i = 0; i < conv.size(); ++i) relu[i] = std::max(conv[i], 0.0f);
+    const std::vector<float> ref =
+        pool_ref(relu, {n_b, cout, conv_h, conv_w}, 2, 2, 0, 0, false);
+    expect_close(host_values<float>(fused), ref, "conv_pool vs host reference");
 }
 
 TEST_F(DeviceOps, Conv2dReluMaxPool2dMatchesComposition) {
@@ -1406,3 +1419,4 @@ TEST_F(DeviceOps, Conv2dReluMaxPool2dRejectsBadShapes) {
     const Tensor Wc = moved_to(Tensor(wc, {2, 4, 3, 3}), kTestDevice);
     EXPECT_THROW(ops::Conv2dReluMaxPool2d(A, Wc, 1, 1), std::runtime_error);  // 通道不匹配
 }
+

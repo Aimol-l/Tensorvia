@@ -53,11 +53,10 @@ public:
         b_ = ops::Randn({out_ch}, 0.0f, 0.01f, opt);
     }
 
-    // [C, H, W] -> [Cout, H/2, W/2]：卷积 same padding 保尺寸，池化空间减半。
+    // [C, H, W] -> [Cout, H/2, W/2]：融合块一次算完 conv+relu+pool，省掉两个
+    // 算子的提交与同步往返（Vulkan lane 上这是前向的主要成本）。
     Tensor forward(const Tensor& x) const {
-        const Tensor conv = ops::Conv2d(x, w_, b_, /*stride=*/1, kPad);
-        const Tensor act  = ops::Relu(conv);
-        return ops::MaxPool2d(act, 2, 2);
+        return ops::Conv2dReluMaxPool2d(x, w_, b_, /*stride=*/1, kPad);
     }
 };
 
@@ -110,6 +109,8 @@ int main() {
     const auto stop = std::chrono::steady_clock::now();
 
     const double avg_ms = std::chrono::duration<double, std::milli>(stop - start).count() / kRuns;
+
+    ops::println(logits);
 
     const std::int64_t best = ops::Argmax(ops::Softmax(logits, 0), 0).item<std::int64_t>();
     std::println("device {} | forward {:.2f} ms/run ({} runs, {}x{}x{}) | prediction: "
