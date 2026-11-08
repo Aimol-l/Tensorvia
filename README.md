@@ -70,7 +70,7 @@ prefill（整段 prompt 一次算完，K/V 写进 cache）→ decode（一次一
 | 测试 | GoogleTest（`BUILD_TEST=ON` 或 `mcpp test`） |
 | Vulkan | Vulkan 1.4 头文件/loader；shader 编译器由 mcpp 按需安装（`xim:shaderc`，即 `glslc`），CMake 路径经 `build.py` 提供 `glslangValidator`（≥ 16.5，需 Python 3）。VulkanMemoryAllocator 已随仓库（`include/tensorvia/backend/vulkan/vk_mem_alloc.h`，3.4.0），无需另装 |
 | CUDA | CUDA Toolkit（mcpp 按 `--accel` 声明的线自动安装 payload；CMake 需自行提供 `nvcc`） |
-| SYCL | DPC++（mcpp 自动安装 `dpcpp` payload；CMake 需 `icpx` 在 `PATH` 上）与 SYCL 运行时 |
+| SYCL | DPC++（mcpp 自动安装 `dpcpp` payload；CMake 需 `icpx` 在 `PATH` 上）与 SYCL 运行时；N 卡 AOT 时规则按需拉取 `xim:cuda-nvcc`（见 1.3） |
 
 ## 一、当使用MCPP构建时
 
@@ -192,7 +192,7 @@ cd Tensorvia
 
 mcpp build --dev                                                  # CPU 后端（默认）
 mcpp build --dev --features cuda   --accel "cuda13.3+{sm_89}"     # CPU + CUDA
-mcpp build --dev --features sycl   --accel "sycl"                 # CPU + SYCL
+mcpp build --dev --features sycl   --accel "sycl+{nvptx64-sm_89}" # CPU + SYCL（N 卡按架构编 AOT）
 mcpp build --dev --features vulkan --accel vulkan1.4               # CPU + Vulkan
 ```
 
@@ -212,6 +212,12 @@ Python，也不需要宿主机上装 shader 编译器）；规则从 `[build] so
 按 13.3 线的兼容路径编译；写 12.9 或不写版本会撞当前 glibc 的 C23 `noexcept`
 冲突），架构（`sm_XX`）按自己的 GPU 选；驱动版本由规则包探测比对
 （`cuda.driver`），与 toolkit 线不是一回事。
+
+SYCL 的 `--accel` 写 `sycl+{nvptx64-sm_89}`（`sm_89` 是别名，架构按自己的 GPU 选；
+多架构写 `sycl+{nvptx64-sm_89,nvptx64-sm_90}`）。裸 `sycl` 只生成 SPIR-V、交给运行时
+选择设备；N 卡走 UR 的 CUDA 后端时不消费 SPIR-V，设备代码必须在构建期按架构编出来。
+`mcpp.plugins` 0.21.0 起，SYCL 的 NVIDIA 目标不再需要 accel 里同时点名 `cuda`，
+`xim:cuda-nvcc` 由规则按需请求，项目侧不必自己声明（mcpp#887）。
 
 ## 二、当使用cmake构建时
 
@@ -363,7 +369,7 @@ std::println("{}", device_id_to_string(t.device_id()));   // CUDA:1
 # mcpp：编译并运行 tests/**/*.cpp（dev-dependencies 里的 gtest 只在此时进图）
 mcpp test                                          # CPU（默认）
 #mcpp test --features vulkan                        # + Vulkan lane 的完整构建
-#mcpp test --features sycl --accel "sycl+{sm_89}"   # + SYCL lane 的完整构建（N 卡必须带架构集合：裸 sycl 产 SPIR-V，UR CUDA 不消费会落 CPU，见 mcpp#887）
+#mcpp test --features sycl --accel "sycl+{nvptx64-sm_89}"  # + SYCL lane 的完整构建（N 卡必须带架构集合：裸 sycl 只产 SPIR-V，UR 的 CUDA 后端不消费）
 #mcpp test --features cuda --accel "cuda13.3+{sm_89}"  # + CUDA lane 的完整构建
 
 # CMake

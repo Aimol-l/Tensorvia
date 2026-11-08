@@ -5,27 +5,63 @@
 # file must not change depending on which command ran last.
 version = 2
 
+[package."compat.opencl"]
+namespace = "compat"
+version = "2026.09.11"
+source  = "index+compat@2026.09.11"
+hash    = "fnv1a:5c2451f4d12da7f3"
+
+[package."compat.opencl-headers"]
+namespace = "compat"
+version = "2026.05.29"
+source  = "index+compat@2026.05.29"
+hash    = "fnv1a:8166a2d98d525bdd"
+
+[package."compat.opencl-runtime"]
+namespace = "compat"
+version = "2026.09.11"
+source  = "index+compat@2026.09.11"
+hash    = "fnv1a:54aacf23366443c4"
+
 [package."compat.openmp"]
 namespace = "compat"
 version = "22.1.8"
 source  = "index+compat@22.1.8"
 hash    = "fnv1a:d769c475fd4d5817"
 
-[package."compat.vulkan-headers"]
-namespace = "compat"
-version = "1.4.357.0"
-source  = "index+compat@1.4.357.0"
-hash    = "fnv1a:bdc593e80e141715"
-
-[package."compat.vulkan-runtime"]
+[package."compat.sycl-runtime"]
 namespace = "compat"
 version = "2026.09.11"
 source  = "index+compat@2026.09.11"
-hash    = "fnv1a:1b525aba82f64630"
+hash    = "fnv1a:6deaf79cdc3c650c"
+
+[package."gcc.libstdcxx"]
+namespace = "gcc"
+version = "16.1.0.1"
+source  = "index+gcc@16.1.0.1"
+hash    = "fnv1a:4b6211883621d843"
 
 [package."mcpp.plugins"]
 namespace = "mcpp"
-version = "0.19.1"
-source  = "index+mcpp@0.19.1"
-hash    = "fnv1a:0d7f39458ff7b510"
+version = "0.21.0"
+source  = "index+mcpp@0.21.0"
+hash    = "fnv1a:8b30383cb93ef040"
+
+[package."openkal"]
+namespace = "mcpplibs"
+version = "0.24.0"
+source  = "index+mcpplibs@0.24.0"
+hash    = "fnv1a:7264ed077cd83703"
+
+[package."openkal-linux"]
+namespace = "mcpplibs"
+version = "0.25.0"
+source  = "index+mcpplibs@0.25.0"
+hash    = "fnv1a:34912a331a4386f5"
+
+[package."os"]
+namespace = "mcpplibs"
+version = "0.4.0"
+source  = "index+mcpplibs@0.4.0"
+hash    = "fnv1a:1f6e16a8588773f7"
 

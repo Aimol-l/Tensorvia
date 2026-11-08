@@ -16,13 +16,13 @@ import tensorvia;
 // 打印的耗时才有对比意义。
 
 #if defined(BACKEND_VULKAN)
-constexpr Device kDevice = Device::VULKAN;
+    constexpr Device kDevice = Device::VULKAN;
 #elif defined(BACKEND_CUDA)
-constexpr Device kDevice = Device::CUDA;
+    constexpr Device kDevice = Device::CUDA;
 #elif defined(BACKEND_SYCL)
-constexpr Device kDevice = Device::SYCL;
+    constexpr Device kDevice = Device::SYCL;
 #else
-constexpr Device kDevice = Device::CPU;
+    constexpr Device kDevice = Device::CPU;
 #endif
 
 namespace {

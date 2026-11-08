@@ -77,7 +77,7 @@ compat.gtest = "1.17.0"
 discover = ["tests/**/*.cpp", "benchmark/**/*.cpp"]
 
 [build-dependencies]
-mcpp.plugins = { version = "0.19.1", features = ["rules-cuda", "rules-sycl","rules-spirv"], host-module = true }
+mcpp.plugins = { version = "0.21.0", features = ["rules-cuda", "rules-sycl","rules-spirv"], host-module = true }
 
 #=================================编译产物和名称================================
 [targets.tensorvia]
@@ -124,9 +124,7 @@ cxxflags = ["-march=x86-64-v3"]
 [target.'cfg(compiler = "gcc")'.build]
 ldflags  = ["-fopenmp"]
 cxxflags = ["-march=x86-64-v3"]
+
 [targets.cnn_inference]
 kind = "bin"
 main = "examples/cnn_inference.cpp"
-
-[target.'cfg(accelerator = "sycl")'.xlings.workspace]
-"xim:cuda-nvcc" = "12.9.86"
