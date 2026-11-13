@@ -76,31 +76,58 @@ prefill（整段 prompt 一次算完，K/V 写进 cache）→ decode（一次一
 
 ### 1.1 直接使用远端的包，避免打包的麻烦
 
-#### 
 ```sh
-# bash —— 使用远端包：后端在 [dependencies] 里用 features 选（见下方 mcpp.toml）
 mcpp new hello && cd hello
-mcpp build
-mcpp run  # 运行main.cpp
+mcpp add aimol.tensorvia@0.3.0     # 写入 [dependencies.aimol] tensorvia = "0.3.0"
+```
+
+然后按要用的后端改 `hello/mcpp.toml`（下面只列相关段落，其余保持默认）：
+
+```toml
+# CPU（默认）：加完依赖就可以了
+[dependencies.aimol]
+tensorvia = { version = "0.3.0" }
 ```
 
 ```toml
-# mcpp.toml
-[package]
-name        = "hello"
-version     = "0.1.0"
-description = "tensorvia package use project"
-license     = "Apache-2.0"
-
+# Vulkan
 [dependencies.aimol]
-tensorvia = { version = "0.3.0"}  # 默认就是使用cpu后端
-#tensorvia = { version = "0.3.0", features = ["cuda"] }
-#tensorvia = { version = "0.3.0", features = ["sycl"] }
-#tensorvia = { version = "0.3.0", features = ["vulkan"] }
-# 消费者通过 features 选产物形态（不开的后端连编译都不参与）；
-# CUDA/SYCL 的设备编译开关在 --accel（根级配置，只有使用方的构建命令能给）——
-# 选了 cuda/sycl 就照下方 1.3 的表格配对 --accel，否则构建被 build.mcpp 拒绝。
+tensorvia = { version = "0.3.0", features = ["vulkan"] }
+
+[build]
+accel = "vulkan1.4"
 ```
+
+```toml
+# CUDA：架构按自己的卡选；nvcc 不接受 gcc 16，走 clang 路线
+[dependencies.aimol]
+tensorvia = { version = "0.3.0", features = ["cuda"] }
+
+[build]
+accel = "cuda13.3+{sm_89}"
+
+[toolchain]
+default = "llvm@22.1.8"
+```
+
+```toml
+# SYCL：要求 libstdc++，共享库各持一份私有运行时
+[dependencies.aimol]
+tensorvia = { version = "0.3.0", features = ["sycl"] }
+
+[build]
+accel = "sycl+{nvptx64-sm_89}"
+cxx_runtime = { shared = "self-contained" }
+
+[toolchain]
+default = "llvm@22.1.8"
+```
+
+```sh
+mcpp build
+mcpp run
+```
+
 ```cpp
 // main.cpp
 import std;
@@ -193,31 +220,8 @@ cd Tensorvia
 mcpp build --dev                                                  # CPU 后端（默认）
 mcpp build --dev --features cuda   --accel "cuda13.3+{sm_89}"     # CPU + CUDA
 mcpp build --dev --features sycl   --accel "sycl+{nvptx64-sm_89}" # CPU + SYCL（N 卡按架构编 AOT）
-mcpp build --dev --features vulkan --accel vulkan1.4               # CPU + Vulkan
+mcpp build --dev --features vulkan --accel vulkan1.4              # CPU + Vulkan
 ```
-
-**`--features` 和 `--accel` 是两个轴，三个设备后端都必须配对给**。Vulkan 的
-shader 由 `mcpp.rules.spirv` 编译（规则自带 `xim:shaderc`/`glslc`，构建时不需要
-Python，也不需要宿主机上装 shader 编译器）；规则从 `[build] sources` 里
-`accel = "vulkan1.4"` 的 glob 取 shader 集合，所以这个轴现在也是 Vulkan 必需的：
-
-| 轴 | 控制什么 |
-|---|---|
-| `--features cuda` | 宿主代码里编不编 CUDA 后端（定义 `BACKEND_CUDA` 宏 → 注册与分发） |
-| `--accel cuda...` | 编不编设备源码（`.cu`）、按哪个架构编、rules-cuda 走哪条兼容路径 |
-
-只给 `--accel` 不给 `--features` 会被 `build.mcpp` 直接拒绝
-（`--accel names cuda but the 'cuda' feature is off`）——设备代码编出来却没有宿主
-注册，是个空壳。`--accel` 里的数字是 **toolkit 线声明**（`cuda13.3` 让 rules-cuda
-按 13.3 线的兼容路径编译；写 12.9 或不写版本会撞当前 glibc 的 C23 `noexcept`
-冲突），架构（`sm_XX`）按自己的 GPU 选；驱动版本由规则包探测比对
-（`cuda.driver`），与 toolkit 线不是一回事。
-
-SYCL 的 `--accel` 写 `sycl+{nvptx64-sm_89}`（`sm_89` 是别名，架构按自己的 GPU 选；
-多架构写 `sycl+{nvptx64-sm_89,nvptx64-sm_90}`）。裸 `sycl` 只生成 SPIR-V、交给运行时
-选择设备；N 卡走 UR 的 CUDA 后端时不消费 SPIR-V，设备代码必须在构建期按架构编出来。
-`mcpp.plugins` 0.21.0 起，SYCL 的 NVIDIA 目标不再需要 accel 里同时点名 `cuda`，
-`xim:cuda-nvcc` 由规则按需请求，项目侧不必自己声明（mcpp#887）。
 
 ## 二、当使用cmake构建时
 
