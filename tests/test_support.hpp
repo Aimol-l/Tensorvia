@@ -1,11 +1,6 @@
 #pragma once
 
-// 共享的测试固定装置与小工具。mcpp 把 tests/ 下每个 .cpp 编成独立的可执行文件，
-// 因此这些助手放在匿名命名空间里：每个可执行文件各有一份实体，不会在链接期碰撞。
-// 新增测试文件时只需 #include "test_support.hpp"。
-
 #include <gtest/gtest.h>
-
 #include <algorithm>
 #include <array>
 #include <atomic>

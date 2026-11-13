@@ -1,9 +1,3 @@
-// `import tensorvia;` 冒烟：C++23 模块消费路径的最薄探针。
-//
-// 不 include 任何 tensorvia 头，只 import 模块——模块门面
-// src/interface/tensorvia.ixx 缺失、facade_exports.def 漂移、或安装面断链，
-// 这里在构建期/运行期最先响。examples/ 下有各路径的消费者样例，但 tests/ 里
-// 没有一个被构建系统自动跑的模块导入探针；本文件补上这一格。
 import std;
 import tensorvia;
 
