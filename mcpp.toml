@@ -1,11 +1,12 @@
 [package]
 name        = "tensorvia"
+namespace   = "aimol"
 version     = "0.3.0"
 description = "Tensorvia: C++23 module tensor library with CPU, Vulkan, CUDA and SYCL backends"
 license     = "MIT"
 standard    = "c++23"
 authors     = ["Aimol-l"]
-platforms   = ["linux"]
+platforms   = ["linux", "macosx", "windows"]
 repo        = "https://github.com/Aimol-l/Tensorvia"
 
 #==================================编译器选择==================================
