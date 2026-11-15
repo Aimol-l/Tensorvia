@@ -37,13 +37,17 @@ jobs:
             suffix: linux-x86_64
             ext: tar.gz
             timeout: 60
-          - leg: default        # 同上；windows 上是 clang-cl + 系统 MSVC sysroot
+          - leg: default        # 对应索引的 "windows default" leg：clang 打
+                               # MSVC ABI + 系统 Visual Studio 当 sysroot。
+                               # mcpp.toml 的 [toolchain] windows 钉的就是这个，
+                               # 写 msvc@system 会变成真 cl.exe——那边不用它。
             os: windows-2022
             suffix: windows-x86_64
             ext: zip
             timeout: 90
-          # 不经过 sysroot 的 clang，对应索引的 "linux llvm" leg：抓住"头文件悄悄
-          # 用了宿主 /usr/include"这类在本机永远发现不了的问题。
+          # 对应索引的 "linux llvm" leg：不钉版本的 clang，抓"悄悄依赖了某个
+          # 具体 clang 版本的行为"这类问题。注意项目级 [toolchain] 声明压过全局
+          # 默认，所以这条腿实际编的仍是 mcpp.toml 里钉的那个 llvm。
           - leg: llvm
             os: ubuntu-latest
             suffix: linux-x86_64
@@ -54,6 +58,17 @@ jobs:
 
       # 缓存先恢复，再解包：released mcpp 是自包含的，解包时把 registry 复制进
       # ~/.mcpp，两个动作顺序反了的话，缓存里那份会被 release 那份盖掉。
+      #
+      # 钥匙里带 mcpp.toml 的内容哈希（和索引的 validate.yml 同一招：
+      # git ls-files -s 读索引，不读文件内容，拿 git 已经算好的 blob SHA）。
+      # 哈希它而不是源码：缓存里存的是工具链和已构建的 compat 包，由
+      # mcpp.toml 的 [toolchain]/[dependencies] 决定；改 src/ 不该让缓存失效，
+      # 改依赖却必须失效。
+      - name: Compute registry cache key
+        shell: bash
+        run: |
+          h=$(git ls-files -s -- 'mcpp.toml' | git hash-object --stdin)
+          echo "REGISTRY_CACHE_KEY=mcpp-registry-${{ runner.os }}-${{ matrix.leg }}-${{ env.MCPP_VERSION }}-$h" >> "$GITHUB_ENV"
       - name: Restore mcpp registry cache
         uses: actions/cache@v4
         with:
@@ -64,7 +79,7 @@ jobs:
             ~/.mcpp/registry
             !~/.mcpp/registry/data/xim-pkgindex
             !~/.mcpp/registry/data/mcpplibs
-          key: mcpp-registry-${{ runner.os }}-${{ matrix.leg }}-${{ env.MCPP_VERSION }}
+          key: ${{ env.REGISTRY_CACHE_KEY }}
 
       - name: Install mcpp ${{ env.MCPP_VERSION }}
         shell: bash
