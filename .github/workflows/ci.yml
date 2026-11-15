@@ -1,0 +1,120 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# 同一个 ref 上重复触发时，只保留最新一次。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # 和 mcpp-index 的 validate.yml 用同一个 pin。本仓库要证明的不是"某个 mcpp 能编过"，
+  # 而是"索引将要用的那个 mcpp 能编过"——否则这里绿了、提交上去照样红。
+  # 2026.8.5.4 起 windows 用 lld 链接，是这个平台能编过的最低版本。
+  MCPP_VERSION: "2026.11.15.1"
+
+jobs:
+  build:
+    name: ${{ matrix.leg }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 没有 macOS leg，不是忘了：CPU 后端是 AVX2（_simd_math.h 包含
+          # <immintrin.h>），Apple silicon 上编不过，mcpp.toml 的 platforms
+          # 也早就只写了 linux 和 windows。加一条必然红的 leg 只会训练大家忽略红色。
+          - leg: default        # 仓库自己 mcpp.toml 选的工具链
+            os: ubuntu-latest
+            suffix: linux-x86_64
+            ext: tar.gz
+            timeout: 60
+          - leg: default        # 同上；windows 上是 clang-cl + 系统 MSVC sysroot
+            os: windows-2022
+            suffix: windows-x86_64
+            ext: zip
+            timeout: 90
+          # 不经过 sysroot 的 clang，对应索引的 "linux llvm" leg：抓住"头文件悄悄
+          # 用了宿主 /usr/include"这类在本机永远发现不了的问题。
+          - leg: llvm
+            os: ubuntu-latest
+            suffix: linux-x86_64
+            ext: tar.gz
+            timeout: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      # 缓存先恢复，再解包：released mcpp 是自包含的，解包时把 registry 复制进
+      # ~/.mcpp，两个动作顺序反了的话，缓存里那份会被 release 那份盖掉。
+      - name: Restore mcpp registry cache
+        uses: actions/cache@v4
+        with:
+          # 存的是工具链和已构建的 compat 包（xim-x-llvm、compat.gtest…）。
+          # 解析出来的索引树排除掉：那是 8MB，但必须是新的——缓存里留着上周的
+          # 索引，这一周上游的修复就永远测不到（mcpp-index 自己踩过这个坑）。
+          path: |
+            ~/.mcpp/registry
+            !~/.mcpp/registry/data/xim-pkgindex
+            !~/.mcpp/registry/data/mcpplibs
+          key: mcpp-registry-${{ runner.os }}-${{ matrix.leg }}-${{ env.MCPP_VERSION }}
+
+      - name: Install mcpp ${{ env.MCPP_VERSION }}
+        shell: bash
+        run: |
+          archive="mcpp-${MCPP_VERSION}-${{ matrix.suffix }}.${{ matrix.ext }}"
+          curl -L -fsS --retry 5 --retry-all-errors --retry-delay 10 -o "$archive" \
+            "https://github.com/mcpp-community/mcpp/releases/download/v${MCPP_VERSION}/${archive}"
+          case "$archive" in
+            *.zip) powershell -NoProfile -Command "Expand-Archive -Force -Path '$archive' -DestinationPath '.'" ;;
+            *)     tar -xzf "$archive" ;;
+          esac
+          root="$PWD/mcpp-${MCPP_VERSION}-${{ matrix.suffix }}"
+          mkdir -p "$HOME/.mcpp/registry"
+          cp -a "$root/registry/." "$HOME/.mcpp/registry/"
+          # MCPP_HOME 指向 ~/.mcpp：released mcpp 是自包含的，默认用自己旁边的
+          # registry。不指这一个，构建就用 <tarball>/registry，上面那个缓存存多少
+          # 都是白存——工具链和 compat 包每个 job 重新下一遍。
+          echo "MCPP_HOME=$HOME/.mcpp" >> "$GITHUB_ENV"
+          echo "MCPP_INDEX_MIRROR=GLOBAL" >> "$GITHUB_ENV"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            echo "MCPP=$(cygpath -m "$root/bin/mcpp.exe")" >> "$GITHUB_ENV"
+            echo "MCPP_VENDORED_XLINGS=$(cygpath -m "$root/registry/bin/xlings.exe")" >> "$GITHUB_ENV"
+            echo "$(cygpath -m "$root/bin")" >> "$GITHUB_PATH"
+          else
+            echo "MCPP=$root/bin/mcpp" >> "$GITHUB_ENV"
+            echo "MCPP_VENDORED_XLINGS=$root/registry/bin/xlings" >> "$GITHUB_ENV"
+            echo "$root/bin" >> "$GITHUB_PATH"
+          fi
+
+      - name: Select toolchain
+        if: matrix.leg != 'default'
+        shell: bash
+        run: |
+          "$MCPP" toolchain install llvm
+          "$MCPP" toolchain default llvm
+          "$MCPP" toolchain list
+
+      # 版本号、目标平台、特性开关在开编之前就可见，出问题不用去翻 3000 行日志。
+      - name: Plan
+        shell: bash
+        run: |
+          "$MCPP" --version
+          grep -n 'version\|platforms' mcpp.toml | head -5
+
+      - name: Build
+        shell: bash
+        run: |
+          "$MCPP" build
+
+      - name: Test
+        shell: bash
+        run: |
+          "$MCPP" test
