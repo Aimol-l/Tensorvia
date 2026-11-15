@@ -6,6 +6,8 @@
 #include <iostream>
 #include <limits>
 
+#include "_platform.h"
+
 namespace ops {
 
 class bfloat16_t {
@@ -145,8 +147,12 @@ public:
     static constexpr bool has_infinity      = true;
     static constexpr bool has_quiet_NaN     = true;
     static constexpr bool has_signaling_NaN = true;
+    // PDP14 弃用了 float_denorm_style / denorm_present，但 C++23 的
+    // numeric_limits 主模板仍然是这个类型；就地压掉告警，理由见 _platform.h。
+    TENSORVIA_DENORM_DEPRECATION_PUSH
     static constexpr float_denorm_style has_denorm     = denorm_present;
     static constexpr bool has_denorm_loss              = false;
+    TENSORVIA_DENORM_DEPRECATION_POP
     static constexpr float_round_style round_style    = round_to_nearest;
     static constexpr int  digits                      = 8;
     static constexpr int  digits10                    = 2;

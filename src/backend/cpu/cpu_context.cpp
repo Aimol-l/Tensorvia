@@ -1,7 +1,15 @@
 #if defined(_WIN32)
     // MinGW-w64 下不引入 <windows.h>：它会级联包含 C++ 标准头，与 GCC 模块冲突。
-    // 改用 GCC/Clang 自带的 <cpuid.h> 读 CPU 品牌串。
-    #if defined(__x86_64__) || defined(__i386__)
+    // 读 CPUID 的两条路互斥，只能选一条：
+    //   MSVC / clang-cl（_MSC_VER）用 <intrin.h> 的 __cpuid()。GCC 和 Clang 自带的
+    //   <cpuid.h> 不能用——它把 __cpuid 定义成函数宏，而 MSVC 的 <wchar.h>（被
+    //   <format> 拉进来）会包含 <intrin.h>，其中的 `void __cpuid(int[4], int);`
+    //   正好被那个宏吃掉，报 "too few arguments provided to function-like macro
+    //   invocation"。<intrin.h> 反过来没有这个问题：标准头本来就会包含它。
+    //   MinGW 的 GCC/Clang 没有 <intrin.h>，用 <cpuid.h> 的 __get_cpuid()。
+    #if defined(_MSC_VER)
+        #include <intrin.h>
+    #elif defined(__x86_64__) || defined(__i386__)
         #include <cpuid.h>
     #endif
 #elif defined(__APPLE__)
@@ -26,19 +34,31 @@ namespace {
 
 #if defined(_WIN32)
 
+#if defined(__x86_64__) || defined(__i386__)
+// 读一个 CPUID leaf 到 out[4]（eax/ebx/ecx/edx）。这个 leaf 不被支持时返回 false，
+// 此时 out 的内容无意义。
+bool read_cpuid(unsigned int leaf, unsigned int out[4]) {
+  #if defined(_MSC_VER)
+    int r[4] = {};
+    __cpuid(r, static_cast<int>(leaf));
+    std::memcpy(out, r, sizeof(r));
+    return true;
+  #else
+    return __get_cpuid(leaf, &out[0], &out[1], &out[2], &out[3]) != 0;
+  #endif
+}
+#endif
+
 std::string read_cpu_model_name() {
 #if defined(__x86_64__) || defined(__i386__)
     unsigned int regs[4] = {};
-    if (!__get_cpuid(0x80000000, &regs[0], &regs[1], &regs[2], &regs[3]) ||
-        regs[0] < 0x80000004) {
+    if (!read_cpuid(0x80000000u, regs) || regs[0] < 0x80000004u) {
         return "unknown";
     }
     char brand[49] = {};
-    char* p = brand;
-    for (unsigned int leaf = 0x80000002; leaf <= 0x80000004; ++leaf) {
-        __get_cpuid(leaf, &regs[0], &regs[1], &regs[2], &regs[3]);
-        std::memcpy(p, regs, 16);
-        p += 16;
+    for (unsigned int leaf = 0x80000002u; leaf <= 0x80000004u; ++leaf) {
+        read_cpuid(leaf, regs);
+        std::memcpy(brand + (leaf - 0x80000002u) * 16, regs, 16);
     }
     std::string s(brand);
     auto b = s.find_first_not_of(' ');
