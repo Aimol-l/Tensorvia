@@ -47,8 +47,21 @@ void fill_random_impl(T* typed_ptr, size_t numel, float min, float max) {
         #pragma omp for
         for (size_t i = 0; i < numel; ++i) {
             if constexpr (std::is_integral_v<T>) {
-                std::uniform_int_distribution<T> dist(static_cast<T>(min), static_cast<T>(max));
-                typed_ptr[i] = dist(rng);
+                // MSVC enforces N4950 [rand.req.genl]/1.5 and rejects
+                // `uniform_int_distribution<char>`; libstdc++ and libc++ let it
+                // through. The distribution runs over the widest matching type
+                // and the sample is narrowed back to T.
+                if constexpr (std::is_signed_v<T>) {
+                    std::uniform_int_distribution<long long> dist(
+                        static_cast<long long>(static_cast<T>(min)),
+                        static_cast<long long>(static_cast<T>(max)));
+                    typed_ptr[i] = static_cast<T>(dist(rng));
+                } else {
+                    std::uniform_int_distribution<unsigned long long> dist(
+                        static_cast<unsigned long long>(static_cast<T>(min)),
+                        static_cast<unsigned long long>(static_cast<T>(max)));
+                    typed_ptr[i] = static_cast<T>(dist(rng));
+                }
             } else {
                 std::uniform_real_distribution<float> dist(min, max);
                 typed_ptr[i] = static_cast<T>(dist(rng));
