@@ -1,7 +1,7 @@
 [package]
 name        = "tensorvia"
 namespace   = "aimol"
-version     = "0.3.1"
+version     = "0.3.2"
 description = "Tensorvia: C++23 module tensor library with CPU, Vulkan, CUDA and SYCL backends"
 license     = "MIT"
 standard    = "c++23"
@@ -37,7 +37,7 @@ vulkan  = { defines = ["BACKEND_VULKAN"] }
 include_dirs        = ["include"]
 default-profile     = "release"
 module_extensions   = [".ixx"]
-defines             = ['TENSORVIA_VERSION="0.3.1"']
+defines             = ['TENSORVIA_VERSION="0.3.2"']
 
 flags = [
     { glob = "src/**/*.cpp",   cxxflags = ["-fopenmp"] },
@@ -123,7 +123,12 @@ ldflags = ["-fopenmp"]
 [target.'cfg(compiler = "gcc")'.build]
 ldflags = ["-fopenmp"]
 
-[target.'cfg(all(arch = "x86_64", os = "linux"))'.build]
+# `x86-64-v3` is an x86 spelling, and only a clang/GCC driver takes it: MSVC has
+# no `-march=`, and it needs none (its intrinsics are available without /arch).
+# The platform axis is deliberately absent: clang on Windows accepts the flag
+# too, and gating it on `os = "linux"` left the Windows leg compiling AVX2
+# intrinsics without AVX2 enabled.
+[target.'cfg(all(arch = "x86_64", any(compiler = "llvm", compiler = "gcc")))'.build]
 cxxflags = ["-march=x86-64-v3"]
 
 [targets.cnn_inference]
