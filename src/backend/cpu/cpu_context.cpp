@@ -1,22 +1,29 @@
 #if defined(_WIN32)
     // MinGW-w64 下不引入 <windows.h>：它会级联包含 C++ 标准头，与 GCC 模块冲突。
-    // 读 CPUID 的两条路互斥，只能选一条：
-    //   MSVC / clang-cl（_MSC_VER）用 <intrin.h> 的 __cpuid()。GCC 和 Clang 自带的
-    //   <cpuid.h> 不能用——它把 __cpuid 定义成函数宏，而 MSVC 的 <wchar.h>（被
-    //   <format> 拉进来）会包含 <intrin.h>，其中的 `void __cpuid(int[4], int);`
-    //   正好被那个宏吃掉，报 "too few arguments provided to function-like macro
-    //   invocation"。<intrin.h> 反过来没有这个问题：标准头本来就会包含它。
-    //   MinGW 的 GCC/Clang 没有 <intrin.h>，用 <cpuid.h> 的 __get_cpuid()。
-    #if defined(_MSC_VER)
-        #include <intrin.h>
-    #elif defined(__x86_64__) || defined(__i386__)
-        #include <cpuid.h>
+    #if defined(__x86_64__) || defined(__i386__)
+        // 读 CPUID 的两条路互斥，只能选一条：
+        //   MSVC / clang-cl（_MSC_VER）用 <intrin.h> 的 __cpuid()。GCC 和 Clang 自带的
+        //   <cpuid.h> 不能用——它把 __cpuid 定义成函数宏，而 MSVC 的 <wchar.h>（被
+        //   <format> 拉进来）会包含 <intrin.h>，其中的 `void __cpuid(int[4], int);`
+        //   正好被那个宏吃掉，报 "too few arguments provided to function-like macro
+        //   invocation"。<intrin.h> 反过来没有这个问题：标准头本来就会包含它。
+        //   MinGW 的 GCC/Clang 没有 <intrin.h>，用 <cpuid.h> 的 __get_cpuid()。
+        #if defined(_MSC_VER)
+            #include <intrin.h>
+        #else
+            #include <cpuid.h>
+        #endif
     #endif
 #elif defined(__APPLE__)
     #include <sys/sysctl.h>
 #elif defined(__linux__) || defined(__unix__)
     #include <unistd.h>
     #include <fstream>
+    #if defined(__x86_64__) || defined(__i386__)
+        // Linux 上没有 <wchar.h> → <intrin.h> 那条级联（那是 MSVC UCRT 的行为），
+        // <cpuid.h> 的 __cpuid 宏不会撞车，可以放心用。
+        #include <cpuid.h>
+    #endif
 #endif
 
 #include <cstdint>
@@ -32,8 +39,6 @@
 
 namespace {
 
-#if defined(_WIN32)
-
 #if defined(__x86_64__) || defined(__i386__)
 // 读一个 CPUID leaf 到 out[4]（eax/ebx/ecx/edx）。这个 leaf 不被支持时返回 false，
 // 此时 out 的内容无意义。
@@ -48,6 +53,8 @@ bool read_cpuid(unsigned int leaf, unsigned int out[4]) {
   #endif
 }
 #endif
+
+#if defined(_WIN32)
 
 std::string read_cpu_model_name() {
 #if defined(__x86_64__) || defined(__i386__)
@@ -127,16 +134,25 @@ size_t      read_mem_total_bytes() { return 0; }
     auto yes_no = [](bool b) { return b ? "yes" : "no"; };
 
 #if defined(__x86_64__) || defined(__i386__)
-    #if defined(__GNUC__) || defined(__clang__)
-        return std::format("AVX2: {} | FMA: {} | F16C: {} | AVX512F: {} | SSE4.2: {}",
-                           yes_no(__builtin_cpu_supports("avx2")),
-                           yes_no(__builtin_cpu_supports("fma")),
-                           yes_no(__builtin_cpu_supports("f16c")),
-                           yes_no(__builtin_cpu_supports("avx512f")),
-                           yes_no(__builtin_cpu_supports("sse4.2")));
-    #else
-        return "x86 ISA detection not supported on this toolchain";
-    #endif
+    // 不用 __builtin_cpu_supports：clang 打 MSVC ABI 时它引用 libgcc 的
+    // __cpu_model / __cpu_features2，而 -fms-runtime-lib=dll -fuse-ld=lld 的链接
+    // 线上没有 libgcc，直接 undefined symbol。编译期一点事没有，链接才炸，所以
+    // 这个问题一直藏着。改成自己问 CPUID，任何编译器、任何 ABI 都能用。
+    unsigned int leaf1[4] = {};
+    unsigned int leaf7[4] = {};
+    read_cpuid(1u, leaf1);
+    read_cpuid(7u, leaf7);
+    // CPUID.1:ECX[27]：OS 开了 XSAVE。AVX 一族按理还得看 XGETBV，但那要 -mxsave
+    // 的内部函数，不带 -march 的构建会直接编译不过，不值得；这一位已经能挡住
+    // "CPU 支持、系统没开" 的大多数情况。读失败的 leaf 缓冲区是零，位自然是 0。
+    const bool osxsave = (leaf1[2] & (1u << 27)) != 0;
+
+    return std::format("AVX2: {} | FMA: {} | F16C: {} | AVX512F: {} | SSE4.2: {}",
+                       yes_no(osxsave && (leaf7[1] & (1u << 5))  != 0),  // CPUID.7.0:EBX[5]
+                       yes_no(osxsave && (leaf1[2] & (1u << 12)) != 0),  // CPUID.1:ECX[12]
+                       yes_no(osxsave && (leaf1[2] & (1u << 29)) != 0),  // CPUID.1:ECX[29]
+                       yes_no(osxsave && (leaf7[1] & (1u << 16)) != 0),  // CPUID.7.0:EBX[16]
+                       yes_no(          (leaf1[2] & (1u << 20)) != 0)); // CPUID.1:ECX[20]
 #elif defined(__aarch64__) || defined(__arm__)
     #if defined(__GNUC__) || defined(__clang__)
         return std::format("NEON: {} | SVE: {}",
