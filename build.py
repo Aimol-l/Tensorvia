@@ -586,6 +586,9 @@ build() {{
 package() {{
     cd "{PROJECT}-$pkgver"
     DESTDIR="$pkgdir" cmake --install build
+    # Arch 规范:许可证归 /usr/share/licenses/$pkgname/,不是 $PROJECT——
+    # 四个后端变体各有各的 pkgname,共用一个目录会让 pacman 报文件冲突。
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }}
 """
     print(f"🔨 makepkg ({backend} backend)")

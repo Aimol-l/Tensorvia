@@ -7,7 +7,7 @@ if(BACKEND_SYCL AND NOT DEFINED CMAKE_CXX_COMPILER)
 endif()
 
 project(tensorvia
-    VERSION 0.3.0
+    VERSION 0.3.2
     DESCRIPTION "Tensorvia: C++23 module tensor library with CPU, Vulkan, CUDA and SYCL backends"
     LANGUAGES CXX
 )
@@ -138,9 +138,11 @@ add_library(tensorvia SHARED
     ${TVV_SOURCES}
 )
 
+set(TENSORVIA_SOVERSION 1)
+
 set_target_properties(tensorvia PROPERTIES
     VERSION   ${PROJECT_VERSION}
-    SOVERSION ${PROJECT_VERSION_MAJOR}
+    SOVERSION ${TENSORVIA_SOVERSION}
 )
 
 target_compile_features(tensorvia PUBLIC cxx_std_23)
