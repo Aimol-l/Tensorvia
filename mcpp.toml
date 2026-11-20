@@ -63,8 +63,8 @@ opt = 3
 #compat.gtest = "1.17.0"
 
 # 所有构建命令 + 下游消费者。libtensorvia.so里面就依赖他
-#[dependencies]
-#compat.spdlog = "1.17.0"
+[dependencies]
+compat.openmp = "22.1.8"
 
 # mcpp test 的时候才会启用，libtensorvia.so里面不会有这个依赖。
 [dev-dependencies]
@@ -113,20 +113,12 @@ compat.vulkan-headers =  { version = "1.4.357.0", visibility = "private" }
 [target.'cfg(accelerator = "cuda")'.build]
 ldflags = ["-lcudart_static", "-lrt", "-lpthread", "-ldl"]
 
-[dependencies]
-compat.openmp = "22.1.8"
-
 [target.'cfg(compiler = "llvm")'.build]
 ldflags = ["-fopenmp"]
 
 [target.'cfg(compiler = "gcc")'.build]
 ldflags = ["-fopenmp"]
 
-# `x86-64-v3` is an x86 spelling, and only a clang/GCC driver takes it: MSVC has
-# no `-march=`, and it needs none (its intrinsics are available without /arch).
-# The platform axis is deliberately absent: clang on Windows accepts the flag
-# too, and gating it on `os = "linux"` left the Windows leg compiling AVX2
-# intrinsics without AVX2 enabled.
 [target.'cfg(all(arch = "x86_64", any(compiler = "llvm", compiler = "gcc")))'.build]
 cxxflags = ["-march=x86-64-v3"]
 
